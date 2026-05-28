@@ -418,3 +418,43 @@ Por eso la recomendación es **no intentar replicar el efecto typewriter de Chat
 - [ ] Tasa de error 429 (Too Many Requests) — debe ser 0%
 - [ ] Tiempo promedio hasta primera respuesta perceptible (typing indicator cuenta como respuesta)
 - [ ] Feedback del usuario (Federico) sobre claridad del chat
+
+---
+
+## 10. Implementación real — post análisis de código
+
+> Nota agregada el 2026-05-28 tras leer el código real de `handler.rs`.
+
+El diagnóstico del ADR (Sección 9) era correcto en dirección pero incompleto en mecanismo.
+
+### Causa raíz confirmada
+
+La variable `streaming: Option<StreamingBubble>` en el loop del handler se pone en `None` cada vez que llega un `ToolRequest` (el bubble es sellado con `.seal().await`). Cuando el siguiente chunk de `MessageContent::Thinking` llega, `streaming.is_none()` es `true` → se abre un **nuevo** bubble con `sendMessage`. En una sesión con 15+ tool calls, esto genera 15+ bubbles de razonamiento.
+
+### Fix implementado
+
+Variable `thinking_shown: bool` (inicializada en `false` por mensaje entrante):
+
+```rust
+let mut thinking_shown = false;
+```
+
+En el branch `MessageContent::Thinking`:
+```rust
+if streaming.is_none() {
+    if !thinking_shown {
+        // Abrir bubble normalmente
+        // ...
+        thinking_shown = true;
+    } else {
+        // Después del primer tool call: solo typing indicator
+        let _ = self.gateway.send_message(&message.user, OutgoingMessage::Typing).await;
+    }
+}
+```
+
+**Resultado:** máximo 1 bubble de thinking por mensaje del usuario, independientemente de cuántos tool calls ocurran en el turno.
+
+### Alcance real vs ADR
+
+El ADR describía cambios en `telegram.rs` (gateway layer). El fix real es en `handler.rs` (orquestación del stream). El gateway no necesitó modificaciones — el `OutgoingMessage::Typing` ya existía y `send_chat_action("typing")` ya estaba implementado.
