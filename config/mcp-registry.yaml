@@ -27,3 +27,6 @@ waves:
     - name: lina-moodle
       path: mcps/moodle
       status: implemented
+    - name: lina-gitlab
+      path: mcps/gitlab
+      status: implemented
