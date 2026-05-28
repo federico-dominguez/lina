@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# lina-log — tail the current goose gateway log in a human-readable format.
+# Usage:
+#   lina-log            # tail the latest log file (pretty-printed)
+#   lina-log -f         # follow continuously (default behavior)
+#   lina-log -n 50      # show last 50 lines then follow
+#   lina-log --raw      # show raw JSON without formatting
+#
+# The gateway logs are written as JSON to:
+#   ~/.local/state/goose/logs/cli/YYYY-MM-DD/HHMMSS.log
+#
+# RUST_LOG controls verbosity. Set in systemd unit:
+#   Environment="RUST_LOG=goose::gateway=info"   # gateway events only (default)
+#   Environment="RUST_LOG=goose=debug"            # everything debug
+#   Environment="RUST_LOG=goose=trace"            # maximum verbosity
+
+set -euo pipefail
+
+LOG_DIR="${HOME}/.local/state/goose/logs/cli"
+RAW=0
+LINES=0
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --raw)   RAW=1 ;;
+        -n)      LINES="$2"; shift ;;
+        -f)      ;;  # default anyway
+        *)       echo "Unknown option: $1"; exit 1 ;;
+    esac
+    shift
+done
+
+# Find the most recent log file
+LATEST=$(find "$LOG_DIR" -name "*.log" -type f 2>/dev/null | sort | tail -1)
+
+if [[ -z "$LATEST" ]]; then
+    echo "No log files found in $LOG_DIR"
+    echo "Is lina-goosed.service running?"
+    exit 1
+fi
+
+echo "==> Tailing: $LATEST" >&2
+echo "==> Service status: $(systemctl --user is-active lina-goosed.service 2>/dev/null || echo unknown)" >&2
+echo "" >&2
+
+if [[ "$RAW" -eq 1 ]]; then
+    if [[ "$LINES" -gt 0 ]]; then
+        tail -n "$LINES" -f "$LATEST"
+    else
+        tail -f "$LATEST"
+    fi
+    exit 0
+fi
+
+# Pretty-print JSON log entries
+pretty() {
+    # jq: extract timestamp (HH:MM:SS), level, target, message, plus key fields
+    jq -r '
+        .timestamp as $ts |
+        (.timestamp | split("T")[1] | split(".")[0]) as $time |
+        .level as $lvl |
+        .target as $tgt |
+        .fields.message as $msg |
+        # Color codes via terminal escape — jq outputs plain, bash adds colors
+        "\($time) [\($lvl)] \($tgt | split("::") | last): \($msg)"
+        + (if .fields | has("user_id") then " user=\(.fields.user_id)" else "" end)
+        + (if .fields | has("session_id") then " session=\(.fields.session_id)" else "" end)
+        + (if .fields | has("tool") then " tool=\(.fields.tool)" else "" end)
+        + (if .fields | has("success") then " success=\(.fields.success)" else "" end)
+        + (if .fields | has("chat_id") then " chat=\(.fields.chat_id)" else "" end)
+        + (if .fields | has("html_chars") then " html_chars=\(.fields.html_chars)" else "" end)
+        + (if .fields | has("error") then " error=\(.fields.error)" else "" end)
+    ' 2>/dev/null || cat  # fallback to raw if jq not available
+}
+
+colorize() {
+    # Add ANSI color based on level keyword in the line
+    while IFS= read -r line; do
+        if   [[ "$line" == *"[ERROR]"* ]]; then echo -e "\033[31m${line}\033[0m"
+        elif [[ "$line" == *"[WARN]"*  ]]; then echo -e "\033[33m${line}\033[0m"
+        elif [[ "$line" == *"[DEBUG]"* ]]; then echo -e "\033[2m${line}\033[0m"
+        elif [[ "$line" == *"incoming message"* ]]; then echo -e "\033[36m${line}\033[0m"
+        elif [[ "$line" == *"sending final"* || "$line" == *"sendMessage ok"* ]]; then echo -e "\033[32m${line}\033[0m"
+        elif [[ "$line" == *"tool call"* ]]; then echo -e "\033[35m${line}\033[0m"
+        elif [[ "$line" == *"[OK]"* ]]; then echo -e "\033[32m${line}\033[0m"
+        elif [[ "$line" == *"[ERR]"* ]]; then echo -e "\033[31m${line}\033[0m"
+        else echo "$line"
+        fi
+    done
+}
+
+if command -v jq &>/dev/null; then
+    if [[ "$LINES" -gt 0 ]]; then
+        tail -n "$LINES" -f "$LATEST" | pretty | colorize
+    else
+        tail -f "$LATEST" | pretty | colorize
+    fi
+else
+    echo "Note: install 'jq' for pretty output (apt install jq)" >&2
+    if [[ "$LINES" -gt 0 ]]; then
+        tail -n "$LINES" -f "$LATEST"
+    else
+        tail -f "$LATEST"
+    fi
+fi

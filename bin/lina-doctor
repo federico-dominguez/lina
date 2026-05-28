@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Healthcheck básico de LINA.
+set -uo pipefail
+
+ok()   { printf "  \033[32m✓\033[0m %s\n" "$*"; }
+fail() { printf "  \033[31m✗\033[0m %s\n" "$*"; FAILED=1; }
+warn() { printf "  \033[33m!\033[0m %s\n" "$*"; }
+
+FAILED=0
+echo "── LINA doctor ──"
+
+# 1. Binarios
+echo "[binaries]"
+command -v goose >/dev/null && ok "goose en PATH ($(goose --version 2>&1 | head -1))" || fail "goose no encontrado"
+[[ -x "$HOME/lina/bin/goosed" ]] && ok "goosed symlink OK ($(readlink "$HOME/lina/bin/goosed"))" || fail "$HOME/lina/bin/goosed inexistente"
+command -v uv >/dev/null && ok "uv presente" || fail "uv no encontrado"
+command -v just >/dev/null && ok "just presente" || warn "just no encontrado"
+
+# 2. Secrets
+echo "[secrets]"
+SF="$HOME/.config/goose/secrets.env"
+if [[ -f "$SF" ]]; then
+    PERMS=$(stat -c '%a' "$SF")
+    [[ "$PERMS" == "600" ]] && ok "secrets.env chmod 600" || fail "secrets.env tiene permisos $PERMS (esperado 600)"
+    grep -q '^DEEPSEEK_API_KEY=sk-' "$SF" && ok "DEEPSEEK_API_KEY presente" || fail "DEEPSEEK_API_KEY ausente o mal formado"
+    grep -q '^TELEGRAM_BOT_TOKEN=' "$SF" && ok "TELEGRAM_BOT_TOKEN presente" || fail "TELEGRAM_BOT_TOKEN ausente"
+else
+    fail "no existe $SF — corré 'just secrets-init'"
+fi
+
+# 3. Config Goose
+echo "[goose config]"
+CF="$HOME/.config/goose/config.yaml"
+[[ -f "$CF" ]] && ok "config.yaml presente" || fail "config.yaml ausente — corré 'just apply-config'"
+grep -q '^active_provider: custom_deepseek' "$CF" 2>/dev/null && ok "provider DeepSeek activo" || warn "provider no es custom_deepseek"
+
+# 4. MCPs propios — sync OK
+echo "[mcps]"
+for d in secrets fs-safe shell-policy systemd-user; do
+    if [[ -d "$HOME/lina/mcps/$d/.venv" ]]; then
+        ok "mcps/$d sincronizado"
+    else
+        fail "mcps/$d sin .venv (corré 'uv sync' o 'just bootstrap')"
+    fi
+done
+
+# 5. Systemd
+echo "[systemd]"
+systemctl --user list-unit-files lina-goosed.service --no-pager 2>/dev/null | grep -q lina-goosed \
+    && ok "unit instalada" || fail "unit no instalada"
+ACTIVE=$(systemctl --user is-active lina-goosed.service 2>/dev/null || echo "inactive")
+if [[ "$ACTIVE" == "active" ]]; then ok "lina-goosed activo"; else warn "lina-goosed: $ACTIVE"; fi
+
+# 6. Gateway
+echo "[gateway]"
+goose gateway status 2>&1 | sed 's/^/  /'
+
+echo "──"
+exit $FAILED

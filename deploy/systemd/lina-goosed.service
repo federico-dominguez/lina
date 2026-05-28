@@ -1,0 +1,46 @@
+[Unit]
+Description=LINA — Goose agent + Telegram gateway
+Documentation=https://github.com/federicocarluccio/lina
+After=network-online.target graphical-session.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Variables de entorno (secretos + runtime). chmod 600 obligatorio.
+EnvironmentFile=%h/.config/goose/secrets.env
+
+# Aseguramos que el binario parcheado y uv estén en PATH.
+Environment="PATH=%h/lina/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+# RUST_LOG controls log verbosity. With this set, logs also appear in journalctl.
+# Options: goose::gateway=info  (default, human events only)
+#          goose=debug           (verbose, all goose crates)
+#          goose=trace           (maximum, including HTTP bodies)
+Environment="RUST_LOG=goose::gateway=info"
+Environment="LINA_SHELL_ALLOW_SUDO=1"
+
+WorkingDirectory=%h/lina
+
+# 'goose gateway start' lee GOOSED_BINARY del entorno y arranca el daemon
+# parcheado + el gateway de Telegram en un solo proceso.
+ExecStart=/usr/bin/env bash -lc 'exec goose gateway start --bot-token "$TELEGRAM_BOT_TOKEN" telegram'
+
+ExecStop=/usr/bin/env bash -lc 'goose gateway stop telegram || true'
+
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+
+# Hardening básico (compatible con --user)
+# Protections que usan mount namespaces están deshabilitadas: en user services
+# cualquier mount namespace obliga a crear un user namespace donde uid 0
+# aparece como nobody, rompiendo sudo. ReadWritePaths implica PrivateMounts.
+PrivateUsers=no
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lina-goosed
+
+[Install]
+WantedBy=default.target

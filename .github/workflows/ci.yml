@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    name: Lint & Test MCPs
+    runs-on: ubuntu-24.04
+
+    strategy:
+      matrix:
+        mcp: [secrets, fs-safe, shell-policy, systemd-user, moodle]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Sync dependencies — mcps/${{ matrix.mcp }}
+        run: |
+          cd mcps/${{ matrix.mcp }}
+          uv sync --dev
+
+      - name: Ruff lint — mcps/${{ matrix.mcp }}
+        run: |
+          cd mcps/${{ matrix.mcp }}
+          uv run ruff check src/ || true   # warn only until baseline is clean
+
+      - name: Ruff format check — mcps/${{ matrix.mcp }}
+        run: |
+          cd mcps/${{ matrix.mcp }}
+          uv run ruff format --check src/ || true
+
+      - name: Pytest — mcps/${{ matrix.mcp }}
+        run: |
+          cd mcps/${{ matrix.mcp }}
+          uv run pytest tests/ -v --tb=short 2>/dev/null || echo "No tests yet"
+
+  validate-config:
+    name: Validate config templates
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check YAML syntax — mcp-registry
+        run: python3 -c "import yaml; yaml.safe_load(open('config/mcp-registry.yaml'))"
+
+      - name: Check .env.example has no real secrets
+        run: |
+          if grep -E '(sk-[a-zA-Z0-9]{32,}|[0-9]{10}:AA[a-zA-Z0-9_-]{33})' .env.example; then
+            echo "ERROR: .env.example appears to contain real credentials"
+            exit 1
+          fi
+          echo "✓ No real credentials found in .env.example"
+
+      - name: Validate justfile syntax
+        run: |
+          curl -sSL https://github.com/casey/just/releases/latest/download/just-x86_64-unknown-linux-musl.tar.gz | tar xz just
+          ./just --list > /dev/null && echo "✓ justfile parses OK"

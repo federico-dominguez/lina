@@ -1,0 +1,62 @@
+# ─── Secrets — NEVER commit ──────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+config/secrets.env
+config/secrets.*.env
+*.session
+*.token
+**/credentials.json
+**/keyring.db
+
+# ─── Runtime state ───────────────────────────────────────────────────────
+state/
+logs/
+*.log
+!logs/.gitkeep
+*.pid
+
+# ─── Lock files (managed per-MCP via uv) ─────────────────────────────────
+# uv.lock files are intentionally committed (reproducible installs).
+# Global lock: nothing here.
+
+# ─── Vendor binaries (tracked by SHA separately; binary itself out of git)
+vendor/goosed-*
+bin/goosed
+
+# ─── Python ──────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+.uv-cache/
+*.egg-info/
+dist/
+build/
+*.whl
+
+# ─── Rust ────────────────────────────────────────────────────────────────
+target/
+
+# ─── Node / JS ───────────────────────────────────────────────────────────
+node_modules/
+*.js.map
+
+# ─── OS / Editor ─────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ─── Test artifacts ──────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+*.test.log
+
+# ─── Goose internal ──────────────────────────────────────────────────────
+.goose/
+goose-session-*.jsonl

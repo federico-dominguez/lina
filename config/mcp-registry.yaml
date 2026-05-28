@@ -1,0 +1,29 @@
+# Fuente de verdad de los MCPs de LINA. `just apply-config` (futuro) consumirá
+# este registro para regenerar la sección `extensions:` del config.yaml de Goose.
+# Por ahora es informativo — el template renderiza extensions inline.
+
+waves:
+  ola_1_soberania:
+    - name: lina-secrets
+      path: mcps/secrets
+      status: implemented
+    - name: lina-fs-safe
+      path: mcps/fs-safe
+      status: implemented
+    - name: lina-shell-policy
+      path: mcps/shell-policy
+      status: implemented
+    - name: lina-systemd-user
+      path: mcps/systemd-user
+      status: implemented
+
+  ola_2_autoextension:
+    - {name: lina-git-ops,     path: mcps/git-ops,     status: planned}
+    - {name: lina-self-modify, path: mcps/self-modify, status: planned}
+    - {name: lina-cost-meter,  path: mcps/cost-meter,  status: planned}
+    - {name: lina-notifier,    path: mcps/notifier,    status: planned}
+
+  ola_3_integraciones:
+    - name: lina-moodle
+      path: mcps/moodle
+      status: implemented
