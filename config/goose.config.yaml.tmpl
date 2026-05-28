@@ -135,6 +135,19 @@ extensions:
       MOODLE_PASSWORD_KEYRING: "lina:moodle:MOODLE_PASSWORD"
     timeout: 120
 
+  lina-gitlab:
+    name: lina-gitlab
+    display_name: LINA GitLab UTEC
+    description: Acceso a proyectos, issues, MRs y pipelines de GitLab UTEC (git.utec.edu.uy).
+    type: stdio
+    enabled: true
+    cmd: uv
+    args: [--directory, /home/fede/lina/mcps/gitlab, run, lina-gitlab]
+    envs:
+      GITLAB_URL: https://git.utec.edu.uy
+      GITLAB_TOKEN_KEYRING: "lina:gitlab:GITLAB_TOKEN"
+    timeout: 60
+
 providers:
   custom_deepseek:
     enabled: true
