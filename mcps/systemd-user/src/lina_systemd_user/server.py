@@ -101,7 +101,9 @@ def svc_list_lina() -> list[dict]:
         unit, load, active, sub = parts[0], parts[1], parts[2], parts[3]
         desc = parts[4] if len(parts) > 4 else ""
         if WRITABLE_REGEX.search(unit):
-            out.append({"unit": unit, "load": load, "active": active, "sub": sub, "description": desc})
+            out.append(
+                {"unit": unit, "load": load, "active": active, "sub": sub, "description": desc}
+            )
     return out
 
 
@@ -124,28 +126,32 @@ def svc_logs(unit: str, lines: int = 100) -> str:
 @mcp.tool()
 def svc_start(unit: str) -> dict:
     """Inicia una unidad LINA."""
-    u = _validate_unit(unit); _require_writable(u)
+    u = _validate_unit(unit)
+    _require_writable(u)
     return {"unit": u, **_systemctl("start", u)}
 
 
 @mcp.tool()
 def svc_stop(unit: str) -> dict:
     """Detiene una unidad LINA."""
-    u = _validate_unit(unit); _require_writable(u)
+    u = _validate_unit(unit)
+    _require_writable(u)
     return {"unit": u, **_systemctl("stop", u)}
 
 
 @mcp.tool()
 def svc_restart(unit: str) -> dict:
     """Reinicia una unidad LINA."""
-    u = _validate_unit(unit); _require_writable(u)
+    u = _validate_unit(unit)
+    _require_writable(u)
     return {"unit": u, **_systemctl("restart", u)}
 
 
 @mcp.tool()
 def svc_reload(unit: str) -> dict:
     """Reload de una unidad LINA (si la soporta; si no, restart)."""
-    u = _validate_unit(unit); _require_writable(u)
+    u = _validate_unit(unit)
+    _require_writable(u)
     return {"unit": u, **_systemctl("reload-or-restart", u)}
 
 

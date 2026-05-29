@@ -10,7 +10,9 @@ from . import server
 
 def main() -> int:
     if len(sys.argv) < 2:
-        print("uso: lina_secrets.cli {get|set|delete|list|backend} <service> [<key>]", file=sys.stderr)
+        print(
+            "uso: lina_secrets.cli {get|set|delete|list|backend} <service> [<key>]", file=sys.stderr
+        )
         return 2
     cmd = sys.argv[1]
     try:

@@ -109,11 +109,11 @@ def _extract_options_from_html(html: str) -> list[dict]:
     # Estrategia 1: answernumber + flex-fill (Moodle 4.x)
     pattern = (
         r'<span[^>]*class="[^"]*answernumber[^"]*"[^>]*>\s*'
-        r'([a-zA-Z])\.'
-        r'\s*</span>\s*'
+        r"([a-zA-Z])\."
+        r"\s*</span>\s*"
         r'<div[^>]*class="[^"]*flex-fill[^"]*"[^>]*>'
-        r'(.*?)'
-        r'</div>'
+        r"(.*?)"
+        r"</div>"
     )
     matches = list(re.finditer(pattern, html, re.DOTALL | re.IGNORECASE))
     if len(matches) >= 2:
@@ -125,7 +125,7 @@ def _extract_options_from_html(html: str) -> list[dict]:
     # Estrategia 2: div.r0, div.r1 con label
     r_pattern = (
         r'<div[^>]*class="[^"]*r\d+"[^>]*>'
-        r'.*?<label[^>]*>(.*?)</label>\s*</div>'
+        r".*?<label[^>]*>(.*?)</label>\s*</div>"
     )
     r_matches = list(re.finditer(r_pattern, html, re.DOTALL | re.IGNORECASE))
     if len(r_matches) >= 2:
@@ -186,9 +186,7 @@ async def _moodle_call(function_name: str, params: dict | None = None) -> dict:
         data = resp.json()
 
     if isinstance(data, dict) and (data.get("exception") or data.get("errorcode")):
-        raise RuntimeError(
-            f"Moodle API error: {data.get('message') or data.get('errorcode')}"
-        )
+        raise RuntimeError(f"Moodle API error: {data.get('message') or data.get('errorcode')}")
 
     return data
 
@@ -238,6 +236,7 @@ def _log_tool_invocation(tool_name: str, **kwargs: object) -> None:
 
 # ─── Tools ─────────────────────────────────────────────────────────────────────
 
+
 @mcp.tool()
 async def moodle_login(username: str, password: str) -> str:
     """Inicia sesión en Moodle con usuario y contraseña.
@@ -276,12 +275,7 @@ async def moodle_get_my_courses() -> str:
 
     lines = [f"📚 Cursos encontrados: {len(courses)}\n"]
     for c in courses:
-        summary = re.sub(r"<[^>]+>", "", c.get("summary", "") or "")[:150]
-        progress = (
-            f"{c.get('progress')}%"
-            if c.get("progress") is not None
-            else "N/A"
-        )
+        progress = f"{c.get('progress')}%" if c.get("progress") is not None else "N/A"
         lines.append(
             f"• **{c.get('fullname', '?')}** ({c.get('shortname', '?')})\n"
             f"  ID: {c.get('id')} | Progreso: {progress}"
@@ -299,9 +293,7 @@ async def moodle_get_course_contents(courseid: int) -> str:
     await _ensure_auth()
     _log_tool_invocation("moodle_get_course_contents", courseid=courseid)
 
-    sections = await _moodle_call(
-        "core_course_get_contents", {"courseid": courseid}
-    )
+    sections = await _moodle_call("core_course_get_contents", {"courseid": courseid})
 
     lines = [f"📖 Contenido del curso ID {courseid}:\n"]
     for s in sections:
@@ -338,9 +330,7 @@ async def moodle_get_quiz_attempts(quizid: int) -> str:
 
     # Resolver cmid → instance
     try:
-        cm_info = await _moodle_call(
-            "core_course_get_course_module", {"cmid": quizid}
-        )
+        cm_info = await _moodle_call("core_course_get_course_module", {"cmid": quizid})
         cm_data = cm_info.get("cm", {})
         if cm_data.get("modname") == "quiz" and cm_data.get("instance"):
             real_quiz_id = int(cm_data["instance"])
@@ -393,15 +383,15 @@ async def moodle_start_quiz_attempt(quizid: int) -> str:
 
     # Intentar resolver como cmid → instance (quizid real)
     try:
-        cm_info = await _moodle_call(
-            "core_course_get_course_module", {"cmid": quizid}
-        )
+        cm_info = await _moodle_call("core_course_get_course_module", {"cmid": quizid})
         cm_data = cm_info.get("cm", {})
         if cm_data.get("modname") == "quiz" and cm_data.get("instance"):
             real_quiz_id = int(cm_data["instance"])
             log.info(
                 "Resuelto cmid=%d → quiz instance=%d (%s)",
-                quizid, real_quiz_id, cm_data.get("name", "?"),
+                quizid,
+                real_quiz_id,
+                cm_data.get("name", "?"),
             )
     except RuntimeError:
         # No es un cmid, asumimos que ya es un quizid real
@@ -413,10 +403,7 @@ async def moodle_start_quiz_attempt(quizid: int) -> str:
             "mod_quiz_get_user_attempts",
             {"quizid": real_quiz_id, "userid": 0, "status": "all"},
         )
-        in_progress = [
-            a for a in existing.get("attempts", [])
-            if a.get("state") == "inprogress"
-        ]
+        in_progress = [a for a in existing.get("attempts", []) if a.get("state") == "inprogress"]
         if in_progress:
             a = in_progress[0]
             return (
@@ -455,10 +442,7 @@ async def moodle_start_quiz_attempt(quizid: int) -> str:
         options = _extract_options_from_html(html)
         slot = i + 1
 
-        lines.append(
-            f"### Pregunta {slot} [Slot: {slot}] "
-            f"[Tipo: {q.get('type', 'unknown')}]"
-        )
+        lines.append(f"### Pregunta {slot} [Slot: {slot}] [Tipo: {q.get('type', 'unknown')}]")
         lines.append(f"📖 **Enunciado:** {question_text}")
 
         if options:
@@ -522,7 +506,8 @@ async def moodle_get_quiz_attempt_data(attemptid: int) -> str:
         total_slots = sum(len(p) for p in pages_list)
         log.info(
             "Layout: %d slots en %d páginas → %s",
-            total_slots, total_pages,
+            total_slots,
+            total_pages,
             " | ".join(f"p{p_i}: {slots}" for p_i, slots in enumerate(pages_list)),
         )
     else:
@@ -588,9 +573,7 @@ async def moodle_get_quiz_attempt_data(attemptid: int) -> str:
             )
             if checked_match:
                 numeric_val = int(checked_match.group(1))
-                letter_val = {0: "a", 1: "b", 2: "c", 3: "d"}.get(
-                    numeric_val, str(numeric_val)
-                )
+                letter_val = {0: "a", 1: "b", 2: "c", 3: "d"}.get(numeric_val, str(numeric_val))
                 current_answer = f"{letter_val} (idx={numeric_val})"
         if current_answer and current_answer != "" and current_answer != "-1":
             lines.append(f"✏️ Respuesta guardada: {current_answer}")
@@ -664,9 +647,7 @@ async def moodle_submit_quiz_answer(
                 qubaid_match = _re.search(r"qubaid=(\d+)", html)
                 if qubaid_match:
                     qubaid = qubaid_match.group(1)
-                seq_match = _re.search(
-                    rf'q\d+:{slot}_:sequencecheck"\s+value="(\d+)"', html
-                )
+                seq_match = _re.search(rf'q\d+:{slot}_:sequencecheck"\s+value="(\d+)"', html)
                 if seq_match:
                     sequencecheck = seq_match.group(1)
                 found = True
@@ -753,15 +734,16 @@ async def moodle_finish_quiz_attempt(attemptid: int) -> str:
 
         correct = sum(1 for q in questions if q.get("status") in ("correct", "Correct"))
         incorrect = sum(1 for q in questions if q.get("status") in ("incorrect", "Incorrect"))
-        partial = sum(1 for q in questions if q.get("status") in ("partiallycorrect", "PartiallyCorrect"))
+        partial = sum(
+            1 for q in questions if q.get("status") in ("partiallycorrect", "PartiallyCorrect")
+        )
         total = len(questions)
         score = rev_attempt.get("sumgrades", "N/A")
-        grade = rev_attempt.get("grade", "N/A")
 
         lines = [
             "🚀 **INTENTO FINALIZADO**\n",
             f"🆔 Attempt ID: **{attemptid}**",
-            f"📊 Estado: finished",
+            f"📊 Estado: {state}",
             f"📝 Total preguntas: {total}",
             f"✅ Correctas: {correct}/{total}",
             f"❌ Incorrectas: {incorrect}/{total}",
@@ -786,6 +768,7 @@ async def moodle_finish_quiz_attempt(attemptid: int) -> str:
 
 # ─── Main ──────────────────────────────────────────────────────────────────────
 
+
 def main() -> None:
     """Punto de entrada del MCP server."""
     log.info("starting lina-moodle (url=%s)", MOODLE_URL)
@@ -795,9 +778,7 @@ def main() -> None:
 
     if MOODLE_USERNAME and MOODLE_PASSWORD:
         try:
-            asyncio.get_event_loop().run_until_complete(
-                _login(MOODLE_USERNAME, MOODLE_PASSWORD)
-            )
+            asyncio.get_event_loop().run_until_complete(_login(MOODLE_USERNAME, MOODLE_PASSWORD))
         except Exception as e:
             log.warning("Login automático falló: %s", e)
 

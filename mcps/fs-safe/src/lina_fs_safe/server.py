@@ -128,12 +128,14 @@ def fs_list(path: str) -> list[dict]:
     for child in sorted(p.iterdir()):
         try:
             st = child.stat()
-            out.append({
-                "name": child.name,
-                "type": "dir" if child.is_dir() else "file" if child.is_file() else "other",
-                "size": st.st_size,
-                "mtime": int(st.st_mtime),
-            })
+            out.append(
+                {
+                    "name": child.name,
+                    "type": "dir" if child.is_dir() else "file" if child.is_file() else "other",
+                    "size": st.st_size,
+                    "mtime": int(st.st_mtime),
+                }
+            )
         except OSError:
             continue
     return out

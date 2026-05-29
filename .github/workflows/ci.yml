@@ -12,8 +12,19 @@ jobs:
     runs-on: ubuntu-24.04
 
     strategy:
+      fail-fast: false
       matrix:
-        mcp: [secrets, fs-safe, shell-policy, systemd-user, moodle]
+        include:
+          - mcp: secrets
+            cov_threshold: 65
+          - mcp: fs-safe
+            cov_threshold: 70
+          - mcp: shell-policy
+            cov_threshold: 65
+          - mcp: systemd-user
+            cov_threshold: 60
+          - mcp: moodle
+            cov_threshold: 18  # HTTP layer no es unit-testable sin mocks — excepción documentada en docs/architecture/0008-moodle-coverage-exception.md
 
     steps:
       - name: Checkout
@@ -37,17 +48,26 @@ jobs:
       - name: Ruff lint — mcps/${{ matrix.mcp }}
         run: |
           cd mcps/${{ matrix.mcp }}
-          uv run ruff check src/ || true   # warn only until baseline is clean
+          uv run ruff check src/
 
       - name: Ruff format check — mcps/${{ matrix.mcp }}
         run: |
           cd mcps/${{ matrix.mcp }}
-          uv run ruff format --check src/ || true
+          uv run ruff format --check src/
 
-      - name: Pytest — mcps/${{ matrix.mcp }}
+      - name: Pytest + coverage — mcps/${{ matrix.mcp }}
         run: |
           cd mcps/${{ matrix.mcp }}
-          uv run pytest tests/ -v --tb=short 2>/dev/null || echo "No tests yet"
+          uv run pytest tests/ -v --tb=short \
+            --cov=src --cov-report=xml --cov-report=term-missing \
+            --cov-fail-under=${{ matrix.cov_threshold }}
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-${{ matrix.mcp }}
+          path: mcps/${{ matrix.mcp }}/coverage.xml
 
   validate-config:
     name: Validate config templates
@@ -70,3 +90,36 @@ jobs:
         run: |
           sudo apt-get install -y just
           just --list > /dev/null && echo "✓ justfile parses OK"
+
+  e2e-integration:
+    name: E2E integration tests (stdio)
+    runs-on: ubuntu-24.04
+    needs: lint-and-test
+    if: success() || failure()  # run even if some unit tests fail
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Sync all MCPs (needed for E2E subprocess invocation)
+        run: |
+          for mcp in fs-safe secrets shell-policy systemd-user moodle; do
+            uv sync --dev --project mcps/$mcp
+          done
+
+      - name: Install E2E test dependencies
+        run: pip install pytest pytest-asyncio
+
+      - name: E2E integration tests
+        run: |
+          pytest tests/integration/mcps/ -v --tb=short -m integration
