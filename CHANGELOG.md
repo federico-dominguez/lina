@@ -12,6 +12,38 @@ Versioning follows [Semantic Versioning](https://semver.org/) — `MAJOR.MINOR.P
 ## [Unreleased]
 
 ### Added
+- **Fase 3: Hardening a nivel producción** (Issue #11)
+  - `x-mcp-defaults` YAML anchor en `docker-compose.yml`: todos los MCPs heredan
+    `read_only: true`, `cap_drop: ALL`, `security_opt: no-new-privileges`, `tmpfs: /tmp`,
+    logging JSON con rotación. Agregar un MCP nuevo hereda la postura completa.
+  - `deploy/docker/nginx/nginx.conf` + servicio `lina-mcp-gateway` (nginx:1.27-alpine):
+    proxy reverso para los 6 MCPs en puertos 8101–8106 (localhost). Los MCPs dejan de
+    exponer puertos directamente; nginx es el único punto de entrada.
+    Rate limits: shell-policy 30 req/min (burst 5), moodle 20 req/min (burst 5),
+    resto 120 req/min (burst 20). HTTP 429 en exceso.
+  - `sql/init/002-audit-schema.sql`: schema PostgreSQL `audit` con tabla `audit.tool_calls`
+    (agrega columnas `mcp` y `duration_ms`) y vista `audit.daily_summary` (resumen diario
+    de uso por MCP/tool). Vista de compatibilidad `public.audit_logs`.
+  - `sql/migrations/001-audit-schema.sql`: migración idempotente para instancias existentes.
+  - `lina-db` MCP: herramienta `get_daily_summary(days)` — consulta `audit.daily_summary`.
+    `_audit()` ahora escribe en `audit.tool_calls`.
+  - `deploy/docker/backup/backup.sh` + servicio `lina-backup` (postgres:16-alpine):
+    `pg_dump` horario comprimido con gzip-9. Retención configurable via `$BACKUP_KEEP`
+    (default 24 copias = ~1 día). Volumen `lina-backup-data`.
+  - `Dockerfile.mcp`: `ENV PYTHONDONTWRITEBYTECODE=1` — evita escrituras de .pyc al FS
+    read-only del contenedor.
+  - `docs/architecture/0009-fase-3-hardening.md`: ADR con todas las decisiones de Fase 3.
+  - `docs/runbooks/0004-recovery.md`: runbook de recovery — reinicio del host, MCP caído,
+    restore desde backup, reset completo.
+
+### Changed
+- `deploy/docker/docker-compose.yml`: MCPs refactorizados con `x-mcp-defaults`;
+  `lina-mcp-db` agrega `depends_on: lina-db: condition: service_healthy`;
+  logging JSON-file en todos los servicios.
+- `tests/integration/mcps/test_mcp_containers.sh`: el smoke test levanta `lina-mcp-gateway`
+  junto a los MCPs (necesario ya que los puertos se exponen vía nginx).
+
+### Added
 - **Fase 2: Containerización completa de MCPs** (Issue #10)
   - Nuevo `deploy/docker/Dockerfile.mcp`: Dockerfile multi-stage compartido para todos los
     MCPs, parametrizado con `ARG MCP_DIR` y `ARG MCP_CMD`. Stage builder usa `uv sync --no-dev`;
