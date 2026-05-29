@@ -1,5 +1,5 @@
 [Unit]
-Description=LINA — Goose agent + Telegram gateway
+Description=LINA — Goose agent server (sin gateway Telegram)
 Documentation=https://github.com/federicocarluccio/lina
 After=network-online.target graphical-session.target
 Wants=network-online.target
@@ -21,11 +21,9 @@ Environment="LINA_SHELL_ALLOW_SUDO=1"
 
 WorkingDirectory=%h/lina
 
-# 'goose gateway start' lee GOOSED_BINARY del entorno y arranca el daemon
-# parcheado + el gateway de Telegram en un solo proceso.
-ExecStart=/usr/bin/env bash -lc 'exec goose gateway start --bot-token "$TELEGRAM_BOT_TOKEN" telegram'
-
-ExecStop=/usr/bin/env bash -lc 'goose gateway stop telegram || true'
+# Solo el servidor HTTP de goosed — el gateway Telegram corre como
+# servicio Docker separado (lina-gateway). Ver deploy/docker/
+ExecStart=/usr/bin/env bash -lc 'exec goosed agent'
 
 Restart=on-failure
 RestartSec=5s

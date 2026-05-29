@@ -279,11 +279,13 @@ services:
       dockerfile: deploy/docker/Dockerfile.gateway
     image: lina-gateway:latest
     restart: unless-stopped
-    depends_on:
-      - goosed
+    # goosed puede correr en Docker o en el host (systemd).
+    # Si corre en el host, GOOSED_URL debe ser http://host.docker.internal:3000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      GOOSED_URL: http://goosed:3000
+      GOOSED_URL: ${GOOSED_URL:-http://goosed:3000}
       GOOSE_SERVER_SECRET_KEY: ${GOOSE_SERVER_SECRET_KEY:-}
       GOOSE_GATEWAY_TRUSTED_USERS: ${GOOSE_GATEWAY_TRUSTED_USERS:-}
       GATEWAY_PACER_TICK: "1.5"

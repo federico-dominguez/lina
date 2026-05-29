@@ -1,0 +1,120 @@
+M2 - Repartido 7 - Preguntas y Respuestas
+=============================================
+Curso: Programación Backend
+Fecha: 2026-05-29
+
+---
+
+Pregunta 1 [Slot 5]: ¿Qué anotación define una relación uno a muchos?
+  a) @OneToMany  ← RESPUESTA
+  b) @RelationOneMany
+  c) @ManyToOne
+  d) @JoinColumn
+
+Pregunta 2 [Slot 13]: ¿Qué hace la anotación @Id en una entidad?
+  a) Define una relación externa
+  b) Genera una excepción
+  c) Indica un atributo opcional
+  d) Marca el campo como clave primaria  ← RESPUESTA
+
+Pregunta 3 [Slot 16]: ¿Qué significa "mapping" en JPA?
+  a) Relacionar clases Java con tablas de base de datos  ← RESPUESTA
+  b) Crear controladores HTTP
+  c) Convertir JSON a entidades
+  d) Generar archivos PDF desde entidades
+
+Pregunta 4 [Slot 18]: ¿Qué tipo de archivo se usa para configurar el esquema en JPA?
+  a) persistence.xml o application.properties  ← RESPUESTA
+  b) schema.sql
+  c) schema.graphql
+  d) application-dev.yml
+
+Pregunta 5 [Slot 11]: ¿Qué es Hibernate?
+  a) Un lenguaje de programación
+  b) Una implementación de JPA  ← RESPUESTA
+  c) Una herramienta de logging
+  d) Un framework de pruebas
+
+Pregunta 6 [Slot 8]: ¿Qué atributo de configuración impide que Hibernate altere el esquema?
+  a) spring.jpa.hibernate.ddl-auto=validate  ← RESPUESTA
+  b) hibernate.mode=off
+  c) ddl.mode=none
+  d) spring.jpa.ddl-auto=create
+
+Pregunta 7 [Slot 19]: ¿Qué ventaja tiene Hibernate al manejar relaciones entre tablas?
+  a) Agrega endpoints REST automáticamente
+  b) Gestiona relaciones de forma automática mediante anotaciones  ← RESPUESTA
+  c) Limita el uso de SQL
+  d) Mejora la UI
+
+Pregunta 8 [Slot 15]: ¿Qué representa @Column(nullable = false)?
+  a) Un índice único
+  b) Un campo que no puede ser nulo en la base  ← RESPUESTA
+  c) Una clave externa
+  d) Un campo opcional
+
+Pregunta 9 [Slot 2]: ¿Cuál es el tipo de relación si un autor tiene muchos libros?
+  a) @ManyToOne
+  b) @OneToOne
+  c) @ManyToMany
+  d) @OneToMany  ← RESPUESTA
+
+Pregunta 10 [Slot 4]: ¿Cuál es una buena práctica para probar entidades con H2?
+  a) Separar profiles y configurar H2 para test  ← RESPUESTA
+  b) Evitar usar relaciones
+  c) Eliminar las validaciones
+  d) Usar solo la base real
+
+Pregunta 11 [Slot 14]: ¿Qué motor de persistencia se usa por defecto con Spring Boot?
+  a) TopLink
+  b) Hibernate  ← RESPUESTA
+  c) EclipseLink
+  d) JDBC puro
+
+Pregunta 12 [Slot 17]: ¿Qué sucede si no se define una clave primaria en una entidad?
+  a) Se lanza una excepción  ← RESPUESTA
+  b) El campo se ignora
+  c) No es necesario para usar Hibernate
+  d) Se asigna automáticamente una UUID
+
+Pregunta 13 [Slot 7]: ¿Qué anotación se usa para definir una relación muchos a uno?
+  a) @OneToMany
+  b) @LinkOne
+  c) @ManyToOne  ← RESPUESTA
+  d) @JoinMany
+
+Pregunta 14 [Slot 10]: ¿Qué clase representa una tabla en JPA?
+  a) @Repository
+  b) @Service
+  c) @Table
+  d) @Entity  ← RESPUESTA
+
+Pregunta 15 [Slot 3]: ¿Cuál es la función de @JoinColumn?
+  a) Serializar objetos
+  b) Nombrar claves foráneas en una relación  ← RESPUESTA
+  c) Crear índices
+  d) Validar entradas
+
+Pregunta 16 [Slot 1]: ¿Cuál es el propósito de @GeneratedValue?
+  a) Generar automáticamente el valor de un campo  ← RESPUESTA
+  b) Forzar el valor 0
+  c) Declarar un tipo de dato
+  d) Crear una validación de entrada
+
+Pregunta 17 [Slot 12]: ¿Qué es JPA?
+  a) Un sistema de autenticación en Java
+  b) Una especificación estándar para persistencia de datos en Java  ← RESPUESTA
+  c) Un gestor de paquetes
+  d) Una API para acceso a archivos
+
+Pregunta 18 [Slot 9]: ¿Qué base de datos embebida es común para pruebas con JPA?
+  a) MongoDB
+  b) PostgreSQL
+  c) Oracle
+  d) H2  ← RESPUESTA
+
+Pregunta 19 [Slot 6]: ¿Qué anotación permite definir una relación bidireccional?
+  a) @RelationTwoSides
+  b) @JoinColumn(name = "id") only
+  c) @OneToMany(mappedBy = "autor")  ← RESPUESTA
+  d) @Bidirectional

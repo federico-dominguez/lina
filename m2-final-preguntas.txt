@@ -1,0 +1,493 @@
+╔══════════════════════════════════════════════════════════╗
+║  M2 - Cuestionario Final - Programación Backend          ║
+║  45 preguntas con respuestas correctas                   ║
+║  Generado: 2026-05-29 19:56 UTC-3                       ║
+╚══════════════════════════════════════════════════════════╝
+
+CONTENIDO DEL CUESTIONARIO:
+• Módulo 1: Spring Boot, JPA, relaciones, controladores
+• Módulo 2: Servicios, DTOs, OpenAPI, validación, paginación
+• Las respuestas están al final de cada pregunta
+
+═════════════════════════════════════════════════════════════
+          PREGUNTAS DEL M2 - CUESTIONARIO FINAL
+═════════════════════════════════════════════════════════════
+
+Pregunta 1
+Enunciado: ¿Cuál es el propósito de @JoinColumn en una relación JPA?
+Opciones:
+  a) Indicar que un campo es obligatorio
+  b) Definir el nombre de la tabla
+  c) Añadir una clave primaria
+  d) Especificar la columna que une dos entidades
+✅ Respuesta correcta: d) Especificar la columna que une dos entidades
+
+Pregunta 2
+Enunciado: ¿Qué herramienta permite importar colecciones de endpoints para pruebas de APIs?
+Opciones:
+  a) Swagger UI
+  b) Postman
+  c) Redocly
+  d) AnyAPI
+✅ Respuesta correcta: b) Postman
+
+Pregunta 3
+Enunciado: ¿Qué herramienta permite editar especificaciones OpenAPI?
+Opciones:
+  a) Swagger Editor
+  b) Postman
+  c) Insomnia
+  d) Swagger UI
+✅ Respuesta correcta: a) Swagger Editor
+
+Pregunta 4
+Enunciado: ¿Qué anotación activa un Bean según un perfil?
+Opciones:
+  a) @Value
+  b) @Bean
+  c) @Autowired
+  d) @Profile
+✅ Respuesta correcta: d) @Profile
+
+Pregunta 5
+Enunciado: ¿Qué significa @OneToMany en JPA?
+Opciones:
+  a) Una entidad se relaciona con una sola instancia de otra
+  b) Un método devuelve muchos registros
+  c) Una entidad se relaciona con múltiples registros de otra
+  d) Una tabla tiene un solo campo
+✅ Respuesta correcta: c) Una entidad se relaciona con múltiples registros de otra
+
+Pregunta 6
+Enunciado: ¿Qué anotación se usa para declarar una clase como repositorio en Spring?
+Opciones:
+  a) @Service
+  b) @Repository
+  c) @Controller
+  d) @Component
+✅ Respuesta correcta: b) @Repository
+
+Pregunta 7
+Enunciado: ¿Qué anotación se usa para capturar valores en la URL como /producto/5?
+Opciones:
+  a) @PathVariable
+  b) @RequestParam
+  c) @RequestBody
+  d) @GetMapping
+✅ Respuesta correcta: a) @PathVariable
+
+Pregunta 8
+Enunciado: ¿Qué beneficio aporta usar @Service?
+Opciones:
+  a) Crea automáticamente una tabla en la base de datos
+  b) Hace que el controlador sea REST
+  c) Valida los datos de entrada
+  d) Permite separar la lógica del controlador
+✅ Respuesta correcta: d) Permite separar la lógica del controlador
+
+Pregunta 9
+Enunciado: ¿Qué es Page<T> en Spring Data?
+Opciones:
+  a) Una interfaz para ordenar resultados
+  b) Un tipo de dato para respuestas HTTP
+  c) Una clase para paginar resultados de búsqueda
+  d) Una anotación de Spring Web
+✅ Respuesta correcta: c) Una clase para paginar resultados de búsqueda
+
+Pregunta 10
+Enunciado: ¿Qué método se usa para guardar un objeto en un repositorio?
+Opciones:
+  a) put()
+  b) insert()
+  c) create()
+  d) save()
+✅ Respuesta correcta: d) save()
+
+Pregunta 11
+Enunciado: ¿Qué anotación permite validar campos en un DTO?
+Opciones:
+  a) @JsonProperty
+  b) @Entity
+  c) @Bean
+  d) @NotBlank
+✅ Respuesta correcta: d) @NotBlank
+
+Pregunta 12
+Enunciado: ¿Para qué se utiliza un DTO?
+Opciones:
+  a) Para modificar la base de datos
+  b) Para transferir datos entre capas evitando exponer entidades
+  c) Para crear consultas SQL
+  d) Para generar documentación automática
+✅ Respuesta correcta: b) Para transferir datos entre capas evitando exponer entidades
+
+Pregunta 13
+Enunciado: ¿Qué archivo se usa frecuentemente para configurar propiedades en Spring Boot?
+Opciones:
+  a) application.properties o application.yml
+  b) web.xml
+  c) pom.xml
+  d) build.gradle
+✅ Respuesta correcta: a) application.properties o application.yml
+
+Pregunta 14
+Enunciado: ¿Qué herramienta permite documentar APIs con interfaz visual interactiva?
+Opciones:
+  a) Swagger UI
+  b) Postman
+  c) Insomnia
+  d) Git
+✅ Respuesta correcta: a) Swagger UI
+
+Pregunta 15
+Enunciado: ¿Qué anotación representa una entidad JPA?
+Opciones:
+  a) @Table
+  b) @Entity
+  c) @Column
+  d) @Id
+✅ Respuesta correcta: b) @Entity
+
+Pregunta 16
+Enunciado: ¿Qué interfaz permite acceso a operaciones CRUD en Spring Data JPA?
+Opciones:
+  a) CrudService
+  b) HibernateContext
+  c) JdbcManager
+  d) JpaRepository
+✅ Respuesta correcta: d) JpaRepository
+
+Pregunta 17
+Enunciado: ¿Cuál es el propósito principal de una API RESTful?
+Opciones:
+  a) Generar páginas web dinámicas
+  b) Ejecutar consultas directamente en la base de datos
+  c) Reemplazar el protocolo HTTP
+  d) Facilitar el intercambio de datos entre sistemas usando HTTP
+✅ Respuesta correcta: d) Facilitar el intercambio de datos entre sistemas usando HTTP
+
+Pregunta 18
+Enunciado: ¿Cuál de los siguientes códigos HTTP indica éxito en una operación?
+Opciones:
+  a) 404
+  b) 500
+  c) 300
+  d) 200
+✅ Respuesta correcta: d) 200
+
+Pregunta 19
+Enunciado: ¿Para qué se utiliza Redocly?
+Opciones:
+  a) Publicar documentación OpenAPI con diseño profesional
+  b) Editar código en vivo
+  c) Ejecutar pruebas unitarias
+  d) Autenticación en APIs
+✅ Respuesta correcta: a) Publicar documentación OpenAPI con diseño profesional
+
+Pregunta 20
+Enunciado: ¿Qué patrón permite crear objetos dependiendo de condiciones?
+Opciones:
+  a) Singleton
+  b) Observer
+  c) Factory
+  d) Decorator
+✅ Respuesta correcta: c) Factory
+
+Pregunta 21
+Enunciado: ¿Qué anotación se utiliza para validar campos en una entidad?
+Opciones:
+  a) @Valid
+  b) @Mapper
+  c) @Check
+  d) @Email, @NotNull, @Size
+✅ Respuesta correcta: d) @Email, @NotNull, @Size
+
+Pregunta 22
+Enunciado: ¿Qué anotación permite capturar datos del cuerpo de una solicitud en formato JSON?
+Opciones:
+  a) @RequestParam
+  b) @PathVariable
+  c) @RequestBody
+  d) @GetMapping
+✅ Respuesta correcta: c) @RequestBody
+
+Pregunta 23
+Enunciado: ¿Qué tipo de archivo suele usarse para definir documentación OpenAPI?
+Opciones:
+  a) .ts y .js
+  b) .xml y .html
+  c) .json y .yaml
+  d) .csv y .txt
+✅ Respuesta correcta: c) .json y .yaml
+
+Pregunta 24
+Enunciado: ¿Cuál es la responsabilidad de la capa de servicio?
+Opciones:
+  a) Renderizar la interfaz de usuario
+  b) Manejar solicitudes HTTP
+  c) Aplicar reglas de negocio y coordinar operaciones
+  d) Realizar consultas directas a la base de datos
+✅ Respuesta correcta: c) Aplicar reglas de negocio y coordinar operaciones
+
+Pregunta 25
+Enunciado: ¿Cuál es el propósito de Swagger UI?
+Opciones:
+  a) Ejecutar base de datos embebida
+  b) Crear controladores REST
+  c) Documentar y probar APIs desde el navegador
+  d) Editar código fuente
+✅ Respuesta correcta: c) Documentar y probar APIs desde el navegador
+
+Pregunta 26
+Enunciado: ¿Qué anotación permite que un parámetro no sea obligatorio en @RequestParam?
+Opciones:
+  a) optional=true
+  b) required=false
+  c) default
+  d) nullable
+✅ Respuesta correcta: b) required=false
+
+Pregunta 27
+Enunciado: ¿Qué propiedad evita que JPA modifique la estructura de la base de datos automáticamente?
+Opciones:
+  a) spring.jpa.hibernate.ddl-auto=create
+  b) spring.jpa.hibernate.ddl-auto=validate
+  c) spring.jpa.hibernate.ddl-auto=update
+  d) spring.jpa.hibernate.ddl-auto=drop
+✅ Respuesta correcta: b) spring.jpa.hibernate.ddl-auto=validate
+
+Pregunta 28
+Enunciado: ¿Qué tipo de relación representa "Un autor tiene muchos libros"?
+Opciones:
+  a) @OneToMany
+  b) @ManyToMany
+  c) @OneToOne
+  d) @ManyToOne
+✅ Respuesta correcta: a) @OneToMany
+
+Pregunta 29
+Enunciado: ¿Qué patrón permite garantizar una sola instancia de un objeto en memoria?
+Opciones:
+  a) Singleton
+  b) Builder
+  c) Factory
+  d) Adapter
+✅ Respuesta correcta: a) Singleton
+
+Pregunta 30
+Enunciado: ¿Qué hace @JoinColumn?
+Opciones:
+  a) Especifica una clave foránea en una relación
+  b) Indica el tipo de dato
+  c) Define la tabla de origen
+  d) Controla la caché
+✅ Respuesta correcta: a) Especifica una clave foránea en una relación
+
+Pregunta 31
+Enunciado: ¿Qué anotación define un controlador REST en Spring?
+Opciones:
+  a) @Controller
+  b) @RestController
+  c) @WebController
+  d) @ResponseBody
+✅ Respuesta correcta: b) @RestController
+
+Pregunta 32
+Enunciado: ¿Qué componente actúa como puerta de entrada en la arquitectura Spring MVC?
+Opciones:
+  a) ModelAndView
+  b) DispatcherServlet
+  c) ViewResolver
+  d) HandlerAdapter
+✅ Respuesta correcta: b) DispatcherServlet
+
+Pregunta 33
+Enunciado: ¿Qué anotación se usa para inyectar dependencias automáticamente?
+Opciones:
+  a) @Bean
+  b) @Qualifier
+  c) @Inject
+  d) @Autowired
+✅ Respuesta correcta: d) @Autowired
+
+Pregunta 34
+Enunciado: ¿Qué significa que una API sea stateless?
+Opciones:
+  a) Cada llamada es independiente y no mantiene estado entre solicitudes
+  b) Los datos se almacenan en la base de datos
+  c) No se permiten peticiones GET
+  d) Solo funciona sin conexión a internet
+✅ Respuesta correcta: a) Cada llamada es independiente y no mantiene estado entre solicitudes
+
+Pregunta 35
+Enunciado: ¿Qué motor de persistencia se usa por defecto con JPA en Spring Boot?
+Opciones:
+  a) EclipseLink
+  b) OpenJPA
+  c) Hibernate
+  d) TopLink
+✅ Respuesta correcta: c) Hibernate
+
+Pregunta 36
+Enunciado: ¿Qué anotación permite ejecutar una consulta personalizada en Spring Data JPA?
+Opciones:
+  a) @Query
+  b) @Procedure
+  c) @Insert
+  d) @Select
+✅ Respuesta correcta: a) @Query
+
+Pregunta 37
+Enunciado: ¿Qué método HTTP se usa para eliminar un recurso?
+Opciones:
+  a) POST
+  b) DELETE
+  c) GET
+  d) UPDATE
+✅ Respuesta correcta: b) DELETE
+
+Pregunta 38
+Enunciado: ¿Cuál es una ventaja de usar @Service en lugar de @Component?
+Opciones:
+  a) Identifica la clase como parte de la capa de negocio
+  b) Hace que la clase sea visible en la UI
+  c) Permite ejecutar código en segundo plano
+  d) Aumenta la velocidad de las consultas
+✅ Respuesta correcta: a) Identifica la clase como parte de la capa de negocio
+
+Pregunta 39
+Enunciado: ¿Qué propiedad evita que Hibernate modifique el esquema automáticamente?
+Opciones:
+  a) spring.jpa.hibernate.ddl-auto=none
+  b) hibernate.mode=off
+  c) ddl-safe=false
+  d) ddl-auto=validate
+✅ Respuesta correcta: a) spring.jpa.hibernate.ddl-auto=none
+
+Pregunta 40
+Enunciado: ¿Qué herramienta permite importar colecciones de endpoints y crear entornos de prueba?
+Opciones:
+  a) Postman
+  b) Git
+  c) Swagger Editor
+  d) Redocly
+✅ Respuesta correcta: a) Postman
+
+Pregunta 41
+Enunciado: ¿Qué clase permite definir la paginación en consultas JPA?
+Opciones:
+  a) PagingModel
+  b) PageRequest
+  c) PageableImpl
+  d) PageSettings
+✅ Respuesta correcta: b) PageRequest
+
+Pregunta 42
+Enunciado: ¿Qué anotación se usa para definir el lado inverso en relaciones bidireccionales?
+Opciones:
+  a) @MappedBy
+  b) @InverseJoin
+  c) @JoinReverse
+  d) @BiDirection
+✅ Respuesta correcta: a) @MappedBy
+
+Pregunta 43
+Enunciado: ¿Qué anotación se usa para relaciones muchos a uno?
+Opciones:
+  a) @OneToMany
+  b) @LinkOne
+  c) @JoinColumn
+  d) @ManyToOne
+✅ Respuesta correcta: d) @ManyToOne
+
+Pregunta 44
+Enunciado: ¿Qué anotación permite definir un bean dentro de una clase de configuración?
+Opciones:
+  a) @Bean
+  b) @Service
+  c) @Value
+  d) @Component
+✅ Respuesta correcta: a) @Bean
+
+Pregunta 45
+Enunciado: ¿Qué patrón garantiza una única instancia de una clase?
+Opciones:
+  a) Builder
+  b) Adapter
+  c) Factory
+  d) Singleton
+✅ Respuesta correcta: d) Singleton
+
+
+═════════════════════════════════════════════════════════
+             RESUMEN POR TEMA
+═════════════════════════════════════════════════════════
+
+📌 SPRING BOOT / ANOTACIONES
+  Q04 @Profile → activa bean por perfil          → d)
+  Q10 save() → guarda en repositorio             → d)
+  Q22 @RequestBody → captura cuerpo JSON         → c)
+  Q31 @RestController → controlador REST         → b)
+  Q33 @Autowired → inyección de dependencias     → d)
+  Q36 @Query → consulta personalizada JPA        → a)
+  Q44 @Bean → bean en clase de configuración     → a)
+
+📌 JPA / ENTIDADES / RELACIONES
+  Q01 @JoinColumn → columna que une entidades    → d)
+  Q05 @OneToMany → múltiples registros           → c)
+  Q15 @Entity → representa entidad JPA           → b)
+  Q16 JpaRepository → interfaz CRUD              → d)
+  Q28 @OneToMany → autor muchos libros           → a)
+  Q30 @JoinColumn → clave foránea                → a)
+  Q42 @MappedBy → lado inverso bidireccional     → a)
+  Q43 @ManyToOne → relación muchos a uno         → d)
+
+📌 VALIDACIÓN
+  Q11 @NotBlank → valida campos en DTO           → d)
+  Q21 @Email, @NotNull, @Size → validar entidad  → d)
+  Q26 required=false → parámetro opcional        → b)
+
+📌 CONFIGURACIÓN
+  Q13 application.properties → config Spring     → a)
+  Q27 ddl-auto=validate → no modifica DB         → b)
+  Q39 ddl-auto=none → no modifica esquema        → a)
+  Q35 Hibernate → motor JPA por defecto          → c)
+
+📌 ARQUITECTURA
+  Q08 @Service → separa lógica del controlador   → d)
+  Q12 DTO → transferir datos entre capas         → b)
+  Q17 API RESTful → intercambio datos vía HTTP   → d)
+  Q18 HTTP 200 → éxito                           → d)
+  Q24 Capa de servicio → reglas de negocio       → c)
+  Q32 DispatcherServlet → puerta Spring MVC      → b)
+  Q34 Stateless → llamadas independientes        → a)
+  Q38 @Service → identifica capa de negocio      → a)
+
+📌 PAGINACIÓN
+  Q09 Page<T> → paginar resultados               → c)
+  Q41 PageRequest → define paginación            → b)
+
+📌 OPENAPI / DOCUMENTACIÓN
+  Q03 Swagger Editor → editar OpenAPI            → a)
+  Q14 Swagger UI → documentar APIs visual        → a)
+  Q19 Redocly → publicar doc profesional         → a)
+  Q23 .json .yaml → archivos OpenAPI             → c)
+  Q25 Swagger UI → doc y probar APIs             → c)
+
+📌 HERRAMIENTAS
+  Q02 Postman → importar colecciones             → b)
+  Q07 @PathVariable → captura en URL             → a)
+  Q40 Postman → importar + entornos prueba       → a)
+
+📌 PATRONES DE DISEÑO
+  Q20 Factory → crear objetos condicionalmente   → c)
+  Q29 Singleton → única instancia en memoria     → a)
+  Q45 Singleton → única instancia de clase       → d)
+
+📌 MISCELLANEOUS
+  Q06 @Repository → repositorio Spring           → b)
+  Q37 DELETE → HTTP eliminar recurso             → b)
+
+═════════════════════════════════════════════════════════
+FIN DEL DOCUMENTO
+═════════════════════════════════════════════════════════

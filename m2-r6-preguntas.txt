@@ -1,0 +1,173 @@
+M2 - Cuestionario - Repartido 6
+Curso: Programación Backend (Spring Boot / JPA)
+Fecha: 2026-05-29
+Intento ID: 600021
+Preguntas totales: 20
+
+========================================
+PREGUNTAS Y OPCIONES
+========================================
+
+Pregunta 1 [Slot: 17] - @ManyToOne
+Enunciado: ¿Qué opción representa una relación muchos a uno?
+  a) @OneToOne
+  b) @JoinColumn
+  c) @ManyToOne  <-- RESPUESTA
+  d) @ManyToMany
+
+Pregunta 2 [Slot: 18] - @MappedBy
+Enunciado: ¿Qué permite hacer la anotación @MappedBy?
+  a) Cambiar el nombre de una tabla
+  b) Eliminar una entidad de forma automática
+  c) Definir el lado inverso de una relación bidireccional  <-- RESPUESTA
+  d) Especificar el nombre de una columna calculada
+
+Pregunta 3 [Slot: 13] - @GeneratedValue
+Enunciado: ¿Qué hace @GeneratedValue?
+  a) Genera el valor de la clave primaria  <-- RESPUESTA
+  b) Crea una relación entre entidades
+  c) Elimina la columna automáticamente
+  d) Define el nombre de la columna
+
+Pregunta 4 [Slot: 15] - Método CRUD save
+Enunciado: ¿Qué método CRUD se usa para guardar una entidad?
+  a) save()  <-- RESPUESTA
+  b) store()
+  c) insert()
+  d) add()
+
+Pregunta 5 [Slot: 3] - @Id
+Enunciado: ¿Cuál es la función de @Id en una entidad?
+  a) Genera una consulta personalizada
+  b) Indica una clave externa
+  c) Marca un campo como clave primaria  <-- RESPUESTA
+  d) Define una columna única
+
+Pregunta 6 [Slot: 16] - Paginación
+Enunciado: ¿Qué método permite obtener todos los registros con paginación?
+  a) findAllPaginated()
+  b) queryAllPages()
+  c) findAll(Pageable pageable)  <-- RESPUESTA
+  d) getAllWithPage()
+
+Pregunta 7 [Slot: 6] - Validación
+Enunciado: ¿Qué anotación permite validar datos como email o campos obligatorios?
+  a) @Mandatory
+  b) @Column(unique = true)
+  c) @Valid
+  d) @NotBlank, @Email  <-- RESPUESTA
+
+Pregunta 8 [Slot: 14] - CrudRepository
+Enunciado: ¿Qué interfaz proporciona métodos CRUD en Spring Data JPA?
+  a) DataAccessObject
+  b) RepositoryManager
+  c) JpaService
+  d) CrudRepository  <-- RESPUESTA
+
+Pregunta 9 [Slot: 20] - Page<T>
+Enunciado: ¿Qué tipo de datos devuelve un método con paginación?
+  a) Set<T>
+  b) Page<T>  <-- RESPUESTA
+  c) Iterable<T>
+  d) List<T>
+
+Pregunta 10 [Slot: 10] - ddl-auto
+Enunciado: ¿Qué atributo de configuración se usa para evitar que JPA altere la estructura?
+  a) spring.jpa.ddl-auto=update
+  b) spring.jpa.hibernate.ddl-auto=validate  <-- RESPUESTA
+  c) jpa.validation=false
+  d) ddl.strict=false
+
+Pregunta 11 [Slot: 11] - Pageable
+Enunciado: ¿Qué clase se utiliza para configurar número de página, tamaño y orden?
+  a) Pageable  <-- RESPUESTA
+  b) Pagination
+  c) Page
+  d) PageRequest
+
+Pregunta 12 [Slot: 4] - @OneToMany
+Enunciado: ¿Cuál es la relación representada por @OneToMany?
+  a) Dos tablas sin relación
+  b) Un registro apunta a sí mismo
+  c) Relación muchos a muchos
+  d) Un objeto tiene una lista de otros  <-- RESPUESTA
+
+Pregunta 13 [Slot: 8] - @JoinColumn
+Enunciado: ¿Qué anotación se usa para definir la columna de unión en una relación?
+  a) @Link
+  b) @JoinTable
+  c) @JoinColumn  <-- RESPUESTA
+  d) @ForeignKey
+
+Pregunta 14 [Slot: 7] - @Table
+Enunciado: ¿Qué anotación se usa para definir el nombre de la tabla en la base?
+  a) @DBTable
+  b) @Schema
+  c) @Table  <-- RESPUESTA
+  d) @TableName
+
+Pregunta 15 [Slot: 1] - Base de datos
+Enunciado: ¿Con qué tipo de base de datos se integra en el documento?
+  a) MySQL
+  b) PostgreSQL  <-- RESPUESTA
+  c) SQLite
+  d) MongoDB
+
+Pregunta 16 [Slot: 12] - Spring Data JPA
+Enunciado: ¿Qué es Spring Data JPA?
+  a) Una extensión de Spring para facilitar el acceso a datos usando JPA  <-- RESPUESTA
+  b) Una herramienta para crear vistas HTML
+  c) Un motor de persistencia de archivos planos
+  d) Un lenguaje de consultas SQL
+
+Pregunta 17 [Slot: 2] - nullable=false
+Enunciado: ¿Cuál es el objetivo del atributo nullable=false?
+  a) Establecer una columna como única
+  b) Permitir que el campo sea opcional
+  c) Forzar claves primarias automáticas
+  d) Indicar que el campo no puede ser nulo  <-- RESPUESTA
+
+Pregunta 18 [Slot: 5] - @Entity
+Enunciado: ¿Qué anotación indica que una clase representa una entidad de base de datos?
+  a) @Bean
+  b) @Entity  <-- RESPUESTA
+  c) @Database
+  d) @Model
+
+Pregunta 19 [Slot: 9] - @Column
+Enunciado: ¿Qué anotación se usa para mapear un atributo a una columna específica?
+  a) @Value
+  b) @Field
+  c) @Column  <-- RESPUESTA
+  d) @Mapper
+
+Pregunta 20 [Slot: 19] - @Query
+Enunciado: ¿Qué tipo de consulta permite la anotación @Query?
+  a) Consultas con SQL embebido en HTML
+  b) Consultas personalizadas con JPQL o SQL nativo  <-- RESPUESTA
+  c) Consultas con validaciones automáticas
+  d) Consultas automáticas generadas por nombre
+
+========================================
+RESPUESTAS ENVIADAS
+========================================
+Slot 17 → c
+Slot 18 → c
+Slot 13 → a
+Slot 15 → a
+Slot 3  → c
+Slot 16 → c
+Slot 6  → d
+Slot 14 → d
+Slot 20 → b
+Slot 10 → b
+Slot 11 → a
+Slot 4  → d
+Slot 8  → c
+Slot 7  → c
+Slot 1  → b
+Slot 12 → a
+Slot 2  → d
+Slot 5  → b
+Slot 9  → c
+Slot 19 → b

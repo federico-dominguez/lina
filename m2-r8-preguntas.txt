@@ -1,0 +1,93 @@
+M2 - Repartido 8 - Preguntas y Respuestas
+======================================
+Fecha: 2026-05-29
+
+Pregunta 1 [Slot 7]: ¿Cuál es una ventaja de usar una capa de servicio?
+  a) Hace el código más acoplado
+  b) Evita la creación de clases adicionales
+  c) Permite reutilización de lógica en diferentes controladores ✅
+  d) Reemplaza la base de datos
+
+Pregunta 2 [Slot 11]: ¿Qué anotación se utiliza comúnmente para declarar una clase de servicio?
+  a) @Repository
+  b) @Controller
+  c) @Service ✅
+  d) @ComponentScan
+
+Pregunta 3 [Slot 5]: ¿Cuál es la principal ventaja del patrón Repository?
+  a) Reduce la complejidad de la UI
+  b) Mejora el rendimiento gráfico
+  c) Permite acceso desacoplado a la base de datos ✅
+  d) Crea archivos de configuración
+
+Pregunta 4 [Slot 2]: ¿Cuál de los siguientes beneficios se logra al aplicar separación de capas?
+  a) Mantenibilidad y escalabilidad ✅
+  b) Reutilización limitada del código
+  c) Mayor acoplamiento entre módulos
+  d) Reducción de documentación
+
+Pregunta 5 [Slot 1]: ¿Cuál de estos patrones está relacionado con la capa de negocio?
+  a) Factory
+  b) Singleton
+  c) Facade
+  d) Todos los anteriores ✅
+
+Pregunta 6 [Slot 13]: ¿Qué es la capa de negocio en una API?
+  a) La base de datos
+  b) La interfaz gráfica de usuario
+  c) La parte encargada de validar formularios
+  d) El lugar donde reside la lógica de negocio ✅
+
+Pregunta 7 [Slot 3]: ¿Cuál de los siguientes patrones facilita el acceso a datos desde la base?
+  a) Service
+  b) DTO
+  c) Repository ✅
+  d) Controller
+
+Pregunta 8 [Slot 14]: ¿Qué patrón de diseño se utiliza para encapsular la creación de objetos?
+  a) DTO
+  b) Singleton
+  c) Repository
+  d) Factory ✅
+
+Pregunta 9 [Slot 10]: ¿Qué anotación se usa para implementar un repositorio en Spring?
+  a) @Service
+  b) @Repository ✅
+  c) @Component
+  d) @Bean
+
+Pregunta 10 [Slot 8]: ¿Para qué se utiliza la capa de servicios en una arquitectura en capas?
+  a) Para ejecutar sentencias SQL desde el controlador
+  b) Para manejar directamente las vistas
+  c) Para aislar la lógica de negocio de los controladores ✅
+  d) Para definir rutas de API
+
+Pregunta 11 [Slot 15]: ¿Qué se recomienda evitar en los controladores?
+  a) Inyectar servicios
+  b) Delegar en la capa de servicios
+  c) Ejecutar lógica de negocio directamente ✅
+  d) Definir rutas de API
+
+Pregunta 12 [Slot 12]: ¿Qué característica tiene el patrón Singleton?
+  a) Crea múltiples instancias para escalabilidad
+  b) Se aplica solo a entidades JPA
+  c) Permite herencia múltiple
+  d) Solo permite una instancia única de la clase ✅
+
+Pregunta 13 [Slot 6]: ¿Cuál es una de las responsabilidades de la capa de servicio?
+  a) Validar formularios HTML
+  b) Aplicar reglas de negocio y coordinar operaciones ✅
+  c) Renderizar páginas web
+  d) Crear sesiones de usuario
+
+Pregunta 14 [Slot 4]: ¿Cuál es la estructura típica de una aplicación por capas?
+  a) API > DAO > React
+  b) Vista > Lógica de negocio > Acceso a datos ✅
+  c) Base de datos > CSS > HTML
+  d) UI > Service > Middleware
+
+Pregunta 15 [Slot 9]: ¿Para qué sirve el patrón Service en una API REST?
+  a) Para validar formularios
+  b) Para agrupar operaciones de negocio relacionadas ✅
+  c) Para acceder directamente a los datos
+  d) Para redireccionar URLs

@@ -1,0 +1,175 @@
+M2 - Cuestionario - Repartido 9 (ID: 754541)
+Attempt: 600034
+Fecha: 2026-05-29
+========================================
+
+📋 **DATOS DEL INTENTO ABIERTO #1**
+
+🆔 Attempt ID: **600034**
+📊 Estado: inprogress
+📅 Inicio: 1780094419
+⏱️ Tiempo límite: Sin límite
+📝 Preguntas totales: 15
+
+---
+
+## 📋 Preguntas y Opciones
+
+### Pregunta 1/15 [Slot: 9] [Tipo: multichoice]
+📖 **Enunciado:** ¿Qué extensión se utiliza comúnmente para especificaciones OpenAPI escritas en YAML?
+📋 **Opciones:**
+  a) .yml o .yaml
+  b) .json
+  c) .cfg
+  d) .doc
+📊 Puntaje máximo: 1
+
+### Pregunta 2/15 [Slot: 14] [Tipo: multichoice]
+📖 **Enunciado:** ¿Qué ventaja ofrece Swagger UI?
+📋 **Opciones:**
+  a) Generación de código fuente Java
+  b) Encriptación automática de tokens
+  c) Interfaz visual para explorar y probar APIs
+  d) Simulación de respuestas sin conexión
+📊 Puntaje máximo: 1
+
+### Pregunta 3/15 [Slot: 5] [Tipo: multichoice]
+📖 **Enunciado:** ¿Para qué sirve Postman?
+📋 **Opciones:**
+  a) Para diseñar interfaces web
+  b) Para editar archivos PDF
+  c) Para compilar aplicaciones Java
+  d) Para testear y documentar APIs
+📊 Puntaje máximo: 1
+
+### Pregunta 4/15 [Slot: 10] [Tipo: multichoice]
+📖 **Enunciado:** ¿Qué formato se usa comúnmente para archivos OpenAPI?
+📋 **Opciones:**
+  a) .json o .yaml
+  b) .txt
+  c) .csv
+  d) .xml
+📊 Puntaje máximo: 1
+
+### Pregunta 5/15 [Slot: 8] [Tipo: multichoice]
+📖 **Enunciado:** ¿Qué es Redocly?
+📋 **Opciones:**
+  a) Un visualizador profesional de documentación OpenAPI
+  b) Un framework de pruebas
+  c) Un sistema de autenticación para APIs
+  d) Una base de datos embebida
+📊 Puntaje máximo: 1
+
+### Pregunta 6/15 [Slot: 13] [Tipo: multichoice]
+📖 **Enunciado:** ¿Qué se puede probar directamente desde Swagger UI?
+📋 **Opciones:**
+  a) Peticiones a los endpoints documentados
+  b) Envío de formularios HTML
+  c) Carga de base de datos
+  d) Generación de código
+📊 Puntaje máximo: 1
+
+### Pregunta 7/15 [Slot: 6] [Tipo: multichoice]
+📖 **Enunciado:** ¿Qué beneficio ofrece Redocly sobre Swagger UI?
+📋 **Opciones:**
+  a) Visualización avanzada y personalizable para producción
+  b) Generación automática de JWT
+  c) Soporte para SQL
+  d) Compresión de archivos YAML
+📊 Puntaje máximo: 1
+
+### Pregunta 8/15 [Slot: 3] [Tipo: multichoice]
+📖 **Enunciado:** ¿Para qué se utiliza Insomnia?
+📋 **Opciones:**
+  a) Para generar archivos CSV
+  b) Para visualizar bases de datos
+  c) Para diseñar interfaces web
+  d) Para consumir, testear y organizar APIs
+📊 Puntaje máximo: 1
+
+### Pregunta 9/15 [Slot: 15] [Tipo: multichoice]
+📖 **Enunciado:** ¿Una ventaja de Postman frente a Swagger UI es?
+📋 **Opciones:**
+  a) Su integración con bases de datos
+  b) Su entorno gráfico para pruebas manuales avanzadas
+  c) Su soporte exclusivo para APIs SOAP
+  d) Su capacidad de renderizar vistas HTML
+📊 Puntaje máximo: 1
+
+### Pregunta 10/15 [Slot: 11] [Tipo: multichoice]
+📖 **Enunciado:** ¿Qué herramienta permite importar colecciones y crear entornos de prueba?
+📋 **Opciones:**
+  a) Redocly
+  b) GitHub Pages
+  c) Postman
+  d) Swagger Editor
+📊 Puntaje máximo: 1
+
+### Pregunta 11/15 [Slot: 12] [Tipo: multichoice]
+📖 **Enunciado:** ¿Qué permite hacer una documentación OpenAPI?
+📋 **Opciones:**
+  a) Describir los endpoints, parámetros y respuestas de una API
+  b) Validar certificados digitales
+  c) Crear un modelo relacional de base de datos
+  d) Documentar la interfaz gráfica
+📊 Puntaje máximo: 1
+
+### Pregunta 12/15 [Slot: 2] [Tipo: multichoice]
+📖 **Enunciado:** ¿Para qué se usa la clave "paths" en un archivo OpenAPI?
+📋 **Opciones:**
+  a) Para describir endpoints y operaciones de la API
+  b) Para definir estilos visuales
+  c) Para definir rutas de archivos locales
+  d) Para configurar el servidor
+📊 Puntaje máximo: 1
+
+### Pregunta 13/15 [Slot: 1] [Tipo: multichoice]
+📖 **Enunciado:** ¿Con qué lenguaje trabaja principalmente Swagger para definir la documentación?
+📋 **Opciones:**
+  a) SQL
+  b) Markdown
+  c) HTML
+  d) JSON/YAML
+📊 Puntaje máximo: 1
+
+### Pregunta 14/15 [Slot: 7] [Tipo: multichoice]
+📖 **Enunciado:** ¿Qué es OpenAPI?
+📋 **Opciones:**
+  a) Una herramienta para crear servidores
+  b) Una base de datos para APIs
+  c) Un framework de autenticación
+  d) Una especificación para describir APIs REST
+📊 Puntaje máximo: 1
+
+### Pregunta 15/15 [Slot: 4] [Tipo: multichoice]
+📖 **Enunciado:** ¿Para qué se utiliza Swagger Editor?
+📋 **Opciones:**
+  a) Para crear y editar documentación OpenAPI
+  b) Para autenticar usuarios
+  c) Para administrar bases de datos
+  d) Para ejecutar código JavaScript
+📊 Puntaje máximo: 1
+
+---
+⚠️ **IMPORTANTE:** Este intento está ABIERTO y NO se ha cerrado.
+Usa moodle_submit_quiz_answer(attemptid, slot, answer) para responder preguntas SIN finalizar el intento.
+Para finalizar, debes hacerlo manualmente en Moodle.
+
+========================================
+RESPUESTAS
+========================================
+Q1 [Slot 9]: .yml o .yaml → a
+Q2 [Slot 14]: Interfaz visual para explorar y probar APIs → c
+Q3 [Slot 5]: Para testear y documentar APIs → d
+Q4 [Slot 10]: .json o .yaml → a
+Q5 [Slot 8]: Un visualizador profesional de documentación OpenAPI → a
+Q6 [Slot 13]: Peticiones a los endpoints documentados → a
+Q7 [Slot 6]: Visualización avanzada y personalizable para producción → a
+Q8 [Slot 3]: Para consumir, testear y organizar APIs → d
+Q9 [Slot 15]: Su entorno gráfico para pruebas manuales avanzadas → b
+Q10 [Slot 11]: Postman → c
+Q11 [Slot 12]: Describir los endpoints, parámetros y respuestas de una API → a
+Q12 [Slot 2]: Para describir endpoints y operaciones de la API → a
+Q13 [Slot 1]: JSON/YAML → d
+Q14 [Slot 7]: Una especificación para describir APIs REST → d
+Q15 [Slot 4]: Para crear y editar documentación OpenAPI → a

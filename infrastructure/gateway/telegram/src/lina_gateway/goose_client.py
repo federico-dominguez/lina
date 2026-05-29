@@ -152,8 +152,8 @@ class GoosedClient:
     async def is_alive(self) -> bool:
         """Quick health check — returns False if goosed is unreachable."""
         try:
-            async with httpx.AsyncClient(timeout=5.0) as c:
-                r = await c.get(f"{self._base_url}/health")
+            async with httpx.AsyncClient(timeout=5.0, verify=False) as c:
+                r = await c.get(f"{self._base_url}/status", headers=self._headers)
                 return r.is_success
         except Exception:
             return False
@@ -177,7 +177,8 @@ class GoosedClient:
                 read=self._read_timeout,
                 write=30.0,
                 pool=5.0,
-            )
+            ),
+            verify=False,  # goosed uses a self-signed TLS certificate
         ) as client:
             async with client.stream(
                 "POST",
