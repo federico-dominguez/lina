@@ -19,6 +19,13 @@ Versioning follows [Semantic Versioning](https://semver.org/) — `MAJOR.MINOR.P
 - Repository migrated to private GitHub with full professional structure
 - Questionnaire output files moved to `~/Documentos/lina-moodle-exports/`
 
+### Fixed
+- **Telegram final message truncated at 4096 chars** — `edit_text` with `sealed=true`
+  now calls `split_message` and sends remaining content as follow-up messages instead
+  of silently dropping it with `…`. Live bubbles (`sealed=false`) keep the safe truncation
+  behaviour (Telegram does not allow splitting in-flight edits). Fixes #21.
+  — goosed binary: `vendor/goosed-linux-amd64.sha256`
+
 ---
 
 ## [0.9.0] — 2026-05-27
