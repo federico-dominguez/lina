@@ -269,6 +269,32 @@ services:
         max-size: "5m"
         max-file: "2"
 
+  # ─── Telegram Gateway (Issue #16) ────────────────────────────────────────
+  # Servicio Python independiente que reemplaza el gateway embebido en goosed.
+  # Pollea Telegram, reenvía mensajes a goosed /reply (SSE) y muestra
+  # respuestas con efecto typewriter via editMessageText.
+  lina-gateway:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.gateway
+    image: lina-gateway:latest
+    restart: unless-stopped
+    depends_on:
+      - goosed
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      GOOSED_URL: http://goosed:3000
+      GOOSE_SERVER_SECRET_KEY: ${GOOSE_SERVER_SECRET_KEY:-}
+      GOOSE_GATEWAY_TRUSTED_USERS: ${GOOSE_GATEWAY_TRUSTED_USERS:-}
+      GATEWAY_PACER_TICK: "1.5"
+      TELEGRAM_POLL_TIMEOUT: "30"
+    # No ports needed — outbound only (Telegram API + goosed internal)
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   lina-db-data:
   lina-logs:
