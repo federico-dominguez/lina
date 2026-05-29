@@ -148,6 +148,18 @@ extensions:
       GITLAB_TOKEN_KEYRING: "lina:gitlab:GITLAB_TOKEN"
     timeout: 60
 
+  lina-db:
+    name: lina-db
+    display_name: LINA DB
+    description: Memoria persistente en PostgreSQL — recuerdos, sesiones, preferencias y auditoría.
+    type: stdio
+    enabled: true
+    cmd: uv
+    args: [--directory, /home/fede/lina/mcps/lina-db, run, lina-db]
+    envs:
+      LINA_DB_URL: ${LINA_DB_URL}
+    timeout: 30
+
 providers:
   custom_deepseek:
     enabled: true
