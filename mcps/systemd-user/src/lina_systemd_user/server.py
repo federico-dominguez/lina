@@ -162,8 +162,8 @@ def svc_daemon_reload() -> dict:
 
 
 def main() -> None:
-    log.info("starting (writable_regex=%s)", WRITABLE_REGEX.pattern)
-    mcp.run()
+    log.info("starting (writable_regex=%s, transport=%s)", WRITABLE_REGEX.pattern, _MCP_TRANSPORT)
+    mcp.run(transport=_MCP_TRANSPORT)
 
 
 if __name__ == "__main__":

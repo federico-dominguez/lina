@@ -75,6 +75,140 @@ services:
       - ${HOME}/.config/goose:/root/.config/goose:ro
       - lina-logs:/app/logs
 
+  # ─── MCP: lina-secrets ──────────────────────────────────────────────────────
+  # Backend: archivo en volumen (libsecret no funciona en containers).
+  # Los secretos se montan como Docker Secrets o se pasan como envvars.
+  lina-mcp-secrets:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.mcp
+      args:
+        MCP_DIR: mcps/secrets
+        MCP_CMD: lina-secrets
+    image: lina-mcp-secrets:latest
+    restart: unless-stopped
+    environment:
+      MCP_TRANSPORT: sse
+      MCP_PORT: "8000"
+      LINA_SECRETS_BACKEND: file
+      LINA_SECRETS_FILE_DIR: /run/secrets/lina
+    volumes:
+      - lina-secrets-data:/run/secrets/lina
+    ports:
+      - "127.0.0.1:8101:8000"
+
+  # ─── MCP: lina-fs-safe ──────────────────────────────────────────────────────
+  lina-mcp-fs-safe:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.mcp
+      args:
+        MCP_DIR: mcps/fs-safe
+        MCP_CMD: lina-fs-safe
+    image: lina-mcp-fs-safe:latest
+    restart: unless-stopped
+    environment:
+      MCP_TRANSPORT: sse
+      MCP_PORT: "8000"
+    volumes:
+      - ${HOME}:/home/user:rw
+    ports:
+      - "127.0.0.1:8102:8000"
+
+  # ─── MCP: lina-shell-policy ─────────────────────────────────────────────────
+  # Hardened: read-only filesystem + tmpfs /tmp + cap_drop ALL.
+  lina-mcp-shell-policy:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.mcp
+      args:
+        MCP_DIR: mcps/shell-policy
+        MCP_CMD: lina-shell-policy
+    image: lina-mcp-shell-policy:latest
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    cap_drop:
+      - ALL
+    environment:
+      MCP_TRANSPORT: sse
+      MCP_PORT: "8000"
+      LINA_SHELL_AUDIT_DIR: /tmp/lina-audit
+    ports:
+      - "127.0.0.1:8103:8000"
+
+  # ─── MCP: lina-systemd-user ─────────────────────────────────────────────────
+  # Requiere D-Bus socket del usuario host (uid 1000) para controlar unidades.
+  # El uid del container (1001) necesita acceso al socket; ajustar con ACLs si es necesario.
+  lina-mcp-systemd-user:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.mcp
+      args:
+        MCP_DIR: mcps/systemd-user
+        MCP_CMD: lina-systemd-user
+    image: lina-mcp-systemd-user:latest
+    restart: unless-stopped
+    environment:
+      MCP_TRANSPORT: sse
+      MCP_PORT: "8000"
+      DBUS_SESSION_BUS_ADDRESS: unix:path=/run/user/1000/bus
+    volumes:
+      - /run/user/1000/bus:/run/user/1000/bus:rw
+    ports:
+      - "127.0.0.1:8104:8000"
+
+  # ─── MCP: lina-moodle ───────────────────────────────────────────────────────
+  # Red aislada lina-moodle-net para limitar acceso de red a *.utec.edu.uy.
+  lina-mcp-moodle:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.mcp
+      args:
+        MCP_DIR: mcps/moodle
+        MCP_CMD: lina-moodle
+    image: lina-mcp-moodle:latest
+    restart: unless-stopped
+    environment:
+      MCP_TRANSPORT: sse
+      MCP_PORT: "8000"
+      MOODLE_URL: ${MOODLE_URL:-https://ev1.utec.edu.uy/moodle}
+      MOODLE_USERNAME: ${MOODLE_USERNAME:-}
+      MOODLE_PASSWORD: ${MOODLE_PASSWORD:-}
+    ports:
+      - "127.0.0.1:8105:8000"
+    networks:
+      - default
+      - lina-moodle-net
+
+  # ─── MCP: lina-db ───────────────────────────────────────────────────────────
+  lina-mcp-db:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.mcp
+      args:
+        MCP_DIR: mcps/lina-db
+        MCP_CMD: lina-db
+    image: lina-mcp-db:latest
+    restart: unless-stopped
+    depends_on:
+      lina-db:
+        condition: service_healthy
+    environment:
+      MCP_TRANSPORT: sse
+      MCP_PORT: "8000"
+      LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
+    ports:
+      - "127.0.0.1:8106:8000"
+
 volumes:
   lina-db-data:
   lina-logs:
+  lina-secrets-data:
+
+networks:
+  default:
+  lina-moodle-net:
+    # Red dedicada para el MCP de Moodle — limita acceso a *.utec.edu.uy.
+    # En producción configurar firewall/egress rules adicionales.

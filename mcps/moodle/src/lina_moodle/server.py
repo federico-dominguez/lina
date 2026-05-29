@@ -32,7 +32,10 @@ MOODLE_USERNAME = os.environ.get("MOODLE_USERNAME", "")
 MOODLE_PASSWORD = os.environ.get("MOODLE_PASSWORD", "")
 SERVICE_NAME = "moodle_mobile_app"
 
-mcp = FastMCP("lina-moodle")
+_MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
+_MCP_HTTP_PORT = int(os.environ.get("MCP_PORT", "8000"))
+
+mcp = FastMCP("lina-moodle", host="0.0.0.0", port=_MCP_HTTP_PORT)
 
 # Estado de sesión (token)
 _auth_token: str | None = None
@@ -771,7 +774,7 @@ async def moodle_finish_quiz_attempt(attemptid: int) -> str:
 
 def main() -> None:
     """Punto de entrada del MCP server."""
-    log.info("starting lina-moodle (url=%s)", MOODLE_URL)
+    log.info("starting lina-moodle (url=%s, transport=%s)", MOODLE_URL, _MCP_TRANSPORT)
 
     # Login automático si hay credenciales en entorno
     import asyncio
@@ -782,7 +785,7 @@ def main() -> None:
         except Exception as e:
             log.warning("Login automático falló: %s", e)
 
-    mcp.run()
+    mcp.run(transport=_MCP_TRANSPORT)
 
 
 if __name__ == "__main__":

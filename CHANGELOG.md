@@ -12,6 +12,33 @@ Versioning follows [Semantic Versioning](https://semver.org/) — `MAJOR.MINOR.P
 ## [Unreleased]
 
 ### Added
+- **Fase 2: Containerización completa de MCPs** (Issue #10)
+  - Nuevo `deploy/docker/Dockerfile.mcp`: Dockerfile multi-stage compartido para todos los
+    MCPs, parametrizado con `ARG MCP_DIR` y `ARG MCP_CMD`. Stage builder usa `uv sync --no-dev`;
+    stage runtime corre como usuario no-root `mcp` (uid 1001). Healthcheck TCP vía Python3
+    (FastMCP no expone `/health`). `ENV MCP_TRANSPORT=sse MCP_PORT=8000` por defecto.
+  - `deploy/docker/docker-compose.yml`: 6 nuevos servicios MCP en puertos 8101–8106:
+    - `lina-mcp-secrets` (8101): backend de archivos (`LINA_SECRETS_BACKEND=file`),
+      volumen `lina-secrets-data` en `/run/secrets/lina`.
+    - `lina-mcp-fs-safe` (8102): monta `$HOME` del host.
+    - `lina-mcp-shell-policy` (8103): hardened — `read_only: true`, `tmpfs: [/tmp:size=64m]`,
+      `cap_drop: ALL`, audit log en tmpfs (`LINA_SHELL_AUDIT_DIR=/tmp/lina-audit`).
+    - `lina-mcp-systemd-user` (8104): socket D-Bus del usuario host montado en
+      `/run/user/1000/bus` con `DBUS_SESSION_BUS_ADDRESS`.
+    - `lina-mcp-moodle` (8105): red aislada `lina-moodle-net`.
+    - `lina-mcp-db` (8106): depends_on `lina-db` (PostgreSQL).
+  - `lina-secrets`: backend de archivos (`LINA_SECRETS_BACKEND=file | keyring`).
+    Las operaciones `secret_get/set/delete/list` ramifican según el backend. Compatible
+    hacia atrás — en modo stdio el default sigue siendo `keyring`. Abandona libsecret
+    en containers (no funciona sin D-Bus de sesión).
+  - `lina-shell-policy`: `LINA_SHELL_AUDIT_DIR` configurable desde entorno (antes hardcodeado
+    a `~/lina/logs`).
+  - Soporte `MCP_TRANSPORT` / `MCP_PORT` en 4 MCPs que aún no lo tenían:
+    `lina-secrets`, `lina-shell-policy`, `lina-systemd-user`, `lina-moodle`.
+    (`lina-db` y `lina-fs-safe` ya lo tenían desde Fase 1.)
+  - `config/mcp-registry.yaml`: campos `container_url` y `container_port` por MCP.
+  - `tests/integration/mcps/test_mcp_containers.sh`: smoke test que levanta los
+    6 contenedores, verifica TCP y endpoint SSE en cada puerto.
 - ADR 0003: Android control via ADB bridge (hybrid architecture, MCP `lina-android-remote` planned)
 - ADR 0002: UI rendering strategy (Telegram HTML rendering)
 
