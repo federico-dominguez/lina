@@ -1,0 +1,254 @@
+"""
+Main bot loop: Telegram long-poll → goosed SSE → Telegram edits.
+
+Mirrors the logic in handler.rs:
+  - Auto-session-id: one persistent session per chat_id
+  - /stop: cancel in-flight request
+  - Typewriter display via StreamingBubble + Pacer
+  - Goosed-down detection with user notification
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections import defaultdict
+
+from .config import Config
+from .formatter import format_tool_status, format_with_thinking, markdown_to_telegram_html
+from .goose_client import EventType, GoosedClient, MessageContent, MessageEvent
+from .pacer import StreamingBubble
+from .telegram_client import MAX_VOICE_FILE_SIZE, TelegramClient, TelegramMessage, voice_prompt
+
+logger = logging.getLogger(__name__)
+
+_STOP_COMMANDS = {"/stop", "stop", "/Stop", "Stop", "/STOP", "STOP"}
+
+
+class Bot:
+    def __init__(self, cfg: Config) -> None:
+        self._cfg = cfg
+        self._tg = TelegramClient(cfg.bot_token, poll_timeout=cfg.poll_timeout)
+        self._goosed = GoosedClient(
+            base_url=cfg.goosed_url,
+            secret=cfg.goosed_secret,
+            connect_timeout=cfg.goosed_connect_timeout,
+            read_timeout=cfg.goosed_read_timeout,
+        )
+        # chat_id → session_id (persistent per chat)
+        self._sessions: dict[int, str] = {}
+        # chat_id → active cancel event (one reply at a time per chat)
+        self._cancels: dict[int, asyncio.Event] = defaultdict(asyncio.Event)
+        # chat_id → True if currently processing
+        self._busy: dict[int, bool] = {}
+
+    def _session_id(self, chat_id: int) -> str:
+        if chat_id not in self._sessions:
+            self._sessions[chat_id] = f"telegram-{chat_id}"
+        return self._sessions[chat_id]
+
+    async def _handle(self, msg: TelegramMessage) -> None:
+        chat_id = msg.chat.id
+        text = msg.text or ""
+
+        # ── /stop ──────────────────────────────────────────────────────
+        if text.strip() in _STOP_COMMANDS:
+            if self._busy.get(chat_id):
+                self._cancels[chat_id].set()
+                await self._tg.send_message(chat_id, "⛔ Deteniendo.")
+            else:
+                await self._tg.send_message(chat_id, "ℹ️ No hay ninguna tarea en curso.")
+            return
+
+        # ── voice note ─────────────────────────────────────────────────
+        if msg.voice:
+            if msg.voice.file_size and msg.voice.file_size > MAX_VOICE_FILE_SIZE:
+                await self._tg.send_message(chat_id, "⚠️ El archivo de voz excede el límite de 20 MB.")
+                return
+            try:
+                data = await self._tg.download_file(msg.voice.file_id)
+                path = await self._tg.save_voice_file(data, msg.voice.mime_type)
+                text = voice_prompt(path, msg.voice.duration, msg.voice.mime_type)
+            except Exception as exc:
+                logger.error("Failed to download voice file: %s", exc)
+                await self._tg.send_message(chat_id, "⚠️ No pude descargar la nota de voz.")
+                return
+
+        if not text.strip():
+            return
+
+        # ── Goosed health check ─────────────────────────────────────────
+        if not await self._goosed.is_alive():
+            await self._tg.send_message(
+                chat_id,
+                "⚠️ <b>goosed no está disponible.</b> Verificá que el servicio esté corriendo.",
+            )
+            return
+
+        # ── Typing indicator ────────────────────────────────────────────
+        await self._tg.send_chat_action(chat_id, "typing")
+        await self._tg.set_reaction(chat_id, msg.message_id, "⚡")
+
+        # ── Reset cancel token ──────────────────────────────────────────
+        cancel_event = asyncio.Event()
+        self._cancels[chat_id] = cancel_event
+        self._busy[chat_id] = True
+
+        try:
+            await self._reply(chat_id, msg.message_id, text, cancel_event)
+        finally:
+            self._busy[chat_id] = False
+            # Clear reaction on original message
+            await self._tg.set_reaction(chat_id, msg.message_id, "")
+
+    async def _reply(
+        self,
+        chat_id: int,
+        user_msg_id: int,
+        text: str,
+        cancel_event: asyncio.Event,
+    ) -> None:
+        session_id = self._session_id(chat_id)
+
+        # Accumulators for the current bubble
+        thinking_acc = ""
+        body_acc = ""
+
+        # The "work bubble" message id (created when first content arrives)
+        bubble_msg_id: int | None = None
+        bubble: StreamingBubble | None = None
+
+        # Tool tracking: tool_name → message_id of the tool status card
+        active_tools: dict[str, tuple[str, str, int]] = {}  # tool_name → (tool_name, args, msg_id)
+
+        async def _edit_bubble(body: str, thinking: str, sealed: bool) -> None:
+            if bubble_msg_id is None:
+                return
+            html = format_with_thinking(thinking, body, sealed)
+            if not html.strip():
+                return
+            await self._tg.edit_message(chat_id, bubble_msg_id, html)
+
+        try:
+            async for event in self._goosed.reply_stream(session_id, text):
+                if cancel_event.is_set():
+                    break
+
+                if event.event_type == EventType.ERROR:
+                    if bubble:
+                        await bubble.seal()
+                        bubble = None
+                    await self._tg.send_message(
+                        chat_id, f"⚠️ Error: <code>{event.error}</code>"
+                    )
+                    return
+
+                if event.event_type == EventType.FINISH:
+                    break
+
+                if event.event_type != EventType.MESSAGE:
+                    continue
+
+                # Process content items
+                for item in event.contents:
+                    if item.content_type == "thinking":
+                        thinking_acc += item.thinking
+                        if bubble_msg_id is None:
+                            # Open the live bubble
+                            html = format_with_thinking(thinking_acc, "", False)
+                            bubble_msg_id = await self._tg.send_message(chat_id, html)
+                            bubble = StreamingBubble(
+                                tick=self._cfg.pacer_tick,
+                                edit_fn=_edit_bubble,
+                            )
+                            bubble.start()
+                        else:
+                            if bubble:
+                                bubble.update(thinking=thinking_acc, body=body_acc)
+
+                    elif item.content_type == "text":
+                        body_acc += item.text
+                        if bubble_msg_id is None:
+                            # No thinking block yet — open bubble with body only
+                            html = markdown_to_telegram_html(body_acc)
+                            bubble_msg_id = await self._tg.send_message(chat_id, html)
+                            bubble = StreamingBubble(
+                                tick=self._cfg.pacer_tick,
+                                edit_fn=_edit_bubble,
+                            )
+                            bubble.start()
+                        else:
+                            if bubble:
+                                bubble.update(thinking=thinking_acc, body=body_acc)
+
+                    elif item.content_type == "tool_request":
+                        # Seal current bubble before showing tool status
+                        if bubble:
+                            await bubble.seal()
+                            bubble = None
+
+                        html = format_tool_status(item.tool_name, item.args_preview, False, None, "")
+                        tool_msg_id = await self._tg.send_message(chat_id, html)
+                        if tool_msg_id is not None:
+                            active_tools[item.tool_name] = (item.tool_name, item.args_preview, tool_msg_id)
+
+                        # Reset bubble for next content
+                        thinking_acc = ""
+                        body_acc = ""
+                        bubble_msg_id = None
+
+                    elif item.content_type == "tool_response":
+                        # Update the matching tool status card
+                        tool_entry = active_tools.pop(item.tool_name, None)
+                        if tool_entry:
+                            tool_name, args_preview, tmsg_id = tool_entry
+                            html = format_tool_status(
+                                tool_name, args_preview, True, item.success, item.result_preview
+                            )
+                            await self._tg.edit_message(chat_id, tmsg_id, html)
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            logger.exception("Error during reply stream: %s", exc)
+            if bubble:
+                await bubble.seal()
+                bubble = None
+            await self._tg.send_message(chat_id, f"⚠️ Error inesperado: <code>{exc}</code>")
+            return
+
+        # Seal the bubble (final edit with sealed=True)
+        if bubble:
+            await bubble.seal()
+        elif body_acc and bubble_msg_id is None:
+            # No bubble was created (shouldn't happen, but belt-and-suspenders)
+            await self._tg.send_message(chat_id, markdown_to_telegram_html(body_acc))
+
+    async def run_once(self, offset: int | None) -> int | None:
+        """Poll once. Returns the new offset."""
+        updates = await self._tg.get_updates(offset)
+        for update in updates:
+            offset = update.update_id + 1
+            if update.message:
+                asyncio.create_task(self._handle(update.message))
+        return offset
+
+    async def run(self) -> None:
+        """Main loop: poll forever."""
+        logger.info("lina-gateway starting (goosed=%s)", self._cfg.goosed_url)
+        offset: int | None = None
+        retry_delay = 1.0
+        while True:
+            try:
+                offset = await self.run_once(offset)
+                retry_delay = 1.0
+            except Exception as exc:
+                logger.error("Poll error (retry in %.0fs): %s", retry_delay, exc)
+                await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 60.0)
+
+
+async def run() -> None:
+    cfg = Config()
+    bot = Bot(cfg)
+    await bot.run()

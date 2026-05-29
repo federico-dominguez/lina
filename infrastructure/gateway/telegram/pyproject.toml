@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lina-gateway"
+version = "0.1.0"
+description = "LINA Telegram gateway — standalone Python service that bridges Telegram and goosed"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx[http2]>=0.27",
+    "anyio>=4.4",
+    "markdown-it-py>=3.0",
+]
+
+[project.scripts]
+lina-gateway = "lina_gateway.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lina_gateway"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "pytest-httpx>=0.30",
+    "ruff>=0.4",
+    "coverage>=7",
+]

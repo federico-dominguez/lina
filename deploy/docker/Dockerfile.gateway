@@ -1,0 +1,28 @@
+# LINA — Telegram gateway
+# Minimal Python image; installs lina-gateway from infrastructure/gateway/telegram/
+FROM python:3.12-slim
+
+# Prevent .pyc files in read-only FS
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Install uv for fast dependency resolution
+RUN pip install --no-cache-dir uv==0.4.*
+
+# Copy only the package source first (layer-cache friendly)
+COPY infrastructure/gateway/telegram/pyproject.toml .
+COPY infrastructure/gateway/telegram/src ./src
+
+# Install production dependencies into a venv
+RUN uv venv /app/.venv && \
+    uv pip install --no-cache --python /app/.venv/bin/python .
+
+ENV PATH="/app/.venv/bin:${PATH}"
+
+# Non-root user
+RUN useradd --no-create-home --uid 1000 gateway
+USER gateway
+
+CMD ["python", "-m", "lina_gateway"]
