@@ -35,7 +35,9 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         curl \
  && rm -rf /var/lib/apt/lists/* \
- && useradd --uid 1001 --create-home --shell /bin/false mcp
+ && useradd --uid 1001 --create-home --shell /bin/false mcp \
+ && mkdir -p /run/secrets/lina \
+ && chown mcp:mcp /run/secrets/lina
 
 WORKDIR /app
 

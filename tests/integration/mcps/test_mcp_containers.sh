@@ -19,6 +19,9 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 COMPOSE_FILE="$REPO_ROOT/deploy/docker/docker-compose.yml"
+# Project name dedicado para no interferir con el stack normal ni entre runs
+COMPOSE_PROJECT="lina-smoke-test"
+COMPOSE=(docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT")
 
 # Puerto → nombre del servicio
 declare -A MCP_PORTS=(
@@ -37,9 +40,16 @@ log()  { echo "[test_mcp_containers] $*" >&2; }
 pass() { echo "  ✓ $*"; }
 fail() { echo "  ✗ $*"; FAILED=1; }
 
+# ─── Cleanup al salir (éxito o fallo) ────────────────────────────────────────
+_cleanup() {
+  log "Limpiando contenedores del proyecto $COMPOSE_PROJECT..."
+  "${COMPOSE[@]}" down --remove-orphans --volumes 2>/dev/null || true
+}
+trap _cleanup EXIT
+
 # ─── Levantar contenedores MCP ───────────────────────────────────────────────
 log "Levantando contenedores MCP (docker compose up -d)..."
-docker compose -f "$COMPOSE_FILE" up -d \
+"${COMPOSE[@]}" up -d \
   lina-mcp-secrets lina-mcp-fs-safe lina-mcp-shell-policy \
   lina-mcp-systemd-user lina-mcp-moodle lina-mcp-db
 
@@ -99,6 +109,6 @@ if [[ "$FAILED" -eq 0 ]]; then
   exit 0
 else
   log "Uno o más contenedores fallaron. Ver salida arriba."
-  docker compose -f "$COMPOSE_FILE" ps
+  "${COMPOSE[@]}" ps
   exit 1
 fi

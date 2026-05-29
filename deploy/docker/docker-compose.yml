@@ -107,6 +107,8 @@ services:
         MCP_CMD: lina-fs-safe
     image: lina-mcp-fs-safe:latest
     restart: unless-stopped
+    # Corre con el mismo UID del host para poder leer/escribir $HOME (0700).
+    user: "${UID:-1000}"
     environment:
       MCP_TRANSPORT: sse
       MCP_PORT: "8000"
@@ -212,5 +214,6 @@ volumes:
 networks:
   default:
   lina-moodle-net:
-    # Red dedicada para el MCP de Moodle — limita acceso a *.utec.edu.uy.
-    # En producción configurar firewall/egress rules adicionales.
+    # Red dedicada para el MCP de Moodle — aisla el servicio del resto del
+    # stack. NOTA: esto no restringe egress por dominio; para limitar tráfico
+    # a *.utec.edu.uy se requieren reglas de firewall/iptables adicionales.

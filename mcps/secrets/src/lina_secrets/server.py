@@ -24,6 +24,7 @@ import logging
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 import keyring
@@ -48,6 +49,11 @@ _MCP_HTTP_PORT = int(os.environ.get("MCP_PORT", "8000"))
 # keyring = system-keyring (default, host mode)
 # file    = archivos en LINA_SECRETS_FILE_DIR (container mode / Docker secrets)
 BACKEND = os.environ.get("LINA_SECRETS_BACKEND", "keyring")
+_VALID_BACKENDS = {"keyring", "file"}
+if BACKEND not in _VALID_BACKENDS:
+    raise ValueError(
+        f"LINA_SECRETS_BACKEND inválido: {BACKEND!r} — valores soportados: {_VALID_BACKENDS}"
+    )
 FILE_DIR = Path(os.environ.get("LINA_SECRETS_FILE_DIR", "/run/secrets/lina"))
 
 mcp = FastMCP("lina-secrets", host="0.0.0.0", port=_MCP_HTTP_PORT)
@@ -122,9 +128,20 @@ def _file_get(service: str, key: str) -> str | None:
 def _file_set(service: str, key: str, value: str) -> None:
     FILE_DIR.mkdir(parents=True, mode=0o700, exist_ok=True)
     p = _file_path(service, key)
-    # Escribir con permisos 0600 — secretos no deben ser legibles por otros.
-    p.write_text(value, encoding="utf-8")
-    p.chmod(0o600)
+    # Escritura atómica: crear tmp con permisos 0600 desde el inicio, luego
+    # os.replace() (atómico en POSIX). Evita la ventana race entre write y chmod.
+    fd, tmp_path = tempfile.mkstemp(dir=FILE_DIR)
+    try:
+        os.chmod(tmp_path, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(value)
+        os.replace(tmp_path, p)
+    except:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def _file_delete(service: str, key: str) -> None:
