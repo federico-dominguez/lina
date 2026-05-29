@@ -9,6 +9,7 @@ Herramientas expuestas:
     store_preference  — guarda/actualiza una preferencia
     get_preferences   — lista preferencias (todas o filtradas por clave)
     get_audit_logs    — recupera los últimos N registros de auditoría
+    get_daily_summary — resumen diario de uso por MCP/tool (audit.daily_summary)
 
 Variables de entorno:
     LINA_DB_URL   URL de conexión (default: postgresql://lina:lina_dev@localhost:5432/lina)
@@ -84,10 +85,10 @@ def _execute(sql: str, params: tuple = (), *, fetch: str = "none") -> Any:
 
 
 def _audit(tool: str, args: dict, result_summary: str) -> None:
-    """Registra una llamada en la tabla audit_logs (best-effort)."""
+    """Registra una llamada en audit.tool_calls (best-effort)."""
     try:
         _execute(
-            "INSERT INTO audit_logs (tool, args_json, result_summary) VALUES (%s, %s, %s)",
+            "INSERT INTO audit.tool_calls (tool, args_json, result_summary) VALUES (%s, %s, %s)",
             (tool, json.dumps(args, default=str), result_summary),
         )
     except Exception as exc:  # noqa: BLE001
@@ -308,19 +309,42 @@ def get_preferences(key: str | None = None) -> list[dict]:
 
 @mcp.tool()
 def get_audit_logs(limit: int = 50) -> list[dict]:
-    """Recupera los N registros de auditoría más recientes.
+    """Recupera los N registros de auditoría más recientes de audit.tool_calls.
 
     Args:
         limit: cantidad de registros (default 50, max 500)
 
     Returns:
-        Lista de dicts con tool, args_json, result_summary, created_at.
+        Lista de dicts con mcp, tool, args_json, result_summary, created_at.
     """
     n = max(1, min(int(limit), 500))
     return (
         _execute(
-            "SELECT tool, args_json, result_summary, created_at"
-            " FROM audit_logs ORDER BY created_at DESC LIMIT %s",
+            "SELECT mcp, tool, args_json, result_summary, created_at"
+            " FROM audit.tool_calls ORDER BY created_at DESC LIMIT %s",
+            (n,),
+            fetch="all",
+        )
+        or []
+    )
+
+
+@mcp.tool()
+def get_daily_summary(days: int = 7) -> list[dict]:
+    """Resumen diario de uso por MCP y tool (vista audit.daily_summary).
+
+    Args:
+        days: cantidad de días hacia atrás a incluir (default 7, max 90)
+
+    Returns:
+        Lista de dicts con day, mcp, tool, calls, avg_ms, max_ms.
+    """
+    n = max(1, min(int(days), 90))
+    return (
+        _execute(
+            "SELECT day, mcp, tool, calls, avg_ms, max_ms"
+            " FROM audit.daily_summary"
+            " WHERE day >= NOW() - (%s * INTERVAL '1 day')",
             (n,),
             fetch="all",
         )

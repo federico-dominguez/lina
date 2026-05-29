@@ -45,7 +45,8 @@ COPY --from=builder /app/mcp /app/mcp
 
 ENV MCP_TRANSPORT=sse \
     MCP_PORT=8000 \
-    PATH="/app/mcp/.venv/bin:${PATH}"
+    PATH="/app/mcp/.venv/bin:${PATH}" \
+    PYTHONDONTWRITEBYTECODE=1
 
 # Persistir el nombre del entrypoint como variable de entorno para CMD
 ENV MCP_CMD=${MCP_CMD}

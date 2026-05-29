@@ -47,11 +47,12 @@ _cleanup() {
 }
 trap _cleanup EXIT
 
-# ─── Levantar contenedores MCP ───────────────────────────────────────────────
-log "Levantando contenedores MCP (docker compose up -d)..."
+# ─── Levantar contenedores MCP + gateway ─────────────────────────────────────
+log "Levantando contenedores MCP + gateway (docker compose up -d)..."
 "${COMPOSE[@]}" up -d \
   lina-mcp-secrets lina-mcp-fs-safe lina-mcp-shell-policy \
-  lina-mcp-systemd-user lina-mcp-moodle lina-mcp-db
+  lina-mcp-systemd-user lina-mcp-moodle lina-mcp-db \
+  lina-mcp-gateway
 
 # ─── Esperar healthchecks ─────────────────────────────────────────────────────
 log "Esperando ${WAIT_SECS}s para que los contenedores lleguen a 'healthy'..."

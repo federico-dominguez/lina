@@ -10,6 +10,24 @@
 #   POSTGRES_PASSWORD   (default: lina_dev  — cambiar en producción)
 #   LINA_DB_URL         (default: postgresql://lina:<POSTGRES_PASSWORD>@lina-db:5432/lina)
 
+# ─── Defaults compartidos para todos los MCPs (Fase 3 hardening) ────────────
+# Aplicar con <<: *mcp-defaults en cada servicio MCP.
+# Servicios pueden sobrescribir claves individuales después del merge.
+x-mcp-defaults: &mcp-defaults
+  restart: unless-stopped
+  read_only: true               # FS del contenedor inmutable; volúmenes siguen rw
+  security_opt:
+    - no-new-privileges:true   # impide sudo/setuid post-exec
+  cap_drop:
+    - ALL                       # sin capabilities; añadir cap_add sólo si se justifica
+  tmpfs:
+    - /tmp:size=64m             # /tmp writable (Python, FastMCP temporales)
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
 services:
 
   # ─── PostgreSQL ─────────────────────────────────────────────────────────────
@@ -31,6 +49,11 @@ services:
       timeout: 3s
       retries: 10
       start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ─── goosed runtime ─────────────────────────────────────────────────────────
   # Requiere imagen precompilada. Construir primero con:
@@ -56,6 +79,11 @@ services:
       - lina-logs:/app/logs
     ports:
       - "127.0.0.1:3000:3000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
 
   # ─── goosed (modo dev, binario montado desde host) ──────────────────────────
   goosed-dev:
@@ -77,8 +105,8 @@ services:
 
   # ─── MCP: lina-secrets ──────────────────────────────────────────────────────
   # Backend: archivo en volumen (libsecret no funciona en containers).
-  # Los secretos se montan como Docker Secrets o se pasan como envvars.
   lina-mcp-secrets:
+    <<: *mcp-defaults
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.mcp
@@ -86,7 +114,6 @@ services:
         MCP_DIR: mcps/secrets
         MCP_CMD: lina-secrets
     image: lina-mcp-secrets:latest
-    restart: unless-stopped
     environment:
       MCP_TRANSPORT: sse
       MCP_PORT: "8000"
@@ -94,11 +121,11 @@ services:
       LINA_SECRETS_FILE_DIR: /run/secrets/lina
     volumes:
       - lina-secrets-data:/run/secrets/lina
-    ports:
-      - "127.0.0.1:8101:8000"
+    # Sin ports: — acceso exclusivo via lina-mcp-gateway (3.3)
 
   # ─── MCP: lina-fs-safe ──────────────────────────────────────────────────────
   lina-mcp-fs-safe:
+    <<: *mcp-defaults
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.mcp
@@ -106,7 +133,6 @@ services:
         MCP_DIR: mcps/fs-safe
         MCP_CMD: lina-fs-safe
     image: lina-mcp-fs-safe:latest
-    restart: unless-stopped
     # Corre con el mismo UID del host para poder leer/escribir $HOME (0700).
     user: "${UID:-1000}"
     environment:
@@ -116,12 +142,10 @@ services:
       LINA_FS_AUDIT_DIR: /home/user/lina/logs
     volumes:
       - ${HOME}:/home/user:rw
-    ports:
-      - "127.0.0.1:8102:8000"
 
   # ─── MCP: lina-shell-policy ─────────────────────────────────────────────────
-  # Hardened: read-only filesystem + tmpfs /tmp + cap_drop ALL.
   lina-mcp-shell-policy:
+    <<: *mcp-defaults
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.mcp
@@ -129,23 +153,15 @@ services:
         MCP_DIR: mcps/shell-policy
         MCP_CMD: lina-shell-policy
     image: lina-mcp-shell-policy:latest
-    restart: unless-stopped
-    read_only: true
-    tmpfs:
-      - /tmp:size=64m
-    cap_drop:
-      - ALL
     environment:
       MCP_TRANSPORT: sse
       MCP_PORT: "8000"
       LINA_SHELL_AUDIT_DIR: /tmp/lina-audit
-    ports:
-      - "127.0.0.1:8103:8000"
 
   # ─── MCP: lina-systemd-user ─────────────────────────────────────────────────
   # Requiere D-Bus socket del usuario host.
-  # Corre con user: "1000" para tener acceso directo al socket (uid 1000 dueño).
   lina-mcp-systemd-user:
+    <<: *mcp-defaults
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.mcp
@@ -153,7 +169,6 @@ services:
         MCP_DIR: mcps/systemd-user
         MCP_CMD: lina-systemd-user
     image: lina-mcp-systemd-user:latest
-    restart: unless-stopped
     environment:
       MCP_TRANSPORT: sse
       MCP_PORT: "8000"
@@ -161,12 +176,10 @@ services:
     user: "1000"
     volumes:
       - /run/user/1000/bus:/run/user/1000/bus:rw
-    ports:
-      - "127.0.0.1:8104:8000"
 
   # ─── MCP: lina-moodle ───────────────────────────────────────────────────────
-  # Red aislada lina-moodle-net para limitar acceso de red a *.utec.edu.uy.
   lina-mcp-moodle:
+    <<: *mcp-defaults
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.mcp
@@ -174,20 +187,19 @@ services:
         MCP_DIR: mcps/moodle
         MCP_CMD: lina-moodle
     image: lina-mcp-moodle:latest
-    restart: unless-stopped
     environment:
       MCP_TRANSPORT: sse
       MCP_PORT: "8000"
       MOODLE_URL: ${MOODLE_URL:-https://ev1.utec.edu.uy/moodle}
       MOODLE_USERNAME: ${MOODLE_USERNAME:-}
       MOODLE_PASSWORD: ${MOODLE_PASSWORD:-}
-    ports:
-      - "127.0.0.1:8105:8000"
     networks:
+      - default
       - lina-moodle-net
 
   # ─── MCP: lina-db ───────────────────────────────────────────────────────────
   lina-mcp-db:
+    <<: *mcp-defaults
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.mcp
@@ -195,7 +207,6 @@ services:
         MCP_DIR: mcps/lina-db
         MCP_CMD: lina-db
     image: lina-mcp-db:latest
-    restart: unless-stopped
     depends_on:
       lina-db:
         condition: service_healthy
@@ -203,13 +214,66 @@ services:
       MCP_TRANSPORT: sse
       MCP_PORT: "8000"
       LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
+
+  # ─── MCP Gateway — nginx rate limiting (3.3) ────────────────────────────────
+  # Proxy reverso para todos los MCPs. Expone 8101-8106 en localhost.
+  # Los MCPs no tienen port mappings propios; sólo son accesibles via este gateway.
+  # Límites: shell-policy 30 req/min, moodle 20 req/min, resto 120 req/min.
+  lina-mcp-gateway:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - lina-mcp-secrets
+      - lina-mcp-fs-safe
+      - lina-mcp-shell-policy
+      - lina-mcp-systemd-user
+      - lina-mcp-moodle
+      - lina-mcp-db
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
-      - "127.0.0.1:8106:8000"
+      - "127.0.0.1:8101:8101"
+      - "127.0.0.1:8102:8102"
+      - "127.0.0.1:8103:8103"
+      - "127.0.0.1:8104:8104"
+      - "127.0.0.1:8105:8105"
+      - "127.0.0.1:8106:8106"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ─── Backup automático (3.6) ─────────────────────────────────────────────────
+  # Ejecuta pg_dump horario. Retiene las últimas 24 copias (= 1 día).
+  # Los backups se almacenan comprimidos en el volumen lina-backup-data.
+  lina-backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      lina-db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-lina_dev}
+      PGHOST: lina-db
+      PGUSER: lina
+      PGDATABASE: lina
+    volumes:
+      - lina-backup-data:/backups
+      - ./backup/backup.sh:/usr/local/bin/lina-backup:ro
+    command: >
+      sh -c "while true; do sh /usr/local/bin/lina-backup; sleep 3600; done"
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
 
 volumes:
   lina-db-data:
   lina-logs:
   lina-secrets-data:
+  lina-backup-data:
 
 networks:
   default:
@@ -217,3 +281,4 @@ networks:
     # Red dedicada para el MCP de Moodle — aisla el servicio del resto del
     # stack. NOTA: esto no restringe egress por dominio; para limitar tráfico
     # a *.utec.edu.uy se requieren reglas de firewall/iptables adicionales.
+
