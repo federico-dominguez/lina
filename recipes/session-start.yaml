@@ -6,7 +6,7 @@ description: |
   larga o cuando Federico retome trabajo interrumpido.
 
 instructions: |
-  Invocá la herramienta `get_last_sessions` del MCP lina-db con n=5.
+  Invocá la herramienta `get_last_sessions` del MCP lina-db con n=3.
 
   Con los resultados, construí un bloque de contexto estructurado así:
 
