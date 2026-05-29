@@ -28,7 +28,10 @@ log = logging.getLogger("lina-systemd-user")
 WRITABLE_REGEX = re.compile(os.environ.get("LINA_SYSTEMD_UNIT_REGEX", r"^lina-"))
 UNIT_NAME_RE = re.compile(r"^[A-Za-z0-9@_.\-]+(\.(service|socket|timer|path|target))?$")
 
-mcp = FastMCP("lina-systemd-user")
+_MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
+_MCP_HTTP_PORT = int(os.environ.get("MCP_PORT", "8000"))
+
+mcp = FastMCP("lina-systemd-user", host="0.0.0.0", port=_MCP_HTTP_PORT)
 
 
 def _validate_unit(unit: str) -> str:
@@ -162,8 +165,8 @@ def svc_daemon_reload() -> dict:
 
 
 def main() -> None:
-    log.info("starting (writable_regex=%s)", WRITABLE_REGEX.pattern)
-    mcp.run()
+    log.info("starting (writable_regex=%s, transport=%s)", WRITABLE_REGEX.pattern, _MCP_TRANSPORT)
+    mcp.run(transport=_MCP_TRANSPORT)
 
 
 if __name__ == "__main__":

@@ -41,11 +41,16 @@ ALLOW_SUDO_ENV = os.environ.get("LINA_SHELL_ALLOW_SUDO", "0") == "1"
 DEFAULT_TIMEOUT = int(os.environ.get("LINA_SHELL_TIMEOUT_SEC", "60"))
 MAX_TIMEOUT = 600
 
-_AUDIT_DIR = Path.home() / "lina" / "logs"
+_AUDIT_DIR = Path(
+    os.environ.get("LINA_SHELL_AUDIT_DIR", str(Path.home() / "lina" / "logs"))
+).expanduser()
 _AUDIT_DIR.mkdir(parents=True, exist_ok=True)
 _AUDIT_LOG = _AUDIT_DIR / "shell-policy.audit.log"
 
-mcp = FastMCP("lina-shell-policy")
+_MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
+_MCP_HTTP_PORT = int(os.environ.get("MCP_PORT", "8000"))
+
+mcp = FastMCP("lina-shell-policy", host="0.0.0.0", port=_MCP_HTTP_PORT)
 
 
 # ─── policy ───────────────────────────────────────────────────────────────────
@@ -218,8 +223,13 @@ def sh_quote(args: list[str]) -> str:
 
 
 def main() -> None:
-    log.info("starting (allow_sudo_env=%s, default_timeout=%ds)", ALLOW_SUDO_ENV, DEFAULT_TIMEOUT)
-    mcp.run()
+    log.info(
+        "starting (allow_sudo_env=%s, default_timeout=%ds, transport=%s)",
+        ALLOW_SUDO_ENV,
+        DEFAULT_TIMEOUT,
+        _MCP_TRANSPORT,
+    )
+    mcp.run(transport=_MCP_TRANSPORT)
 
 
 if __name__ == "__main__":

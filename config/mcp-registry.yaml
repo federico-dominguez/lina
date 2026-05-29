@@ -1,25 +1,39 @@
 # Fuente de verdad de los MCPs de LINA. `just apply-config` (futuro) consumirá
 # este registro para regenerar la sección `extensions:` del config.yaml de Goose.
 # Por ahora es informativo — el template renderiza extensions inline.
+#
+# Campos por MCP:
+#   container_url:  URL SSE cuando el MCP corre en container (Fase 2)
+#   container_port: puerto en localhost mapeado por docker-compose
 
 waves:
   ola_1_soberania:
     - name: lina-secrets
       path: mcps/secrets
       status: implemented
+      container_url: http://localhost:8101/sse
+      container_port: 8101
     - name: lina-fs-safe
       path: mcps/fs-safe
       status: implemented
+      container_url: http://localhost:8102/sse
+      container_port: 8102
     - name: lina-shell-policy
       path: mcps/shell-policy
       status: implemented
+      container_url: http://localhost:8103/sse
+      container_port: 8103
     - name: lina-systemd-user
       path: mcps/systemd-user
       status: implemented
+      container_url: http://localhost:8104/sse
+      container_port: 8104
     - name: lina-db
       path: mcps/lina-db
       status: implemented
       requires: postgresql
+      container_url: http://localhost:8106/sse
+      container_port: 8106
 
   ola_2_autoextension:
     - {name: lina-git-ops,     path: mcps/git-ops,     status: planned}
@@ -31,6 +45,8 @@ waves:
     - name: lina-moodle
       path: mcps/moodle
       status: implemented
+      container_url: http://localhost:8105/sse
+      container_port: 8105
     - name: lina-gitlab
       path: mcps/gitlab
       status: implemented

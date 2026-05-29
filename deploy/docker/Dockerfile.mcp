@@ -1,0 +1,63 @@
+# LINA — MCP container (shared multi-stage base)
+#
+# Build args:
+#   MCP_DIR  path relativo al repo root con el pyproject.toml del MCP
+#            ej: mcps/fs-safe
+#   MCP_CMD  nombre del entrypoint (definido en pyproject.toml [project.scripts])
+#            ej: lina-fs-safe
+#
+# Uso:
+#   docker build --build-arg MCP_DIR=mcps/fs-safe --build-arg MCP_CMD=lina-fs-safe \
+#                -t lina-mcp-fs-safe -f deploy/docker/Dockerfile.mcp .
+
+# ─── Stage 1: builder ────────────────────────────────────────────────────────
+FROM python:3.13-slim-bookworm AS builder
+
+ARG MCP_DIR
+ARG MCP_CMD
+
+WORKDIR /app
+
+# uv para instalar dependencias del MCP
+RUN pip install --no-cache-dir "uv>=0.5"
+
+COPY ${MCP_DIR}/ mcp/
+
+RUN cd mcp && uv sync --no-dev --frozen --quiet
+
+# ─── Stage 2: runtime ────────────────────────────────────────────────────────
+FROM python:3.13-slim-bookworm
+
+ARG MCP_CMD
+
+# Dependencias mínimas de sistema
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        curl \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --uid 1001 --create-home --shell /bin/false mcp \
+ && mkdir -p /run/secrets/lina \
+ && chown mcp:mcp /run/secrets/lina
+
+WORKDIR /app
+
+COPY --from=builder /app/mcp /app/mcp
+
+ENV MCP_TRANSPORT=sse \
+    MCP_PORT=8000 \
+    PATH="/app/mcp/.venv/bin:${PATH}"
+
+# Persistir el nombre del entrypoint como variable de entorno para CMD
+ENV MCP_CMD=${MCP_CMD}
+
+USER mcp
+
+EXPOSE 8000
+
+# Healthcheck via TCP connect (FastMCP no expone /health endpoint)
+# MCP_PORT puede ser sobreescrito en runtime; el healthcheck lo lee desde el entorno.
+HEALTHCHECK --interval=15s --timeout=5s --retries=5 --start-period=15s \
+    CMD python3 -c \
+        "import socket,os; p=int(os.environ.get('MCP_PORT','8000')); s=socket.socket(); r=s.connect_ex(('127.0.0.1',p)); s.close(); exit(r)"
+
+CMD ["sh", "-c", "$MCP_CMD"]
