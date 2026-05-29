@@ -42,7 +42,19 @@ _AUDIT_DIR = Path.home() / "lina" / "logs"
 _AUDIT_DIR.mkdir(parents=True, exist_ok=True)
 _AUDIT_LOG = _AUDIT_DIR / "fs-safe.audit.log"
 
-mcp = FastMCP("lina-fs-safe")
+# Transport config — read early because FastMCP bakes host/port at construction.
+# MCP_TRANSPORT=streamable-http  enables HTTP mode (for containerised Fase 2+).
+# MCP_PORT overrides the listening port in HTTP mode (default 8000).
+# Without MCP_TRANSPORT the server starts in stdio mode (current / Fase 0-1).
+_MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
+_MCP_HTTP_PORT = int(os.environ.get("MCP_PORT", "8000"))
+
+mcp = FastMCP(
+    "lina-fs-safe",
+    # host/port are only used when transport="streamable-http".
+    host="0.0.0.0",
+    port=_MCP_HTTP_PORT,
+)
 
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
@@ -211,7 +223,8 @@ def fs_move(src: str, dst: str, overwrite: bool = False) -> str:
 
 def main() -> None:
     log.info("starting allowlist=%s", [str(p) for p in ALLOWLIST])
-    mcp.run()
+    log.info("transport=%s port=%d", _MCP_TRANSPORT, _MCP_HTTP_PORT)
+    mcp.run(transport=_MCP_TRANSPORT)
 
 
 if __name__ == "__main__":
