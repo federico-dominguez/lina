@@ -20,6 +20,7 @@ MCP_PARAMS = [
     ("mcps/fs-safe", "lina-fs-safe", "lina-fs-safe"),
     ("mcps/shell-policy", "lina-shell-policy", "lina-shell-policy"),
     ("mcps/systemd-user", "lina-systemd-user", "lina-systemd-user"),
+    ("mcps/moodle", "lina-moodle", "lina-moodle"),
 ]
 
 pytestmark = pytest.mark.integration

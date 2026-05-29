@@ -6,12 +6,10 @@ a la API real de Moodle.
 
 from __future__ import annotations
 
-import pytest
-
-from lina_moodle.server import _decode_html, _clean_html, _extract_question_text
-
+from lina_moodle.server import _clean_html, _decode_html, _extract_question_text
 
 # ─── tests de _decode_html ────────────────────────────────────────────────────
+
 
 class TestDecodeHtml:
     def test_decodes_common_entities(self):
@@ -38,6 +36,7 @@ class TestDecodeHtml:
 
 # ─── tests de _clean_html ─────────────────────────────────────────────────────
 
+
 class TestCleanHtml:
     def test_strips_html_tags(self):
         result = _clean_html("<p>Hello <b>world</b></p>")
@@ -61,6 +60,7 @@ class TestCleanHtml:
 
 # ─── tests de _extract_question_text ─────────────────────────────────────────
 
+
 class TestExtractQuestionText:
     def test_extracts_qtext_div(self):
         html = """
@@ -80,21 +80,28 @@ class TestExtractQuestionText:
     def test_decodes_entities_in_question(self):
         html = '<div class="qtext">&iquest;Cu&aacute;l es la respuesta?</div>'
         result = _extract_question_text(html)
-        # ¿ (iquest) no está en nuestra tabla — el resto debe decodificarse
-        assert "á" in result or "á" in result
+        # &aacute; debe decodificarse; ¿ (iquest) puede no estar en la tabla
+        assert "Cu\u00e1l" in result  # "Cuál" decodificado correctamente
 
 
 # ─── tests de configuración de entorno ───────────────────────────────────────
 
+
 class TestEnvConfig:
     def test_moodle_url_defaults(self, monkeypatch):
         monkeypatch.delenv("MOODLE_URL", raising=False)
-        import importlib, lina_moodle.server as m
+        import importlib
+
+        import lina_moodle.server as m
+
         importlib.reload(m)
         assert "utec.edu.uy" in m.MOODLE_URL
 
     def test_moodle_url_override(self, monkeypatch):
         monkeypatch.setenv("MOODLE_URL", "https://moodle.example.com")
-        import importlib, lina_moodle.server as m
+        import importlib
+
+        import lina_moodle.server as m
+
         importlib.reload(m)
         assert m.MOODLE_URL == "https://moodle.example.com"

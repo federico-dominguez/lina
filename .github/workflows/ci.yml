@@ -14,7 +14,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mcp: [secrets, fs-safe, shell-policy, systemd-user, moodle]
+        include:
+          - mcp: secrets
+            cov_threshold: 65
+          - mcp: fs-safe
+            cov_threshold: 70
+          - mcp: shell-policy
+            cov_threshold: 65
+          - mcp: systemd-user
+            cov_threshold: 60
+          - mcp: moodle
+            cov_threshold: 18  # HTTP layer no es unit-testable sin mocks; excepción documentada en ADR-0007
 
     steps:
       - name: Checkout
@@ -49,7 +59,8 @@ jobs:
         run: |
           cd mcps/${{ matrix.mcp }}
           uv run pytest tests/ -v --tb=short \
-            --cov=src --cov-report=xml --cov-report=term-missing
+            --cov=src --cov-report=xml --cov-report=term-missing \
+            --cov-fail-under=${{ matrix.cov_threshold }}
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
@@ -102,13 +113,11 @@ jobs:
 
       - name: Sync all MCPs (needed for E2E subprocess invocation)
         run: |
-          for mcp in fs-safe secrets shell-policy systemd-user; do
+          for mcp in fs-safe secrets shell-policy systemd-user moodle; do
             uv sync --dev --project mcps/$mcp
           done
 
       - name: E2E integration tests
         run: |
-          # Run E2E tests from repo root using pytest with the integration path
           uv run --project mcps/fs-safe \
-            pytest tests/integration/mcps/ -v --tb=short -m integration || true
-          echo "✓ E2E tests completed (failures are non-blocking in Fase 0)"
+            pytest tests/integration/mcps/ -v --tb=short -m integration
