@@ -56,29 +56,45 @@ services:
         max-file: "3"
 
   # ─── goosed runtime ─────────────────────────────────────────────────────────
-  # Requiere imagen precompilada. Construir primero con:
-  #   docker build -f deploy/docker/Dockerfile.goosed -t lina-goosed:latest .
-  #
-  # O montar el binario directamente (modo desarrollo):
-  #   GOOSED_BIN=/home/fede/goosed_patched docker compose --profile dev up
+  # Imagen buildeada desde el binario patched + MCPs Python.
+  # Para rebuild: cp ~/goosed_patched bin/goosed-linux-amd64 && docker compose build goosed
   goosed:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.goosed
     image: lina-goosed:latest
     restart: unless-stopped
     depends_on:
       lina-db:
         condition: service_healthy
+      lina-mcp-gateway:
+        condition: service_started
     environment:
       LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
-    env_file:
-      - path: ../../.env.example
-        required: false
-      - path: ../../.env
-        required: false
+      GOOSE_SERVER__SECRET_KEY: ${GOOSE_SERVER__SECRET_KEY}
+      GOOSE_MAX_TURNS: ${GOOSE_MAX_TURNS:-1000}
+      GOOSE_GATEWAY_MAX_TURNS: ${GOOSE_GATEWAY_MAX_TURNS:-50}
+      GOOSE_SUBAGENT_MAX_TURNS: ${GOOSE_SUBAGENT_MAX_TURNS:-200}
+      GOOSE_CONTEXT_STRATEGY: ${GOOSE_CONTEXT_STRATEGY:-summarize}
+      GOOSE_TELEMETRY_ENABLED: "false"
+      GOOSE_DISABLE_AUTO_SESSION_TITLES: "true"
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      LINA_ENV: docker
     volumes:
-      - ${HOME}/.config/goose:/root/.config/goose:ro
+      # Config específica para Docker (MCPs via SSE, sin gateway Rust)
+      - ../../config/goose.config.docker.yaml:/root/.config/goose/config.yaml:ro
+      # Sessions y memoria persistentes del host
+      - ${HOME}/.config/goose/memory:/root/.config/goose/memory:rw
+      - ${HOME}/.config/goose/gateway:/root/.config/goose/gateway:rw
       - lina-logs:/app/logs
     ports:
       - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -sfk -H \"x-secret-key: ${GOOSE_SERVER__SECRET_KEY}\" https://localhost:3000/status"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     logging:
       driver: json-file
       options:
@@ -279,14 +295,13 @@ services:
       dockerfile: deploy/docker/Dockerfile.gateway
     image: lina-gateway:latest
     restart: unless-stopped
-    # goosed puede correr en Docker o en el host (systemd).
-    # Si corre en el host, GOOSED_URL debe ser http://host.docker.internal:3000
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      goosed:
+        condition: service_healthy
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      GOOSED_URL: ${GOOSED_URL:-http://goosed:3000}
-      GOOSE_SERVER_SECRET_KEY: ${GOOSE_SERVER_SECRET_KEY:-}
+      GOOSED_URL: https://goosed:3000
+      GOOSE_SERVER_SECRET_KEY: ${GOOSE_SERVER__SECRET_KEY}
       GOOSE_GATEWAY_TRUSTED_USERS: ${GOOSE_GATEWAY_TRUSTED_USERS:-}
       GATEWAY_PACER_TICK: "1.5"
       TELEGRAM_POLL_TIMEOUT: "30"
