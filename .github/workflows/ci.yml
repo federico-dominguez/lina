@@ -24,7 +24,7 @@ jobs:
           - mcp: systemd-user
             cov_threshold: 60
           - mcp: moodle
-            cov_threshold: 18  # HTTP layer no es unit-testable sin mocks; excepción documentada en ADR-0007
+            cov_threshold: 18  # HTTP layer no es unit-testable sin mocks — excepción documentada en docs/architecture/0008-moodle-coverage-exception.md
 
     steps:
       - name: Checkout
