@@ -25,6 +25,8 @@ jobs:
             cov_threshold: 60
           - mcp: moodle
             cov_threshold: 18  # HTTP layer no es unit-testable sin mocks — excepción documentada en docs/architecture/0008-moodle-coverage-exception.md
+          - mcp: lina-db
+            cov_threshold: 65
 
     steps:
       - name: Checkout
@@ -113,7 +115,7 @@ jobs:
 
       - name: Sync all MCPs (needed for E2E subprocess invocation)
         run: |
-          for mcp in fs-safe secrets shell-policy systemd-user moodle; do
+          for mcp in fs-safe secrets shell-policy systemd-user moodle lina-db; do
             uv sync --dev --project mcps/$mcp
           done
 

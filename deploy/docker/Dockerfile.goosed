@@ -1,0 +1,59 @@
+# syntax=docker/dockerfile:1
+# LINA — Runtime image (goosed + MCPs Python)
+#
+# El binario goosed es un artefacto externo (build custom del fork patched).
+# Debe estar disponible en el contexto de build.
+#
+# Uso:
+#   # Copiar el binario al contexto antes de buildear:
+#   cp ~/goosed_patched bin/goosed-linux-amd64
+#   docker build -f deploy/docker/Dockerfile.goosed -t lina-goosed:latest .
+#
+# Build arg:
+#   GOOSED_BIN   ruta relativa al binario dentro del build context
+#                (default: bin/goosed-linux-amd64)
+
+FROM python:3.13-slim-bookworm
+
+# ─── sistema ──────────────────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libsecret-1-0 \
+        libdbus-1-3 \
+        ca-certificates \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# ─── uv ───────────────────────────────────────────────────────────────────────
+ENV UV_VERSION=0.4.18
+RUN pip install --no-cache-dir uv==${UV_VERSION}
+
+# ─── app ──────────────────────────────────────────────────────────────────────
+WORKDIR /app
+
+# Copiar MCPs y sincronizar dependencias (sin dev)
+COPY mcps/ mcps/
+RUN for d in secrets fs-safe shell-policy systemd-user moodle lina-db; do \
+        if [ -d "mcps/$d" ]; then \
+            echo "→ uv sync mcps/$d" && cd "mcps/$d" && uv sync --no-dev --quiet && cd /app; \
+        fi; \
+    done
+
+COPY config/ config/
+COPY bin/ bin/
+
+# ─── goosed binary ────────────────────────────────────────────────────────────
+ARG GOOSED_BIN=bin/goosed-linux-amd64
+COPY ${GOOSED_BIN} /usr/local/bin/goosed
+RUN chmod +x /usr/local/bin/goosed
+
+# ─── runtime ──────────────────────────────────────────────────────────────────
+EXPOSE 3000
+ENV LINA_ENV=docker
+
+# Health check vía el endpoint HTTP de goosed (si está disponible)
+HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=3 \
+    CMD curl -sf http://localhost:3000/health || exit 1
+
+# goosed actúa como daemon del gateway; el bot token se pasa vía env_file en docker-compose.
+# Requiere TELEGRAM_BOT_TOKEN en el entorno (inyectado desde .env o env_file).
+CMD ["/bin/sh", "-c", "/usr/local/bin/goosed & exec goose gateway start --bot-token \"$TELEGRAM_BOT_TOKEN\" telegram"]

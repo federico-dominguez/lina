@@ -1,0 +1,80 @@
+# LINA — Docker Compose
+# Levanta PostgreSQL + goosed con todos los MCPs.
+#
+# Uso rápido:
+#   just docker-up          # arranca en background
+#   just docker-down        # detiene y remueve contenedores
+#   just docker-logs        # tail logs de goosed
+#
+# Variables de entorno opcionales (sobreescribir en .env):
+#   POSTGRES_PASSWORD   (default: lina_dev  — cambiar en producción)
+#   LINA_DB_URL         (default: postgresql://lina:<POSTGRES_PASSWORD>@lina-db:5432/lina)
+
+services:
+
+  # ─── PostgreSQL ─────────────────────────────────────────────────────────────
+  lina-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lina
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lina_dev}
+      POSTGRES_DB: lina
+    volumes:
+      - lina-db-data:/var/lib/postgresql/data
+      - ../../sql/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lina -d lina"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  # ─── goosed runtime ─────────────────────────────────────────────────────────
+  # Requiere imagen precompilada. Construir primero con:
+  #   docker build -f deploy/docker/Dockerfile.goosed -t lina-goosed:latest .
+  #
+  # O montar el binario directamente (modo desarrollo):
+  #   GOOSED_BIN=/home/fede/goosed_patched docker compose --profile dev up
+  goosed:
+    image: lina-goosed:latest
+    restart: unless-stopped
+    depends_on:
+      lina-db:
+        condition: service_healthy
+    environment:
+      LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
+    env_file:
+      - path: ../../.env.example
+        required: false
+      - path: ../../.env
+        required: false
+    volumes:
+      - ${HOME}/.config/goose:/root/.config/goose:ro
+      - lina-logs:/app/logs
+    ports:
+      - "127.0.0.1:3000:3000"
+
+  # ─── goosed (modo dev, binario montado desde host) ──────────────────────────
+  goosed-dev:
+    image: lina-goosed:latest
+    profiles: ["dev"]
+    restart: "no"
+    depends_on:
+      lina-db:
+        condition: service_healthy
+    environment:
+      LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
+    env_file:
+      - path: ../../.env
+        required: false
+    volumes:
+      - ${GOOSED_BIN:-/usr/local/bin/goosed}:/usr/local/bin/goosed:ro
+      - ${HOME}/.config/goose:/root/.config/goose:ro
+      - lina-logs:/app/logs
+
+volumes:
+  lina-db-data:
+  lina-logs:
