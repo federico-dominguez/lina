@@ -223,7 +223,9 @@ def sh_quote(args: list[str]) -> str:
 def main() -> None:
     log.info(
         "starting (allow_sudo_env=%s, default_timeout=%ds, transport=%s)",
-        ALLOW_SUDO_ENV, DEFAULT_TIMEOUT, _MCP_TRANSPORT,
+        ALLOW_SUDO_ENV,
+        DEFAULT_TIMEOUT,
+        _MCP_TRANSPORT,
     )
     mcp.run(transport=_MCP_TRANSPORT)
 

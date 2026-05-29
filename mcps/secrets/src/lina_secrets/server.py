@@ -82,6 +82,7 @@ def _index_remove(service: str, key: str) -> None:
 
 # ─── file backend helpers ─────────────────────────────────────────────────────
 
+
 def _file_path(service: str, key: str) -> Path:
     """Ruta canónica para un secreto en el backend file."""
     # Separador __ evita colisiones entre service=a,key=b_c y service=a_b,key=c.
@@ -108,7 +109,7 @@ def _file_list(service: str) -> list[str]:
     if not FILE_DIR.exists():
         return []
     prefix = f"{service}__"
-    return sorted(p.name[len(prefix):] for p in FILE_DIR.iterdir() if p.name.startswith(prefix))
+    return sorted(p.name[len(prefix) :] for p in FILE_DIR.iterdir() if p.name.startswith(prefix))
 
 
 @mcp.tool()
@@ -187,7 +188,9 @@ def keyring_backend() -> str:
 def main() -> None:
     log.info(
         "starting (namespace=%s, backend=%s, transport=%s)",
-        NAMESPACE, BACKEND, _MCP_TRANSPORT,
+        NAMESPACE,
+        BACKEND,
+        _MCP_TRANSPORT,
     )
     mcp.run(transport=_MCP_TRANSPORT)
 
