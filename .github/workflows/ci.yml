@@ -117,7 +117,9 @@ jobs:
             uv sync --dev --project mcps/$mcp
           done
 
+      - name: Install E2E test dependencies
+        run: pip install pytest pytest-asyncio
+
       - name: E2E integration tests
         run: |
-          uv run --project mcps/fs-safe \
-            pytest tests/integration/mcps/ -v --tb=short -m integration
+          pytest tests/integration/mcps/ -v --tb=short -m integration

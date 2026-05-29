@@ -3,6 +3,7 @@
 # Los MCPs individuales tienen su propia configuración en mcps/*/pyproject.toml.
 testpaths = ["tests"]
 asyncio_mode = "auto"
+pythonpath = ["."]
 markers = [
     "integration: E2E integration tests that spawn real MCP subprocess (require uv sync)",
 ]
