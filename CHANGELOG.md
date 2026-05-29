@@ -19,6 +19,14 @@ Versioning follows [Semantic Versioning](https://semver.org/) — `MAJOR.MINOR.P
 - Repository migrated to private GitHub with full professional structure
 - Questionnaire output files moved to `~/Documentos/lina-moodle-exports/`
 
+### Fixed
+- **Telegram final message truncated at 4096 chars** — patched `goosed` binary now splits
+  responses that exceed 4096 characters into multiple consecutive messages instead of
+  silently dropping the remainder with `…`. In-flight live-edit bubbles retain safe truncation
+  (Telegram does not allow splitting an in-progress edit). Source change is in the local
+  Goose fork (`crates/goose/src/gateway/telegram.rs`, function `edit_text`); this repo
+  tracks the compiled binary checksum at `vendor/goosed-linux-amd64.sha256`. Fixes #21.
+
 ---
 
 ## [0.9.0] — 2026-05-27
