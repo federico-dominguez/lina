@@ -22,6 +22,7 @@ MCP_PARAMS = [
     ("mcps/shell-policy", "lina-shell-policy", "lina-shell-policy"),
     ("mcps/systemd-user", "lina-systemd-user", "lina-systemd-user"),
     ("mcps/moodle", "lina-moodle", "lina-moodle"),
+    ("mcps/lina-db", "lina-db", "lina-db"),
 ]
 
 # (mcp_dir, cmd, tool_name, tool_args)
@@ -34,6 +35,10 @@ MCP_TOOLS_CALL_PARAMS = [
     pytest.param(
         "mcps/moodle", "lina-moodle", "moodle_get_courses", {},
         marks=pytest.mark.skip(reason="requiere MOODLE_TOKEN válido — ver ADR-0008"),
+    ),
+    pytest.param(
+        "mcps/lina-db", "lina-db", "get_memory", {"key": "test"},
+        marks=pytest.mark.skip(reason="requiere PostgreSQL activo — ver Issue #9"),
     ),
 ]
 

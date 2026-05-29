@@ -40,7 +40,7 @@ _symlink-goosed:
     @echo "✓ {{GOOSED_LINK}} → {{GOOSED_SRC}}"
 
 _install-mcps:
-    @for d in secrets fs-safe shell-policy systemd-user; do \
+    @for d in secrets fs-safe shell-policy systemd-user lina-db; do \
         echo "→ uv sync mcps/$$d"; \
         (cd "{{LINA_DIR}}/mcps/$$d" && uv sync --quiet) ; \
     done
@@ -112,9 +112,25 @@ logs:
 logs-tail n="200":
     journalctl --user -u lina-goosed.service -n {{n}} --no-pager
 
+# ─── Docker ──────────────────────────────────────────────────────────────────
+COMPOSE_FILE := LINA_DIR / "deploy/docker/docker-compose.yml"
+
+docker-up:
+    docker compose -f "{{COMPOSE_FILE}}" up -d
+    @echo "✅ Stack Docker levantado (PostgreSQL + goosed)"
+
+docker-down:
+    docker compose -f "{{COMPOSE_FILE}}" down
+
+docker-logs:
+    docker compose -f "{{COMPOSE_FILE}}" logs -f
+
+docker-ps:
+    docker compose -f "{{COMPOSE_FILE}}" ps
+
 # ─── Tests ───────────────────────────────────────────────────────────────────
 test:
-    @for d in secrets fs-safe shell-policy systemd-user moodle; do \
+    @for d in secrets fs-safe shell-policy systemd-user moodle lina-db; do \
         if [[ -d "{{LINA_DIR}}/mcps/$$d/tests" ]]; then \
             echo "→ pytest mcps/$$d"; \
             (cd "{{LINA_DIR}}/mcps/$$d" && uv run pytest tests/ -v --tb=short) ; \
@@ -127,7 +143,7 @@ test-integration:
 
 # ─── Lint ─────────────────────────────────────────────────────────────────────
 lint:
-    @for d in secrets fs-safe shell-policy systemd-user moodle; do \
+    @for d in secrets fs-safe shell-policy systemd-user moodle lina-db; do \
         echo "→ ruff mcps/$$d"; \
         (cd "{{LINA_DIR}}/mcps/$$d" && uv run ruff check src/ && uv run ruff format --check src/) || true ; \
     done
