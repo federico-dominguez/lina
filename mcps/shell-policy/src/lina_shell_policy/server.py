@@ -52,15 +52,28 @@ mcp = FastMCP("lina-shell-policy")
 
 # Patrones que NUNCA se ejecutan, ni con sudo habilitado.
 HARD_DENY: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)\b.*\s/(\s|$|\*)"),
-     "rm -rf sobre raíz"),
-    (re.compile(r"\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)\s+(--no-preserve-root|/\*)"),
-     "rm -rf --no-preserve-root"),
+    (
+        re.compile(r"\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)\b.*\s/(\s|$|\*)"),
+        "rm -rf sobre raíz",
+    ),
+    (
+        re.compile(r"\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)\b.*\/\.\.(/|$)"),
+        "rm -rf con path traversal",
+    ),
+    (
+        re.compile(
+            r"\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)\s+(--no-preserve-root|/\*)"
+        ),
+        "rm -rf --no-preserve-root",
+    ),
     (re.compile(r"\bmkfs(\.|\s)"), "mkfs (formateo)"),
     (re.compile(r"\bdd\b.*\bof=/dev/(sd|nvme|hd|mmcblk)"), "dd hacia dispositivo de bloques"),
     (re.compile(r":\s*\(\s*\)\s*\{.*\|.*&.*\}\s*;\s*:"), "fork bomb"),
-    (re.compile(r"\b(shutdown|reboot|halt|poweroff|init\s+0|init\s+6)\b"), "apagado/reinicio del sistema"),
-    (re.compile(r"\bchmod\s+(-R\s+)?0?777\s+/\b"), "chmod 777 sobre raíz"),
+    (
+        re.compile(r"\b(shutdown|reboot|halt|poweroff|init\s+0|init\s+6)\b"),
+        "apagado/reinicio del sistema",
+    ),
+    (re.compile(r"\bchmod\s+(-R\s+)?0?777\s+/"), "chmod 777 sobre raíz"),
     (re.compile(r"\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(bash|sh|zsh)\b"), "curl|bash pipe a shell"),
     (re.compile(r">\s*/dev/(sd|nvme|hd|mmcblk)"), "redirección a dispositivo de bloques"),
 ]
@@ -72,8 +85,10 @@ PRIVILEGED: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bapt(-get)?\s+(install|remove|purge|upgrade|dist-upgrade)\b"), "apt write"),
     (re.compile(r"\b(dnf|yum)\s+(install|remove|upgrade)\b"), "dnf/yum write"),
     (re.compile(r"\bpacman\s+-(S|R|U|Syu)\b"), "pacman write"),
-    (re.compile(r"\bsystemctl\b(?!\s+--user)\s+(start|stop|restart|enable|disable|mask)"),
-     "systemctl system (sin --user)"),
+    (
+        re.compile(r"\bsystemctl\b(?!\s+--user)\s+(start|stop|restart|enable|disable|mask)"),
+        "systemctl system (sin --user)",
+    ),
 ]
 
 
@@ -96,7 +111,8 @@ def evaluate(command: str, allow_sudo: bool) -> PolicyDecision:
             if allow_sudo and ALLOW_SUDO_ENV:
                 return PolicyDecision(True, "privileged", f"privileged-allowed: {label}")
             return PolicyDecision(
-                False, "denied",
+                False,
+                "denied",
                 f"requiere privilegios ({label}); allow_sudo={allow_sudo}, "
                 f"LINA_SHELL_ALLOW_SUDO={int(ALLOW_SUDO_ENV)}",
             )

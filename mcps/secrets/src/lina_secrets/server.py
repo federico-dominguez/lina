@@ -116,7 +116,9 @@ def secret_list(service: str) -> list[str]:
 @mcp.tool()
 def keyring_backend() -> str:
     """Devuelve el backend de keyring en uso (debugging)."""
-    return f"{keyring.get_keyring().__class__.__module__}.{keyring.get_keyring().__class__.__name__}"
+    return (
+        f"{keyring.get_keyring().__class__.__module__}.{keyring.get_keyring().__class__.__name__}"
+    )
 
 
 def main() -> None:

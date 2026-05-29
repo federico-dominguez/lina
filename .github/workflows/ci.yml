@@ -37,17 +37,26 @@ jobs:
       - name: Ruff lint — mcps/${{ matrix.mcp }}
         run: |
           cd mcps/${{ matrix.mcp }}
-          uv run ruff check src/ || true   # warn only until baseline is clean
+          uv run ruff check src/
 
       - name: Ruff format check — mcps/${{ matrix.mcp }}
         run: |
           cd mcps/${{ matrix.mcp }}
-          uv run ruff format --check src/ || true
+          uv run ruff format --check src/
 
-      - name: Pytest — mcps/${{ matrix.mcp }}
+      - name: Pytest + coverage — mcps/${{ matrix.mcp }}
         run: |
           cd mcps/${{ matrix.mcp }}
-          uv run pytest tests/ -v --tb=short 2>/dev/null || echo "No tests yet"
+          uv run pytest tests/ -v --tb=short \
+            --cov=src --cov-report=xml --cov-report=term-missing \
+            --cov-fail-under=60
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-${{ matrix.mcp }}
+          path: mcps/${{ matrix.mcp }}/coverage.xml
 
   validate-config:
     name: Validate config templates
