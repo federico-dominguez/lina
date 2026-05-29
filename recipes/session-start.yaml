@@ -1,0 +1,27 @@
+version: "1.0.0"
+title: "Iniciar sesión — cargar contexto persistente"
+description: |
+  Carga los últimos resúmenes de sesión desde PostgreSQL y los inyecta
+  como contexto antes de empezar a trabajar. Llamar al inicio de cada sesión
+  larga o cuando Federico retome trabajo interrumpido.
+
+instructions: |
+  Invocá la herramienta `get_last_sessions` del MCP lina-db con n=3.
+
+  Con los resultados, construí un bloque de contexto estructurado así:
+
+  <b>📚 Contexto de sesiones anteriores:</b>
+
+  Por cada sesión (de más reciente a más antigua):
+  • <b>[session_id]</b> (<i>created_at en formato legible</i>)
+    [summary en 1-2 líneas]
+
+  Si no hay sesiones previas, respondé: "Primera sesión — sin historial previo."
+
+  Después del bloque, preguntá: "¿Continuamos desde donde quedamos, o empezamos
+  algo nuevo?"
+
+  <b>Restricciones:</b>
+  - No inventes ni interpolés información que no esté en los datos reales.
+  - Si lina-db no está disponible (error de conexión), avisalo brevemente y
+    continuá sin contexto: "⚠️ lina-db no disponible, continuando sin historial."

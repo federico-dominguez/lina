@@ -148,6 +148,23 @@ extensions:
       GITLAB_TOKEN_KEYRING: "lina:gitlab:GITLAB_TOKEN"
     timeout: 60
 
+  lina-db:
+    name: lina-db
+    display_name: LINA DB
+    description: Memoria persistente en PostgreSQL — recuerdos, sesiones, preferencias y auditoría.
+    type: stdio
+    enabled: true
+    cmd: uv
+    args: [--directory, /home/fede/lina/mcps/lina-db, run, lina-db]
+    envs:
+      # NOTE: LINA_DB_URL must point to the correct host for the runtime context.
+      # Host: postgresql://lina:lina_dev@localhost:5432/lina
+      # Docker (container network): postgresql://lina:lina_dev@lina-db:5432/lina
+      # This template renders the host value; Docker deployments should override
+      # via compose env_file or environment section. See docs/runbooks for Docker setup.
+      LINA_DB_URL: ${LINA_DB_URL}
+    timeout: 30
+
 providers:
   custom_deepseek:
     enabled: true

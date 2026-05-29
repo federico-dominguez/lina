@@ -60,9 +60,12 @@ secrets-init:
     @install -m 0600 /dev/null "{{SECRETS_FILE}}"
     @read -rp "DEEPSEEK_API_KEY: " DK; \
      read -rp "TELEGRAM_BOT_TOKEN: " TT; \
+     read -rp "LINA_DB_URL [postgresql://lina:lina_dev@localhost:5432/lina]: " DBU; \
+     DBU=$${DBU:-postgresql://lina:lina_dev@localhost:5432/lina}; \
      { echo "DEEPSEEK_API_KEY=$$DK"; \
        echo "TELEGRAM_BOT_TOKEN=$$TT"; \
-       grep -vE '^(DEEPSEEK_API_KEY|TELEGRAM_BOT_TOKEN)=' "{{LINA_DIR}}/.env.example"; \
+       echo "LINA_DB_URL=$$DBU"; \
+       grep -vE '^(DEEPSEEK_API_KEY|TELEGRAM_BOT_TOKEN|LINA_DB_URL)=' "{{LINA_DIR}}/.env.example"; \
      } > "{{SECRETS_FILE}}"
     @chmod 600 "{{SECRETS_FILE}}"
     @echo "✓ secrets escritos en {{SECRETS_FILE}} (chmod 600)"
@@ -75,6 +78,23 @@ secrets-set service key:
 
 secrets-get service key:
     @cd "{{LINA_DIR}}/mcps/secrets" && uv run python -m lina_secrets.cli get {{service}} {{key}}
+
+# Exporta cada variable de secrets.env a un archivo individual en secrets.d/
+# (patrón Docker secrets: cada archivo contiene exactamente un valor).
+# Los archivos se crean con chmod 600 y nombres sin extensión.
+# uso: just secrets-export-files
+SECRETS_DIR := GOOSE_CFG_DIR / "secrets.d"
+
+secrets-export-files:
+    @test -f "{{SECRETS_FILE}}" || { echo "❌ corré 'just secrets-init' primero"; exit 1; }
+    @mkdir -p "{{SECRETS_DIR}}"
+    @chmod 700 "{{SECRETS_DIR}}"
+    @grep -v '^#' "{{SECRETS_FILE}}" | grep -v '^$$' | while IFS='=' read -r key value; do \
+        printf '%s' "$$value" > "{{SECRETS_DIR}}/$$key"; \
+        chmod 600 "{{SECRETS_DIR}}/$$key"; \
+        echo "✓ {{SECRETS_DIR}}/$$key"; \
+    done
+    @echo "✅ Secrets exportados a {{SECRETS_DIR}}/ ($(ls '{{SECRETS_DIR}}' | wc -l) archivos)"
 
 # ─── Config render ────────────────────────────────────────────────────────────
 apply-config:

@@ -16,6 +16,10 @@ waves:
     - name: lina-systemd-user
       path: mcps/systemd-user
       status: implemented
+    - name: lina-db
+      path: mcps/lina-db
+      status: implemented
+      requires: postgresql
 
   ola_2_autoextension:
     - {name: lina-git-ops,     path: mcps/git-ops,     status: planned}
