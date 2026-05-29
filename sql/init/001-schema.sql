@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS memories (
     expires_at  TIMESTAMPTZ              -- NULL = sin expiración
 );
 
-CREATE INDEX IF NOT EXISTS idx_memories_key      ON memories (key);
+-- No index on key needed: UNIQUE constraint already creates one.
 CREATE INDEX IF NOT EXISTS idx_memories_expires  ON memories (expires_at)
     WHERE expires_at IS NOT NULL;
 

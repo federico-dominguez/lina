@@ -33,9 +33,9 @@ WORKDIR /app
 # Copiar MCPs y sincronizar dependencias (sin dev)
 COPY mcps/ mcps/
 RUN for d in secrets fs-safe shell-policy systemd-user moodle lina-db; do \
-        [ -d "mcps/$d" ] && \
-        (echo "→ uv sync mcps/$d" && cd "mcps/$d" && uv sync --no-dev --quiet) \
-        || true; \
+        if [ -d "mcps/$d" ]; then \
+            echo "→ uv sync mcps/$d" && cd "mcps/$d" && uv sync --no-dev --quiet && cd /app; \
+        fi; \
     done
 
 COPY config/ config/
@@ -54,4 +54,6 @@ ENV LINA_ENV=docker
 HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=3 \
     CMD curl -sf http://localhost:3000/health || exit 1
 
-CMD ["/usr/local/bin/goosed"]
+# goosed actúa como daemon del gateway; el bot token se pasa vía env_file en docker-compose.
+# Requiere TELEGRAM_BOT_TOKEN en el entorno (inyectado desde .env o env_file).
+CMD ["/bin/sh", "-c", "/usr/local/bin/goosed & exec goose gateway start --bot-token \"$TELEGRAM_BOT_TOKEN\" telegram"]

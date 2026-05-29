@@ -115,7 +115,11 @@ logs-tail n="200":
 # ─── Docker ──────────────────────────────────────────────────────────────────
 COMPOSE_FILE := LINA_DIR / "deploy/docker/docker-compose.yml"
 
-docker-up:
+docker-build:
+    docker build -f "{{LINA_DIR}}/deploy/docker/Dockerfile.goosed" -t lina-goosed:latest "{{LINA_DIR}}"
+    @echo "✅ Imagen lina-goosed:latest construida"
+
+docker-up: docker-build
     docker compose -f "{{COMPOSE_FILE}}" up -d
     @echo "✅ Stack Docker levantado (PostgreSQL + goosed)"
 

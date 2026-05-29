@@ -26,7 +26,20 @@ import psycopg2.extras
 from mcp.server.fastmcp import FastMCP
 
 log = logging.getLogger("lina-db")
-mcp = FastMCP("lina-db")
+
+# Transport config — read early because FastMCP bakes host/port at construction.
+# MCP_TRANSPORT=streamable-http  enables HTTP mode (for containerised Fase 2+).
+# MCP_PORT overrides the listening port in HTTP mode (default 8000).
+# Without MCP_TRANSPORT the server starts in stdio mode (current / Fase 1).
+_MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
+_MCP_HTTP_PORT = int(os.environ.get("MCP_PORT", "8000"))
+
+mcp = FastMCP(
+    "lina-db",
+    # host/port are only used when transport="streamable-http".
+    host="0.0.0.0",
+    port=_MCP_HTTP_PORT,
+)
 
 LINA_DB_URL = os.environ.get(
     "LINA_DB_URL",
@@ -254,12 +267,15 @@ def store_preference(key: str, value: str) -> str:
             "UPDATE preferences SET value = %s, updated_at = NOW() WHERE key = %s",
             (value, key),
         )
-        return "updated"
-    _execute(
-        "INSERT INTO preferences (key, value) VALUES (%s, %s)",
-        (key, value),
-    )
-    return "ok"
+        result = "updated"
+    else:
+        _execute(
+            "INSERT INTO preferences (key, value) VALUES (%s, %s)",
+            (key, value),
+        )
+        result = "ok"
+    _audit("store_preference", {"key": key}, result)
+    return result
 
 
 @mcp.tool()
@@ -316,8 +332,8 @@ def get_audit_logs(limit: int = 50) -> list[dict]:
 
 
 def main() -> None:
-    log.info("lina-db starting (db=%s)", LINA_DB_URL.split("@")[-1])
-    mcp.run()
+    log.info("lina-db starting (db=%s transport=%s)", LINA_DB_URL.split("@")[-1], _MCP_TRANSPORT)
+    mcp.run(transport=_MCP_TRANSPORT)
 
 
 if __name__ == "__main__":
