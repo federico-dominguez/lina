@@ -11,7 +11,13 @@
 # Archivo de salida: /backups/lina_YYYYMMDD_HHMMSS.sql.gz
 # Retención:         últimas 24 copias (BACKUP_KEEP, sobreescribible por env)
 
-set -e
+set -eu
+
+# ─── Validar envvars requeridas ───────────────────────────────────────────────
+: "${PGHOST:?PGHOST no definida}"
+: "${PGUSER:?PGUSER no definida}"
+: "${PGDATABASE:?PGDATABASE no definida}"
+: "${PGPASSWORD:?PGPASSWORD no definida}"
 
 BACKUP_DIR="${BACKUP_DIR:-/backups}"
 BACKUP_KEEP="${BACKUP_KEEP:-24}"
