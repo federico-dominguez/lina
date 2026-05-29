@@ -103,3 +103,59 @@ class TestIndex:
     def test_remove_nonexistent_key_is_safe(self):
         """No debe lanzar excepción al intentar eliminar una key que no existe en el índice."""
         _index_remove("svc5", "ghost")  # no debería lanzar
+
+
+# ─── tests de tool functions ──────────────────────────────────────────────────
+
+class TestSecretTools:
+    def test_secret_set_returns_ok(self):
+        from lina_secrets.server import secret_set
+
+        result = secret_set("svc", "mykey", "myvalue")
+        assert "ok" in result
+
+    def test_secret_get_returns_value(self):
+        from lina_secrets.server import secret_set, secret_get
+
+        secret_set("svc", "key1", "value1")
+        assert secret_get("svc", "key1") == "value1"
+
+    def test_secret_get_raises_if_missing(self):
+        from lina_secrets.server import secret_get
+
+        with pytest.raises(KeyError, match="no existe"):
+            secret_get("nosvc", "nokey")
+
+    def test_secret_delete_removes(self):
+        from lina_secrets.server import secret_set, secret_delete, secret_get
+
+        secret_set("delsvc", "dkey", "v")
+        secret_delete("delsvc", "dkey")
+        with pytest.raises(KeyError):
+            secret_get("delsvc", "dkey")
+
+    def test_secret_list_returns_keys(self):
+        from lina_secrets.server import secret_set, secret_list
+
+        secret_set("listsvc", "a", "1")
+        secret_set("listsvc", "b", "2")
+        keys = secret_list("listsvc")
+        assert "a" in keys and "b" in keys
+
+    def test_keyring_backend_returns_class_name(self):
+        from lina_secrets.server import keyring_backend
+
+        result = keyring_backend()
+        assert isinstance(result, str) and len(result) > 0
+
+    def test_secret_reserved_key_raises(self):
+        from lina_secrets.server import secret_get
+
+        with pytest.raises(ValueError, match="reservado"):
+            secret_get("svc", "__index__")
+
+    def test_secret_set_empty_value_raises(self):
+        from lina_secrets.server import secret_set
+
+        with pytest.raises(ValueError, match="vacío"):
+            secret_set("svc", "key", "")

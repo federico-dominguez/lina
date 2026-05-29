@@ -71,6 +71,9 @@ class TestRequireWritable:
         m._require_writable("test-unit.service")  # OK
         with pytest.raises(PermissionError):
             m._require_writable("lina-goosed.service")  # no matchea el nuevo regex
+        # Restaurar el módulo al regex por defecto para no contaminar tests siguientes
+        monkeypatch.delenv("LINA_SYSTEMD_UNIT_REGEX")
+        importlib.reload(m)
 
 
 # ─── tests de svc_status mockeando subprocess ────────────────────────────────
@@ -105,3 +108,48 @@ class TestSvcStatusMocked:
         # read-only no requiere namespace check → debe funcionar
         result = svc_status("nginx.service")
         assert "exit_code" in result
+
+
+# ─── tests de herramientas read-only (is-active, is-enabled, list, logs) ─────────────
+
+class TestSvcReadOnly:
+    @pytest.fixture(autouse=True)
+    def mock_subprocess(self, monkeypatch):
+        import subprocess
+
+        def fake_run(cmd, **kwargs):
+            stdout = ""
+            if "is-active" in cmd:
+                stdout = "active\n"
+            elif "is-enabled" in cmd:
+                stdout = "enabled\n"
+            elif "list-units" in cmd:
+                stdout = "lina-goosed.service  loaded active running LINA Goosed\n"
+            elif "journalctl" in cmd:
+                stdout = "May 29 12:00 lina-goosed[1234]: started\n"
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+    def test_svc_is_active_mocked(self):
+        from lina_systemd_user.server import svc_is_active
+
+        assert svc_is_active("lina-goosed") == "active"
+
+    def test_svc_is_enabled_mocked(self):
+        from lina_systemd_user.server import svc_is_enabled
+
+        assert svc_is_enabled("lina-goosed") == "enabled"
+
+    def test_svc_list_lina_mocked(self):
+        from lina_systemd_user.server import svc_list_lina
+
+        result = svc_list_lina()
+        assert len(result) >= 1
+        assert any("lina" in u["unit"] for u in result)
+
+    def test_svc_logs_mocked(self):
+        from lina_systemd_user.server import svc_logs
+
+        result = svc_logs("lina-goosed")
+        assert "started" in result

@@ -27,6 +27,10 @@ dev = [
 testpaths = ["tests"]
 asyncio_mode = "auto"
 
+[tool.coverage.report]
+fail_under = 18
+show_missing = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

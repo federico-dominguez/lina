@@ -113,3 +113,52 @@ class TestPrivileged:
         importlib.reload(m)
         d = m.evaluate("systemctl --user status lina-goosed", allow_sudo=False)
         assert is_safe(d)
+
+
+# ─── tests de tools públicas (sh_explain, sh_run, sh_which, sh_quote) ─────────────────
+
+class TestShTools:
+    def test_sh_explain_safe(self):
+        from lina_shell_policy.server import sh_explain
+
+        result = sh_explain("ls -la")
+        assert result["allowed"] is True
+        assert result["category"] == "safe"
+
+    def test_sh_explain_denied(self):
+        from lina_shell_policy.server import sh_explain
+
+        result = sh_explain("rm -rf /")
+        assert result["allowed"] is False
+        assert result["category"] == "denied"
+
+    def test_sh_run_denied_returns_minus_one(self):
+        from lina_shell_policy.server import sh_run
+
+        result = sh_run("rm -rf /")
+        assert result["exit_code"] == -1
+        assert "POLICY DENY" in result["stderr"]
+
+    def test_sh_run_safe_command_executes(self):
+        from lina_shell_policy.server import sh_run
+
+        result = sh_run("echo __lina_test__")
+        assert result["exit_code"] == 0
+        assert "__lina_test__" in result["stdout"]
+
+    def test_sh_which_known_binary(self):
+        from lina_shell_policy.server import sh_which
+
+        assert sh_which("ls") is not None
+
+    def test_sh_which_invalid_raises(self):
+        from lina_shell_policy.server import sh_which
+
+        with pytest.raises(ValueError, match="inválido"):
+            sh_which("ls;echo hack")
+
+    def test_sh_quote_multiple_args(self):
+        from lina_shell_policy.server import sh_quote
+
+        result = sh_quote(["echo", "hello world"])
+        assert "hello world" in result

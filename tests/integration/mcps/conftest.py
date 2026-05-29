@@ -21,8 +21,9 @@ from typing import Any
 class McpStdioClient:
     """Spawns an MCP server subprocess and communicates via JSON-RPC over stdio."""
 
-    def __init__(self, cmd: str, env: dict[str, str] | None = None, timeout: float = 10.0):
+    def __init__(self, cmd: str, cwd: str | None = None, env: dict[str, str] | None = None, timeout: float = 10.0):
         self.cmd = cmd
+        self.cwd = cwd
         self.env = env
         self.timeout = timeout
         self._proc: subprocess.Popen | None = None
@@ -40,6 +41,7 @@ class McpStdioClient:
             stderr=subprocess.DEVNULL,
             env=proc_env,
             text=True,
+            cwd=self.cwd,
         )
         return self
 
@@ -75,11 +77,21 @@ class McpStdioClient:
         raise TimeoutError(f"No response from {self.cmd} within {self.timeout}s")
 
     def initialize(self) -> dict:
-        return self._send("initialize", {
+        result = self._send("initialize", {
             "protocolVersion": "2024-11-05",
             "capabilities": {},
             "clientInfo": {"name": "e2e-test", "version": "0.0.1"},
         })
+        # Required by MCP spec: send notifications/initialized after initialize response
+        assert self._proc and self._proc.stdin
+        notification = json.dumps({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {},
+        })
+        self._proc.stdin.write(notification + "\n")
+        self._proc.stdin.flush()
+        return result
 
     def tools_list(self) -> list[dict]:
         result = self._send("tools/list", {})

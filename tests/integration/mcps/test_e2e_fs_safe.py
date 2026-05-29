@@ -7,21 +7,24 @@ Requieren que el venv de lina-fs-safe esté sincronizado (`uv sync`).
 from __future__ import annotations
 
 import os
-import sys
 import pytest
 
-sys.path.insert(0, str(__file__.replace("/tests/integration/mcps/test_e2e_fs_safe.py", "")))
 from tests.integration.mcps.conftest import McpStdioClient
 
 
-MCP_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "mcps", "fs-safe")
+MCP_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "mcps", "fs-safe"))
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(scope="module")
-def client():
-    with McpStdioClient("lina-fs-safe", env={"MCP_TRANSPORT": "stdio"}) as c:
+def client(tmp_path_factory):
+    tmp = tmp_path_factory.mktemp("fs_e2e")
+    with McpStdioClient(
+        "lina-fs-safe",
+        cwd=MCP_DIR,
+        env={"MCP_TRANSPORT": "stdio", "LINA_FS_ALLOWLIST": str(tmp)},
+    ) as c:
         yield c
 
 
@@ -43,5 +46,4 @@ def test_tools_list(client):
 
 def test_tools_call_fs_stat(client, tmp_path):
     result = client.tools_call("fs_stat", {"path": str(tmp_path)})
-    # result is a list of content objects
     assert result is not None

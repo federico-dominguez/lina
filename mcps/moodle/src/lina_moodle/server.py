@@ -720,7 +720,7 @@ async def moodle_finish_quiz_attempt(attemptid: int) -> str:
         },
     )
 
-    state = result.get("state", "unknown")  # noqa: F841
+    state = result.get("state", "unknown")
     warnings = result.get("warnings", [])
 
     # Obtener revisión post-finalización
@@ -743,7 +743,7 @@ async def moodle_finish_quiz_attempt(attemptid: int) -> str:
         lines = [
             "🚀 **INTENTO FINALIZADO**\n",
             f"🆔 Attempt ID: **{attemptid}**",
-            "📊 Estado: finished",
+            f"📊 Estado: {state}",
             f"📝 Total preguntas: {total}",
             f"✅ Correctas: {correct}/{total}",
             f"❌ Incorrectas: {incorrect}/{total}",
