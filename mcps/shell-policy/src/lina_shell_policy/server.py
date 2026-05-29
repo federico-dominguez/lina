@@ -41,7 +41,9 @@ ALLOW_SUDO_ENV = os.environ.get("LINA_SHELL_ALLOW_SUDO", "0") == "1"
 DEFAULT_TIMEOUT = int(os.environ.get("LINA_SHELL_TIMEOUT_SEC", "60"))
 MAX_TIMEOUT = 600
 
-_AUDIT_DIR = Path(os.environ.get("LINA_SHELL_AUDIT_DIR", str(Path.home() / "lina" / "logs")))
+_AUDIT_DIR = Path(
+    os.environ.get("LINA_SHELL_AUDIT_DIR", str(Path.home() / "lina" / "logs"))
+).expanduser()
 _AUDIT_DIR.mkdir(parents=True, exist_ok=True)
 _AUDIT_LOG = _AUDIT_DIR / "shell-policy.audit.log"
 

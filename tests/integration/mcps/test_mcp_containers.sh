@@ -66,15 +66,29 @@ sys.exit(r)
 done
 
 # ─── Verificar endpoint SSE ───────────────────────────────────────────────────
-log "Verificando endpoint SSE (HTTP 200)..."
+# Usamos HEAD o bien abrimos una conexión TCP y leemos solo la línea de status
+# para evitar que SSE deje la conexión abierta y curl espere para siempre.
+log "Verificando endpoint SSE (HTTP 200/primera línea)..."
 for port in "${!MCP_PORTS[@]}"; do
   svc="${MCP_PORTS[$port]}"
-  http_code=$(curl -s -o /dev/null -w "%{http_code}" \
-    --max-time 5 "http://localhost:${port}/sse" 2>/dev/null || echo "000")
-  if [[ "$http_code" == "200" ]]; then
-    pass "HTTP GET /sse :$port ($svc) — $http_code"
+  # Leer solo la línea de status HTTP; cerrar la conexión inmediatamente.
+  status_line=$(python3 -c "
+import socket, sys
+try:
+    s = socket.socket()
+    s.settimeout(5)
+    s.connect(('127.0.0.1', $port))
+    s.sendall(b'GET /sse HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n')
+    line = s.recv(256).decode(errors='replace').split('\\r\\n')[0]
+    s.close()
+    print(line)
+except Exception as e:
+    print(f'ERROR: {e}')
+" 2>/dev/null)
+  if echo "$status_line" | grep -q '^HTTP/.* 200'; then
+    pass "HTTP /sse :$port ($svc) — OK ($status_line)"
   else
-    fail "HTTP GET /sse :$port ($svc) — $http_code (esperado 200)"
+    fail "HTTP /sse :$port ($svc) — respuesta: '$status_line'"
   fi
 done
 

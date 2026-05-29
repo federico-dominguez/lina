@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -83,20 +84,47 @@ def _index_remove(service: str, key: str) -> None:
 # ─── file backend helpers ─────────────────────────────────────────────────────
 
 
+_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def _validate_name(name: str, label: str) -> None:
+    """Valida que service/key no contengan caracteres peligrosos (path traversal)."""
+    if not _NAME_RE.match(name):
+        raise ValueError(
+            f"{label} inválido: {name!r} — solo se permiten [A-Za-z0-9._-] (1-64 chars)"
+        )
+
+
 def _file_path(service: str, key: str) -> Path:
-    """Ruta canónica para un secreto en el backend file."""
+    """Ruta canónica para un secreto en el backend file.
+
+    Valida service y key para prevenir path traversal, luego resuelve y
+    verifica que la ruta final esté dentro de FILE_DIR.
+    """
+    _validate_name(service, "service")
+    _validate_name(key, "key")
     # Separador __ evita colisiones entre service=a,key=b_c y service=a_b,key=c.
-    return FILE_DIR / f"{service}__{key}"
+    p = (FILE_DIR / f"{service}__{key}").resolve()
+    if not str(p).startswith(str(FILE_DIR.resolve()) + "/") and p != FILE_DIR.resolve():
+        raise ValueError(f"ruta fuera de FILE_DIR: {p}")
+    return p
 
 
 def _file_get(service: str, key: str) -> str | None:
     p = _file_path(service, key)
-    return p.read_text(encoding="utf-8").strip() if p.exists() else None
+    if not p.exists():
+        return None
+    # Eliminar solo el newline final (común en Docker secrets), no strip completo.
+    content = p.read_text(encoding="utf-8")
+    return content.rstrip("\n")
 
 
 def _file_set(service: str, key: str, value: str) -> None:
-    FILE_DIR.mkdir(parents=True, exist_ok=True)
-    _file_path(service, key).write_text(value, encoding="utf-8")
+    FILE_DIR.mkdir(parents=True, mode=0o700, exist_ok=True)
+    p = _file_path(service, key)
+    # Escribir con permisos 0600 — secretos no deben ser legibles por otros.
+    p.write_text(value, encoding="utf-8")
+    p.chmod(0o600)
 
 
 def _file_delete(service: str, key: str) -> None:

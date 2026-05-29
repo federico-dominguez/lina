@@ -23,7 +23,7 @@ RUN pip install --no-cache-dir "uv>=0.5"
 
 COPY ${MCP_DIR}/ mcp/
 
-RUN cd mcp && uv sync --no-dev --quiet
+RUN cd mcp && uv sync --no-dev --frozen --quiet
 
 # ─── Stage 2: runtime ────────────────────────────────────────────────────────
 FROM python:3.13-slim-bookworm
@@ -35,7 +35,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         curl \
  && rm -rf /var/lib/apt/lists/* \
- && useradd --uid 1001 --no-create-home --shell /bin/false mcp
+ && useradd --uid 1001 --create-home --shell /bin/false mcp
 
 WORKDIR /app
 
@@ -53,7 +53,9 @@ USER mcp
 EXPOSE 8000
 
 # Healthcheck via TCP connect (FastMCP no expone /health endpoint)
+# MCP_PORT puede ser sobreescrito en runtime; el healthcheck lo lee desde el entorno.
 HEALTHCHECK --interval=15s --timeout=5s --retries=5 --start-period=15s \
-    CMD python3 -c "import socket; s=socket.socket(); r=s.connect_ex(('127.0.0.1',8000)); s.close(); exit(r)"
+    CMD python3 -c \
+        "import socket,os; p=int(os.environ.get('MCP_PORT','8000')); s=socket.socket(); r=s.connect_ex(('127.0.0.1',p)); s.close(); exit(r)"
 
 CMD ["sh", "-c", "$MCP_CMD"]

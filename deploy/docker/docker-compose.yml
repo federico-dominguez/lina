@@ -110,6 +110,8 @@ services:
     environment:
       MCP_TRANSPORT: sse
       MCP_PORT: "8000"
+      HOME: /home/user
+      LINA_FS_AUDIT_DIR: /home/user/lina/logs
     volumes:
       - ${HOME}:/home/user:rw
     ports:
@@ -139,8 +141,8 @@ services:
       - "127.0.0.1:8103:8000"
 
   # ─── MCP: lina-systemd-user ─────────────────────────────────────────────────
-  # Requiere D-Bus socket del usuario host (uid 1000) para controlar unidades.
-  # El uid del container (1001) necesita acceso al socket; ajustar con ACLs si es necesario.
+  # Requiere D-Bus socket del usuario host.
+  # Corre con user: "1000" para tener acceso directo al socket (uid 1000 dueño).
   lina-mcp-systemd-user:
     build:
       context: ../..
@@ -154,6 +156,7 @@ services:
       MCP_TRANSPORT: sse
       MCP_PORT: "8000"
       DBUS_SESSION_BUS_ADDRESS: unix:path=/run/user/1000/bus
+    user: "1000"
     volumes:
       - /run/user/1000/bus:/run/user/1000/bus:rw
     ports:
@@ -179,7 +182,6 @@ services:
     ports:
       - "127.0.0.1:8105:8000"
     networks:
-      - default
       - lina-moodle-net
 
   # ─── MCP: lina-db ───────────────────────────────────────────────────────────
