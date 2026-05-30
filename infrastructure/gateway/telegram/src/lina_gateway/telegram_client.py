@@ -118,24 +118,41 @@ class TelegramClient:
 
     async def edit_message(self, chat_id: int, message_id: int, html: str) -> None:
         """Edit an existing message.  Ignores "not modified" errors silently."""
+        from .formatter import split_message, strip_html_tags
+
+        # edit_message only supports a single chunk — take the first 4096 chars worth
+        chunks = split_message(html)
+        text = chunks[0] if chunks else html
+
         payload = {
             "chat_id": chat_id,
             "message_id": message_id,
-            "text": html,
+            "text": text,
             "parse_mode": "HTML",
         }
         try:
             resp = await self._http.post(self._url("editMessageText"), json=payload)
             if not resp.is_success:
                 body = resp.text
-                if "message is not modified" not in body:
-                    logger.warning(
-                        "editMessageText failed chat=%s msg=%s status=%s err=%s",
-                        chat_id,
-                        message_id,
-                        resp.status_code,
-                        body[:200],
+                if "message is not modified" in body:
+                    return
+                if resp.status_code == 400:
+                    # HTML probably malformed (streaming partial tags) — retry as plain text
+                    plain = strip_html_tags(text)
+                    r2 = await self._http.post(
+                        self._url("editMessageText"),
+                        json={"chat_id": chat_id, "message_id": message_id, "text": plain},
                     )
+                    if not r2.is_success and "message is not modified" not in r2.text:
+                        logger.warning(
+                            "editMessageText plain fallback failed chat=%s msg=%s err=%s",
+                            chat_id, message_id, r2.text[:200],
+                        )
+                    return
+                logger.warning(
+                    "editMessageText failed chat=%s msg=%s status=%s err=%s",
+                    chat_id, message_id, resp.status_code, body[:200],
+                )
         except Exception as exc:
             logger.warning("editMessageText network error: %s", exc)
 
