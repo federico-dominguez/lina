@@ -16,11 +16,11 @@ import httpx
 # Safety net against 429 flood-waits during rapid streaming updates.
 _MIN_EDIT_INTERVAL_S = 0.5
 
-# Indicator appended to the first chunk when a message must be truncated.
-_EDIT_TRUNCATION_INDICATOR = "\n\n<i>… [respuesta truncada]</i>"
-
 # Maximum retries on Telegram 429 Too Many Requests.
 _MAX_429_RETRIES = 3
+
+# Telegram hard limit per message.
+_TG_MAX_MSG_LEN = 4096
 
 logger = logging.getLogger(__name__)
 
@@ -143,13 +143,15 @@ class TelegramClient:
                 return last_id
         return last_id
 
-    async def edit_message(self, chat_id: int, message_id: int, html: str) -> None:
-        """Edit an existing message.  Ignores "not modified" errors silently.
+    async def edit_message(self, chat_id: int, message_id: int, html: str) -> bool:
+        """Edit an existing message.  Returns True if content was too long and
+        needs continuation (caller should create a new message for overflow).
 
         Handles 429 with Retry-After back-off, and throttles successive edits
         of the same message to avoid triggering Telegram flood limits.  When
         the formatted HTML exceeds Telegram's 4096-character limit the first
-        chunk is sent and a truncation indicator is appended.
+        chunk is sent as-is (without truncation indicator) and the method
+        returns True so the caller can create a continuation message.
         """
         from .formatter import split_message, strip_html_tags
 
@@ -160,16 +162,10 @@ class TelegramClient:
         if gap < _MIN_EDIT_INTERVAL_S:
             await asyncio.sleep(_MIN_EDIT_INTERVAL_S - gap)
 
-        # ── Truncate with indicator when message is too long ──────────────
-        chunks = split_message(html)
-        if len(chunks) > 1:
-            # Make room for the truncation indicator inside the 4096-char limit
-            indicator = _EDIT_TRUNCATION_INDICATOR
-            room = len(indicator)
-            short_chunks = split_message(html, max_len=4096 - room)
-            text = short_chunks[0] + indicator
-        else:
-            text = chunks[0] if chunks else html
+        # ── Check if content fits in one message ──────────────────────────
+        chunks = split_message(html, max_len=_TG_MAX_MSG_LEN)
+        needs_continuation = len(chunks) > 1
+        text = chunks[0] if chunks else html
 
         payload = {
             "chat_id": chat_id,
@@ -183,7 +179,7 @@ class TelegramClient:
                 resp = await self._http.post(self._url("editMessageText"), json=payload)
             except Exception as exc:
                 logger.warning("editMessageText network error: %s", exc)
-                return
+                return needs_continuation
 
             if resp.status_code == 429:
                 retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
@@ -218,6 +214,7 @@ class TelegramClient:
             break  # success or non-retryable error
 
         self._last_edit_at[key] = asyncio.get_running_loop().time()
+        return needs_continuation
 
     async def send_chat_action(self, chat_id: int, action: str = "typing") -> None:
         try:

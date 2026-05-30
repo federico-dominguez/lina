@@ -6,6 +6,8 @@ Mirrors the logic in handler.rs:
   - /stop: cancel in-flight request
   - Typewriter display via StreamingBubble + Pacer
   - Goosed-down detection with user notification
+  - Long messages (>4096 chars) are split across multiple Telegram messages
+    without truncation.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ import time
 from collections import defaultdict
 
 from .config import Config
-from .formatter import format_tool_status, format_with_thinking, markdown_to_telegram_html
+from .formatter import format_tool_status, format_with_thinking, markdown_to_telegram_html, split_message
 from .goose_client import EventType, GoosedClient
 from .pacer import StreamingBubble
 from .telegram_client import MAX_VOICE_FILE_SIZE, TelegramClient, TelegramMessage, voice_prompt
@@ -24,6 +26,8 @@ from .telegram_client import MAX_VOICE_FILE_SIZE, TelegramClient, TelegramMessag
 logger = logging.getLogger(__name__)
 
 _STOP_COMMANDS = {"/stop", "stop", "/Stop", "Stop", "/STOP", "STOP"}
+_TG_CHAR_LIMIT = 4096
+_OVERFLOW_MARGIN = 200  # start splitting when content approaches the limit
 
 
 class Bot:
@@ -134,10 +138,18 @@ class Bot:
         body_bubble_msg_id: int | None = None
         body_bubble: StreamingBubble | None = None
 
+        # Overflow tracking for body: once the message exceeds 4096 chars,
+        # we seal the current bubble and send continuation messages manually.
+        body_overflowed: bool = False
+        # Character position in body_acc that has already been delivered
+        # (used to send only the delta after overflow).
+        body_delivered_offset: int = 0
+
         # Tool tracking: tool_name → (tool_name, args, msg_id)
         active_tools: dict[str, tuple[str, str, int]] = {}
 
         async def _edit_thinking_bubble(body_unused: str, thinking: str, sealed: bool) -> None:
+            nonlocal thinking_bubble_msg_id
             if thinking_bubble_msg_id is None:
                 return
             html = format_with_thinking(thinking, "", sealed)
@@ -146,12 +158,45 @@ class Bot:
             await self._tg.edit_message(chat_id, thinking_bubble_msg_id, html)
 
         async def _edit_body_bubble(body: str, thinking_unused: str, sealed: bool) -> None:
+            nonlocal body_bubble_msg_id, body_bubble, body_overflowed, body_delivered_offset
             if body_bubble_msg_id is None:
                 return
+
             html = markdown_to_telegram_html(body)
             if not html.strip():
                 return
-            await self._tg.edit_message(chat_id, body_bubble_msg_id, html)
+
+            # ── After overflow, send only the delta as a new message ─────
+            if body_overflowed:
+                new_text = body[body_delivered_offset:]
+                if not new_text:
+                    return
+                delta_html = markdown_to_telegram_html(new_text)
+                if delta_html.strip():
+                    new_id = await self._tg.send_message(chat_id, delta_html)
+                    if new_id is not None:
+                        body_bubble_msg_id = new_id
+                body_delivered_offset = len(body)
+                return
+
+            # ── Check if content fits in one Telegram message ───────────
+            chunks = split_message(html, max_len=_TG_CHAR_LIMIT - _OVERFLOW_MARGIN)
+            if len(chunks) <= 1:
+                await self._tg.edit_message(chat_id, body_bubble_msg_id, html)
+                return
+
+            # ── Overflow detected: seal current bubble and send rest ────
+            # Edit current message with first chunk (no truncation indicator)
+            await self._tg.edit_message(chat_id, body_bubble_msg_id, chunks[0])
+
+            body_overflowed = True
+            body_delivered_offset = len(body)
+
+            # Send remaining chunks as independent messages
+            for chunk in chunks[1:]:
+                new_id = await self._tg.send_message(chat_id, chunk)
+                if new_id is not None:
+                    body_bubble_msg_id = new_id
 
         async def _seal_all() -> None:
             nonlocal thinking_bubble, body_bubble
@@ -242,6 +287,8 @@ class Bot:
                         body_acc = ""
                         thinking_bubble_msg_id = None
                         body_bubble_msg_id = None
+                        body_overflowed = False
+                        body_delivered_offset = 0
 
                     elif item.content_type == "tool_response":
                         # Update the matching tool status card
