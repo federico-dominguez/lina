@@ -159,17 +159,22 @@ class GoosedClient:
             return False
 
     async def ensure_session(self, session_id: str) -> str:
-        """Ensure a goosed session exists; create it if it doesn't.
+        """Ensure a goosed session exists with provider loaded.
 
-        Returns the session_id to use (same as input if it exists, or a new one).
+        1. Check if session exists → if yes, return as-is.
+        2. Create session via POST /agent/start.
+        3. Initialize provider via POST /agent/resume {load_model_and_extensions: true}.
+
+        Returns the session_id to use.
         """
-        async with httpx.AsyncClient(timeout=10.0, verify=False) as c:
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as c:
             r = await c.get(
                 f"{self._base_url}/sessions/{session_id}",
                 headers=self._headers,
             )
             if r.status_code == 200:
                 return session_id
+
             # Session doesn't exist — create a new one
             r2 = await c.post(
                 f"{self._base_url}/agent/start",
@@ -180,6 +185,16 @@ class GoosedClient:
             data = r2.json()
             new_id = data.get("id") or data.get("session_id") or session_id
             logger.info("Created new goosed session: %s", new_id)
+
+            # Initialize provider + extensions (restore_provider_from_session)
+            r3 = await c.post(
+                f"{self._base_url}/agent/resume",
+                json={"session_id": new_id, "load_model_and_extensions": True},
+                headers=self._headers,
+            )
+            r3.raise_for_status()
+            logger.info("Provider initialized for session %s", new_id)
+
             return new_id
 
     async def reply_stream(
