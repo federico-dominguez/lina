@@ -275,6 +275,8 @@ services:
         MCP_CMD: lina-gcalendar
     image: lina-mcp-gcalendar:latest
     read_only: false          # necesita escribir token.json en /run/gcalendar/
+    user: "${UID:-1000}"      # el proceso debe correr con el mismo UID que posee los archivos
+                              # del volumen lina-gcalendar-token; setear UID en el entorno si difiere de 1000
     environment:
       MCP_TRANSPORT: streamable-http
       MCP_PORT: "8000"
@@ -336,6 +338,12 @@ services:
       - "127.0.0.1:8108:8108"
       - "127.0.0.1:8109:8109"
       - "127.0.0.1:8110:8110"
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     logging:
       driver: json-file
       options:
