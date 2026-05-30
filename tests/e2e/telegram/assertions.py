@@ -205,15 +205,25 @@ def assert_thinking_not_in_final(capture: ResponseCapture) -> None:
 
 
 def assert_thinking_max_length(capture: ResponseCapture, max_chars: int = 800) -> None:
-    """Assert thinking block is within the max_chars limit (AGENTS.md §3)."""
+    """Assert thinking block content is within the max_chars limit (AGENTS.md §3).
+
+    Measures only the thinking *content*, excluding:
+    - The header line ("💭 Razonando...\\n") that the formatter prepends.
+    - The trailing "\\n…" truncation suffix added by the formatter.
+    """
     thinking = capture.thinking_message
     if thinking is None:
         return
     text = thinking.final_text
-    if len(text) > max_chars:
+    # Strip the header line ("💭 Razonando...\n") before measuring content length.
+    content = text.split("\n", 1)[1] if "\n" in text else text
+    # Strip the trailing truncation suffix "\n…" if present.
+    if content.endswith("\n…"):
+        content = content[:-2]
+    if len(content) > max_chars:
         raise AssertionError(
-            f"Thinking block too long: {len(text)} chars > {max_chars} limit. "
-            f"Start: {text[:100]!r}"
+            f"Thinking block too long: {len(content)} chars > {max_chars} limit. "
+            f"Content start: {content[:100]!r}"
         )
 
 
