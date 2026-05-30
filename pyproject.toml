@@ -6,4 +6,5 @@ asyncio_mode = "auto"
 pythonpath = ["."]
 markers = [
     "integration: E2E integration tests that spawn real MCP subprocess (require uv sync)",
+    "e2e_telegram: Telegram E2E tests — require a real Telegram account and a running Lina instance. Not run in CI by default.",
 ]
