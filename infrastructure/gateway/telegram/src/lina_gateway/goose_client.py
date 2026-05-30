@@ -173,6 +173,20 @@ class GoosedClient:
                 headers=self._headers,
             )
             if r.status_code == 200:
+                # Session exists — still resume so extensions from current
+                # config.yaml are loaded (handles goosed restarts with new MCPs).
+                r_resume = await c.post(
+                    f"{self._base_url}/agent/resume",
+                    json={"session_id": session_id, "load_model_and_extensions": True},
+                    headers=self._headers,
+                )
+                if r_resume.is_success:
+                    logger.info("Extensions reloaded for existing session %s", session_id)
+                else:
+                    logger.warning(
+                        "agent/resume failed for %s: %s %s",
+                        session_id, r_resume.status_code, r_resume.text[:200],
+                    )
                 return session_id
 
             # Session doesn't exist — create a new one
