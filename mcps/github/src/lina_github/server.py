@@ -5,6 +5,7 @@ Variables de entorno:
     MCP_TRANSPORT     stdio (default) | streamable-http
     MCP_PORT          puerto HTTP (default 8000)
 """
+
 from __future__ import annotations
 
 import logging
@@ -19,7 +20,7 @@ log = logging.getLogger("lina-github")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 _GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
-_GITHUB_API   = "https://api.github.com"
+_GITHUB_API = "https://api.github.com"
 _MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
 _MCP_HTTP_PORT = int(os.environ.get("MCP_PORT", "8000"))
 
@@ -62,7 +63,9 @@ def _patch(path: str, json: dict) -> Any:
 @mcp.tool()
 def github_list_repos(owner: str, page: int = 1, per_page: int = 30) -> list[dict]:
     """Lista repositorios de un usuario u organización (owner)."""
-    return _get(f"/users/{owner}/repos", params={"page": page, "per_page": per_page, "sort": "updated"})
+    return _get(
+        f"/users/{owner}/repos", params={"page": page, "per_page": per_page, "sort": "updated"}
+    )
 
 
 @mcp.tool()
@@ -85,10 +88,16 @@ def github_get_file(owner: str, repo: str, path: str, ref: str = "HEAD") -> dict
     """
     data = _get(f"/repos/{owner}/{repo}/contents/{path}", params={"ref": ref})
     if isinstance(data, list):
-        return {"type": "directory", "entries": [{"name": e["name"], "type": e["type"]} for e in data]}
+        return {
+            "type": "directory",
+            "entries": [{"name": e["name"], "type": e["type"]} for e in data],
+        }
     import base64
+
     content_b64 = data.get("content", "").replace("\n", "")
-    data["content"] = base64.b64decode(content_b64).decode("utf-8", errors="replace") if content_b64 else ""
+    data["content"] = (
+        base64.b64decode(content_b64).decode("utf-8", errors="replace") if content_b64 else ""
+    )
     return data
 
 
@@ -101,11 +110,15 @@ def github_list_issues(
     per_page: int = 20,
 ) -> list[dict]:
     """Lista issues de un repositorio. state: open | closed | all."""
-    return _get(f"/repos/{owner}/{repo}/issues", params={"state": state, "page": page, "per_page": per_page})
+    return _get(
+        f"/repos/{owner}/{repo}/issues", params={"state": state, "page": page, "per_page": per_page}
+    )
 
 
 @mcp.tool()
-def github_create_issue(owner: str, repo: str, title: str, body: str = "", labels: list[str] | None = None) -> dict:
+def github_create_issue(
+    owner: str, repo: str, title: str, body: str = "", labels: list[str] | None = None
+) -> dict:
     """Crea un issue en un repositorio."""
     payload: dict[str, Any] = {"title": title, "body": body}
     if labels:
@@ -122,7 +135,9 @@ def github_list_prs(
     per_page: int = 20,
 ) -> list[dict]:
     """Lista pull requests de un repositorio. state: open | closed | all."""
-    return _get(f"/repos/{owner}/{repo}/pulls", params={"state": state, "page": page, "per_page": per_page})
+    return _get(
+        f"/repos/{owner}/{repo}/pulls", params={"state": state, "page": page, "per_page": per_page}
+    )
 
 
 @mcp.tool()
@@ -141,9 +156,10 @@ def github_create_pr(
         head: rama origen (ej: feat/my-feature)
         base: rama destino (ej: main)
     """
-    return _post(f"/repos/{owner}/{repo}/pulls", json={
-        "title": title, "head": head, "base": base, "body": body, "draft": draft
-    })
+    return _post(
+        f"/repos/{owner}/{repo}/pulls",
+        json={"title": title, "head": head, "base": base, "body": body, "draft": draft},
+    )
 
 
 @mcp.tool()
@@ -187,7 +203,9 @@ def main() -> None:
         stream=sys.stderr,
     )
     if not _GITHUB_TOKEN:
-        log.warning("GITHUB_TOKEN no configurado — peticiones sin autenticar (rate-limit: 60 req/h)")
+        log.warning(
+            "GITHUB_TOKEN no configurado — peticiones sin autenticar (rate-limit: 60 req/h)"
+        )
     log.info("starting lina-github (transport=%s, port=%d)", _MCP_TRANSPORT, _MCP_HTTP_PORT)
     mcp.run(transport=_MCP_TRANSPORT)
 

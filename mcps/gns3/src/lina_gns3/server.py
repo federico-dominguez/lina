@@ -8,6 +8,7 @@ Variables de entorno:
     MCP_TRANSPORT     stdio (default) | streamable-http
     MCP_PORT          puerto HTTP (default 8000)
 """
+
 from __future__ import annotations
 
 import logging
@@ -21,11 +22,11 @@ from mcp.server.fastmcp import FastMCP
 log = logging.getLogger("lina-gns3")
 
 # ── Config ────────────────────────────────────────────────────────────────────
-_GNS3_HOST  = os.environ.get("GNS3_HOST", "localhost")
-_GNS3_PORT  = int(os.environ.get("GNS3_PORT", "3080"))
-_GNS3_USER  = os.environ.get("GNS3_USER", "")
-_GNS3_PASS  = os.environ.get("GNS3_PASSWORD", "")
-_GNS3_BASE  = f"http://{_GNS3_HOST}:{_GNS3_PORT}/v2"
+_GNS3_HOST = os.environ.get("GNS3_HOST", "localhost")
+_GNS3_PORT = int(os.environ.get("GNS3_PORT", "3080"))
+_GNS3_USER = os.environ.get("GNS3_USER", "")
+_GNS3_PASS = os.environ.get("GNS3_PASSWORD", "")
+_GNS3_BASE = f"http://{_GNS3_HOST}:{_GNS3_PORT}/v2"
 _MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
 _MCP_HTTP_PORT = int(os.environ.get("MCP_PORT", "8000"))
 
@@ -164,7 +165,9 @@ def main() -> None:
     )
     log.info(
         "starting lina-gns3 (gns3=%s:%d, transport=%s)",
-        _GNS3_HOST, _GNS3_PORT, _MCP_TRANSPORT,
+        _GNS3_HOST,
+        _GNS3_PORT,
+        _MCP_TRANSPORT,
     )
     mcp.run(transport=_MCP_TRANSPORT)
 

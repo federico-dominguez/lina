@@ -13,6 +13,7 @@ Primer uso:
     usuario autorice en el navegador. Tras eso el token queda persistido en
     GCALENDAR_TOKEN_FILE y no vuelve a pedirse (se refresca automáticamente).
 """
+
 from __future__ import annotations
 
 import logging
@@ -26,9 +27,7 @@ from mcp.server.fastmcp import FastMCP
 log = logging.getLogger("lina-gcalendar")
 
 # ── Config ────────────────────────────────────────────────────────────────────
-_CREDENTIALS_FILE = os.environ.get(
-    "GCALENDAR_CREDENTIALS_FILE", "/run/gcalendar/credentials.json"
-)
+_CREDENTIALS_FILE = os.environ.get("GCALENDAR_CREDENTIALS_FILE", "/run/gcalendar/credentials.json")
 _TOKEN_FILE = os.environ.get("GCALENDAR_TOKEN_FILE", "/run/gcalendar/token.json")
 _SCOPES = ["https://www.googleapis.com/auth/calendar"]
 _MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
@@ -40,7 +39,6 @@ mcp = FastMCP("lina-gcalendar", host="0.0.0.0", port=_MCP_HTTP_PORT)
 # ── Auth ──────────────────────────────────────────────────────────────────────
 def _build_service():
     """Construye el cliente de Google Calendar, refrescando token si es necesario."""
-    import json
 
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
@@ -201,9 +199,7 @@ def gcal_update_event(
     if end:
         patch["end"] = _dt_body(end)
 
-    return service.events().patch(
-        calendarId=calendar_id, eventId=event_id, body=patch
-    ).execute()
+    return service.events().patch(calendarId=calendar_id, eventId=event_id, body=patch).execute()
 
 
 @mcp.tool()
@@ -223,7 +219,8 @@ def main() -> None:
     )
     log.info(
         "starting lina-gcalendar (credentials=%s, transport=%s)",
-        _CREDENTIALS_FILE, _MCP_TRANSPORT,
+        _CREDENTIALS_FILE,
+        _MCP_TRANSPORT,
     )
     mcp.run(transport=_MCP_TRANSPORT)
 
