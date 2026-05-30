@@ -110,6 +110,13 @@ class Bot:
     ) -> None:
         session_id = self._session_id(chat_id)
 
+        # Ensure the session exists in goosed (creates it if needed)
+        try:
+            session_id = await self._goosed.ensure_session(session_id)
+            self._sessions[chat_id] = session_id
+        except Exception as exc:
+            logger.warning("Could not ensure session for chat %s: %s", chat_id, exc)
+
         # Accumulators for the current bubble
         thinking_acc = ""
         body_acc = ""
