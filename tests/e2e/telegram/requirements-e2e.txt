@@ -1,0 +1,8 @@
+# E2E Telegram testing dependencies
+# Install with: pip install -r requirements-e2e.txt
+# Or: uv pip install -r requirements-e2e.txt
+
+telethon>=1.36
+pytest>=8
+pytest-asyncio>=0.23
+pytest-json-report>=1.5

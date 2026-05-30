@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""
+lina-tg-probe — CLI for E2E testing of the Lina Telegram bot.
+
+Usage:
+    lina-tg-probe send "<prompt>"      # Send one prompt, print metrics + response
+    lina-tg-probe send "<prompt>" --json   # Output JSON metrics
+    lina-tg-probe repl                 # Interactive REPL against the bot
+    lina-tg-probe suite [--filter <pattern>] [--report json|text]
+
+Required env vars: TELEGRAM_TEST_API_ID, TELEGRAM_TEST_API_HASH,
+                   TELEGRAM_TEST_PHONE, LINA_BOT_USERNAME
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import os
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
+from typing import Optional
+
+# Allow running from repo root without installing
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+
+async def _cmd_send(prompt: str, as_json: bool, timeout: float) -> int:
+    from tests.e2e.telegram.assertions import assert_full_integrity
+    from tests.e2e.telegram.client import TelegramTestClient
+
+    async with TelegramTestClient(collect_timeout=timeout) as tg:
+        capture = await tg.send_prompt(prompt)
+
+    if as_json:
+        data = {
+            "ttft_s": round(capture.ttft or 0, 3),
+            "ttlt_s": round(capture.ttlt or 0, 3),
+            "total_edits": capture.total_edit_count,
+            "final_message_count": len(capture.final_messages),
+            "total_chars": capture.total_chars,
+            "approx_tokens_per_second": (
+                round(capture.approx_tokens_per_second, 1)
+                if capture.approx_tokens_per_second else None
+            ),
+            "thinking": bool(capture.thinking_message),
+            "edit_intervals_ms": [round(x, 1) for x in capture.all_edit_intervals_ms],
+            "final_text": capture.final_text,
+        }
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        _print_capture(capture)
+
+    return 0
+
+
+def _print_capture(capture: object) -> None:  # ResponseCapture
+    from tests.e2e.telegram.capture import ResponseCapture
+    assert isinstance(capture, ResponseCapture)
+
+    SEP = "─" * 60
+    print(SEP)
+    print(f"  TTFT : {capture.ttft:.2f}s" if capture.ttft else "  TTFT : N/A")
+    print(f"  TTLT : {capture.ttlt:.2f}s" if capture.ttlt else "  TTLT : N/A")
+    print(f"  Edits: {capture.total_edit_count}")
+    print(f"  Chars: {capture.total_chars}")
+    tps = capture.approx_tokens_per_second
+    print(f"  ~TPS : {tps:.1f}" if tps else "  ~TPS : N/A")
+    if capture.thinking_message:
+        thinking_len = len(capture.thinking_message.final_text)
+        print(f"  💭   : yes ({thinking_len} chars)")
+    else:
+        print("  💭   : no")
+    print(SEP)
+
+    if capture.thinking_message:
+        print("\n[THINKING]")
+        print(textwrap.fill(capture.thinking_message.final_text, width=80))
+        print()
+
+    for i, msg in enumerate(capture.final_messages, 1):
+        label = f"[RESPONSE {i}/{len(capture.final_messages)}]"
+        print(f"\n{label}")
+        print(msg.final_text)
+
+    print()
+
+
+async def _cmd_repl(timeout: float) -> int:
+    from tests.e2e.telegram.client import TelegramTestClient
+
+    print("lina-tg-probe REPL — type a message, press Enter, see the response.")
+    print("Commands: :quit / :exit  to exit,  :timeout <secs>  to change timeout")
+    print()
+
+    async with TelegramTestClient(collect_timeout=timeout) as tg:
+        current_timeout = timeout
+        while True:
+            try:
+                line = input("you> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nBye.")
+                break
+
+            if not line:
+                continue
+            if line in (":quit", ":exit", "/exit"):
+                break
+            if line.startswith(":timeout "):
+                try:
+                    current_timeout = float(line.split()[1])
+                    print(f"Timeout set to {current_timeout}s")
+                except (IndexError, ValueError):
+                    print("Usage: :timeout <seconds>")
+                continue
+
+            capture = await tg.send_prompt(line, timeout=current_timeout)
+            _print_capture(capture)
+
+    return 0
+
+
+async def _cmd_suite(filter_pattern: Optional[str], report: str) -> int:
+    """Run pytest on the e2e telegram suite and optionally pretty-print results."""
+    repo_root = Path(__file__).parent.parent
+    test_dir = repo_root / "tests" / "e2e" / "telegram" / "scenarios"
+
+    cmd = [
+        sys.executable, "-m", "pytest",
+        str(test_dir),
+        "-m", "e2e_telegram",
+        "-v",
+        "--tb=short",
+    ]
+    if filter_pattern:
+        cmd += ["-k", filter_pattern]
+    if report == "json":
+        report_path = repo_root / "tests" / "e2e" / "telegram" / ".report.json"
+        cmd += [f"--json-report", f"--json-report-file={report_path}"]
+        print(f"JSON report will be written to: {report_path}")
+
+    result = subprocess.run(cmd, cwd=repo_root)
+    return result.returncode
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="lina-tg-probe",
+        description="E2E probe for the Lina Telegram bot",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    sub = p.add_subparsers(dest="command", required=True)
+
+    # send
+    s = sub.add_parser("send", help="Send a single prompt and show metrics")
+    s.add_argument("prompt", help="Text to send to Lina")
+    s.add_argument("--json", action="store_true", dest="as_json", help="Output JSON metrics")
+    s.add_argument("--timeout", type=float, default=90.0, help="Max wait in seconds (default 90)")
+
+    # repl
+    r = sub.add_parser("repl", help="Interactive REPL against Lina")
+    r.add_argument("--timeout", type=float, default=90.0)
+
+    # suite
+    t = sub.add_parser("suite", help="Run the full E2E test suite")
+    t.add_argument("--filter", dest="filter_pattern", default=None, help="pytest -k filter")
+    t.add_argument("--report", choices=["text", "json"], default="text")
+
+    return p
+
+
+def main() -> None:
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    if args.command == "send":
+        rc = asyncio.run(_cmd_send(args.prompt, args.as_json, args.timeout))
+    elif args.command == "repl":
+        rc = asyncio.run(_cmd_repl(args.timeout))
+    elif args.command == "suite":
+        rc = asyncio.run(_cmd_suite(args.filter_pattern, args.report))
+    else:
+        parser.print_help()
+        rc = 1
+
+    sys.exit(rc)
+
+
+if __name__ == "__main__":
+    main()
