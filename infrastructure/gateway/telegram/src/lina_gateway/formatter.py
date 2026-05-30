@@ -223,9 +223,22 @@ def sanitize_lang(raw: str) -> str | None:
 
 _INLINE_CODE = re.compile(r"`([^`]+)`")
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*|__(.+?)__", re.DOTALL)
-_ITALIC_RE = re.compile(r"\*(.+?)\*|_(.+?)_", re.DOTALL)
+# Italic: *text* requires non-word-char boundaries to avoid matching inside URLs
+# (_text_ uses word-boundary checks so href="foo_bar" is not corrupted)
+_ITALIC_RE = re.compile(
+    r"(?<![*])\*(?=[^\s*\n])([^*\n]+?)(?<=[^\s])\*(?![*])"
+    r"|(?<!\w)_(?=[^\s_\n])([^_\n]+?)(?<=[^\s])_(?!\w)",
+)
 _STRIKE_RE = re.compile(r"~~(.+?)~~", re.DOTALL)
 _LINK_RE = re.compile(r"\[(.+?)\]\((.+?)\)")
+
+# Patterns used to STRIP (not convert) inline markdown in <pre><code> contexts
+# where HTML tags render as literal text anyway.
+_STRIP_MD_BOLD = re.compile(r"\*\*(.+?)\*\*|__(.+?)__", re.DOTALL)
+_STRIP_MD_ITALIC = re.compile(r"\*(.+?)\*|_(.+?)_", re.DOTALL)
+_STRIP_MD_CODE = re.compile(r"`([^`]+)`")
+_STRIP_MD_STRIKE = re.compile(r"~~(.+?)~~", re.DOTALL)
+_STRIP_MD_LINK = re.compile(r"\[(.+?)\]\(.+?\)")
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$")
 _HR_RE = re.compile(r"^(-{3,}|\*{3,}|_{3,})$")
 _UL_RE = re.compile(r"^(\s*)[*\-+]\s+(.+)$")
@@ -246,14 +259,33 @@ class _MarkdownState:
     output: list[str] = field(default_factory=list)
 
 
+def _strip_inline_markdown(text: str) -> str:
+    """Remove inline markdown markers, keeping the content.
+
+    Used for table cells inside ``<pre><code>`` blocks where HTML tags are not
+    rendered by Telegram — they would appear as literal ``<b>`` characters.
+    """
+    text = _STRIP_MD_CODE.sub(r"\1", text)
+    text = _STRIP_MD_BOLD.sub(lambda m: m.group(1) or m.group(2), text)
+    text = _STRIP_MD_ITALIC.sub(lambda m: m.group(1) or m.group(2), text)
+    text = _STRIP_MD_STRIKE.sub(r"\1", text)
+    text = _STRIP_MD_LINK.sub(r"\1", text)
+    return text
+
+
 def _inline_format(text: str) -> str:
-    """Apply inline formatting (bold, italic, code, links, strike)."""
-    # Links first to avoid mangling URLs
-    text = _LINK_RE.sub(lambda m: f'<a href="{escape_html(m.group(2))}">{escape_html(m.group(1))}</a>', text)
-    text = _INLINE_CODE.sub(lambda m: f"<code>{escape_html(m.group(1))}</code>", text)
-    text = _BOLD_RE.sub(lambda m: f"<b>{escape_html(m.group(1) or m.group(2))}</b>", text)
-    text = _ITALIC_RE.sub(lambda m: f"<i>{escape_html(m.group(1) or m.group(2))}</i>", text)
-    text = _STRIKE_RE.sub(lambda m: f"<s>{escape_html(m.group(1))}</s>", text)
+    """Apply inline formatting (bold, italic, code, links, strike).
+
+    Pre-condition: *text* must already be HTML-escaped via ``escape_html()``.
+    This function must NOT call ``escape_html`` internally — the input is
+    pre-escaped and double-escaping would corrupt HTML entities.
+    """
+    # Links first to avoid mangling URLs that contain markdown-like chars
+    text = _LINK_RE.sub(lambda m: f'<a href="{m.group(2)}">{m.group(1)}</a>', text)
+    text = _INLINE_CODE.sub(lambda m: f"<code>{m.group(1)}</code>", text)
+    text = _BOLD_RE.sub(lambda m: f"<b>{m.group(1) or m.group(2)}</b>", text)
+    text = _ITALIC_RE.sub(lambda m: f"<i>{m.group(1) or m.group(2)}</i>", text)
+    text = _STRIKE_RE.sub(lambda m: f"<s>{m.group(1)}</s>", text)
     return text
 
 
@@ -293,7 +325,9 @@ def _render_table(rows: list[list[str]], header_rows: int) -> str:
         for col_idx, width in enumerate(col_widths):
             cell = row[col_idx] if col_idx < len(row) else ""
             pad = width - _cell_display_width(cell)
-            cells.append(f" {escape_html(cell)}{' ' * (pad + 1)}")
+            # Strip markdown markers: inside <pre><code> HTML tags render as
+            # literal text, so **bold** would appear with asterisks.
+            cells.append(f" {escape_html(_strip_inline_markdown(cell))}{' ' * (pad + 1)}")
         lines.append("│" + "│".join(cells) + "│")
     lines.append(bot)
     return "<pre><code>" + "\n".join(lines) + "\n</code></pre>"
@@ -455,9 +489,12 @@ def format_with_thinking(thinking: str, body: str, sealed: bool) -> str:
 
     suffix = "\n…" if truncated else ""
     tag = "<blockquote expandable>" if sealed else "<blockquote>"
+    # Apply full markdown conversion so DeepSeek's **bold** / *italic* in
+    # reasoning text is rendered properly instead of leaking as raw markers.
+    thinking_body_html = markdown_to_telegram_html(thinking_trimmed)
     thinking_html = (
         f"{tag}💭 <i>Razonando...</i>\n"
-        f"{escape_html(thinking_trimmed)}{suffix}"
+        f"{thinking_body_html}{suffix}"
         "</blockquote>"
     )
     body_html = markdown_to_telegram_html(body)
