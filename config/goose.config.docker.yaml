@@ -75,6 +75,40 @@ extensions:
     enabled: true
     timeout: 30
 
+  # ─── MCPs legacy (ports 8107-8110) ──────────────────────────────────────────
+
+  lina-github:
+    name: lina-github
+    display_name: LINA GitHub
+    type: streamable_http
+    uri: http://lina-mcp-gateway:8107/mcp
+    enabled: true
+    timeout: 60
+
+  lina-gitlab:
+    name: lina-gitlab
+    display_name: LINA GitLab
+    type: streamable_http
+    uri: http://lina-mcp-gateway:8108/mcp
+    enabled: true
+    timeout: 60
+
+  lina-gcalendar:
+    name: lina-gcalendar
+    display_name: LINA Google Calendar
+    type: streamable_http
+    uri: http://lina-mcp-gateway:8109/mcp
+    enabled: true
+    timeout: 60
+
+  lina-gns3:
+    name: lina-gns3
+    display_name: LINA GNS3
+    type: streamable_http
+    uri: http://lina-mcp-gateway:8110/mcp
+    enabled: true
+    timeout: 60
+
 providers:
   custom_deepseek:
     enabled: true
