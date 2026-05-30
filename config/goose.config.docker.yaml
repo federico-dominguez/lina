@@ -22,55 +22,56 @@ extensions:
   summon:             {enabled: true,  type: platform, name: summon,              display_name: Summon,              bundled: true}
   summarize:          {enabled: true,  type: platform, name: summarize,           display_name: Summarize,           bundled: true}
 
-  # ─── MCPs de LINA — acceso vía SSE (lina-mcp-gateway:8101-8106) ─────────────
+  # ─── MCPs de LINA — acceso vía streamable_http (lina-mcp-gateway:8101-8106) ──
   # El gateway nginx expone cada MCP en un puerto distinto dentro del network.
   # Dentro de Docker los nombres de servicio resuelven directamente.
+  # goosed >= 1.35 requiere streamable_http (SSE deprecated).
 
   lina-secrets:
     name: lina-secrets
     display_name: LINA Secrets
-    type: sse
-    uri: http://lina-mcp-gateway:8101/sse
+    type: streamable_http
+    uri: http://lina-mcp-gateway:8101/mcp
     enabled: true
     timeout: 30
 
   lina-fs-safe:
     name: lina-fs-safe
     display_name: LINA FS Safe
-    type: sse
-    uri: http://lina-mcp-gateway:8102/sse
+    type: streamable_http
+    uri: http://lina-mcp-gateway:8102/mcp
     enabled: true
     timeout: 60
 
   lina-shell-policy:
     name: lina-shell-policy
     display_name: LINA Shell Policy
-    type: sse
-    uri: http://lina-mcp-gateway:8103/sse
+    type: streamable_http
+    uri: http://lina-mcp-gateway:8103/mcp
     enabled: true
     timeout: 120
 
   lina-systemd-user:
     name: lina-systemd-user
     display_name: LINA Systemd User
-    type: sse
-    uri: http://lina-mcp-gateway:8104/sse
+    type: streamable_http
+    uri: http://lina-mcp-gateway:8104/mcp
     enabled: true
     timeout: 30
 
   lina-moodle:
     name: lina-moodle
     display_name: LINA Moodle
-    type: sse
-    uri: http://lina-mcp-gateway:8105/sse
+    type: streamable_http
+    uri: http://lina-mcp-gateway:8105/mcp
     enabled: true
     timeout: 120
 
   lina-db:
     name: lina-db
     display_name: LINA DB
-    type: sse
-    uri: http://lina-mcp-gateway:8106/sse
+    type: streamable_http
+    uri: http://lina-mcp-gateway:8106/mcp
     enabled: true
     timeout: 30
 
