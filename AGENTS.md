@@ -144,6 +144,12 @@ Antes de: borrar archivos, sobreescribir, reiniciar servicios, enviar formulario
 - **Archivos**: siempre via MCP `lina-fs-safe`. No usar `open()` directo en Python scripts.
 - **Shell**: siempre via MCP `lina-shell-policy`. No ejecutar comandos no auditados.
 
+**Rutas en lina-fs-safe**: el MCP corre en Docker con `$HOME=/home/user` y el host montado en `/home/user`. Usá **siempre rutas absolutas**:
+- Repo LINA: `/home/user/lina/` (no `~/lina/`)
+- Documentos: `/home/user/Documents/`
+- Proyectos: `/home/user/IdeaProjects/`
+Las llamadas con `~/` pueden fallar si goosed expande la tilde antes de enviarla al MCP.
+
 ### 5.2 Estrategia de tool use
 - **Verificá antes de actuar**: si no estás segura del estado actual (ej: ¿está el archivo X?), verificalo primero con una tool read/list.
 - **Secuencial sobre paralelo** en operaciones con dependencias. Si paso B depende de A, no los mandes juntos.
