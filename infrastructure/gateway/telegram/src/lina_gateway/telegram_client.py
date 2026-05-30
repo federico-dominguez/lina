@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import tempfile
@@ -10,6 +11,16 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+
+# Minimum seconds between successive edits of the same message.
+# Safety net against 429 flood-waits during rapid streaming updates.
+_MIN_EDIT_INTERVAL_S = 0.5
+
+# Indicator appended to the first chunk when a message must be truncated.
+_EDIT_TRUNCATION_INDICATOR = "\n\n<i>… [respuesta truncada]</i>"
+
+# Maximum retries on Telegram 429 Too Many Requests.
+_MAX_429_RETRIES = 3
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +74,8 @@ class TelegramClient:
             timeout=httpx.Timeout(connect=10.0, read=poll_timeout + 15.0, write=30.0, pool=5.0),
             http2=False,
         )
+        # Tracks last edit timestamp per (chat_id, message_id) for throttling.
+        self._last_edit_at: dict[tuple[int, int], float] = {}
 
     def _url(self, method: str) -> str:
         return f"{TELEGRAM_API_BASE}/bot{self._token}/{method}"
@@ -90,7 +103,21 @@ class TelegramClient:
         chunks = split_message(html)
         for chunk in chunks:
             payload = {"chat_id": chat_id, "text": chunk, "parse_mode": "HTML"}
-            resp = await self._http.post(self._url("sendMessage"), json=payload)
+            resp: httpx.Response | None = None
+            for attempt in range(_MAX_429_RETRIES):
+                resp = await self._http.post(self._url("sendMessage"), json=payload)
+                if resp.status_code == 429:
+                    retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
+                    logger.warning(
+                        "sendMessage 429 chat=%s retry_after=%ss attempt=%s",
+                        chat_id, retry_after, attempt + 1,
+                    )
+                    await asyncio.sleep(retry_after)
+                    continue
+                break
+            if resp is None:
+                logger.error("sendMessage: no response after retries chat=%s", chat_id)
+                return last_id
             resp.raise_for_status()
             data = resp.json()
             if data.get("ok"):
@@ -117,12 +144,32 @@ class TelegramClient:
         return last_id
 
     async def edit_message(self, chat_id: int, message_id: int, html: str) -> None:
-        """Edit an existing message.  Ignores "not modified" errors silently."""
+        """Edit an existing message.  Ignores "not modified" errors silently.
+
+        Handles 429 with Retry-After back-off, and throttles successive edits
+        of the same message to avoid triggering Telegram flood limits.  When
+        the formatted HTML exceeds Telegram's 4096-character limit the first
+        chunk is sent and a truncation indicator is appended.
+        """
         from .formatter import split_message, strip_html_tags
 
-        # edit_message only supports a single chunk — take the first 4096 chars worth
+        # ── Per-message edit throttle ─────────────────────────────────────
+        key = (chat_id, message_id)
+        last = self._last_edit_at.get(key, 0.0)
+        gap = asyncio.get_running_loop().time() - last
+        if gap < _MIN_EDIT_INTERVAL_S:
+            await asyncio.sleep(_MIN_EDIT_INTERVAL_S - gap)
+
+        # ── Truncate with indicator when message is too long ──────────────
         chunks = split_message(html)
-        text = chunks[0] if chunks else html
+        if len(chunks) > 1:
+            # Make room for the truncation indicator inside the 4096-char limit
+            indicator = _EDIT_TRUNCATION_INDICATOR
+            room = len(indicator)
+            short_chunks = split_message(html, max_len=4096 - room)
+            text = short_chunks[0] + indicator
+        else:
+            text = chunks[0] if chunks else html
 
         payload = {
             "chat_id": chat_id,
@@ -130,14 +177,29 @@ class TelegramClient:
             "text": text,
             "parse_mode": "HTML",
         }
-        try:
-            resp = await self._http.post(self._url("editMessageText"), json=payload)
+
+        for attempt in range(_MAX_429_RETRIES):
+            try:
+                resp = await self._http.post(self._url("editMessageText"), json=payload)
+            except Exception as exc:
+                logger.warning("editMessageText network error: %s", exc)
+                return
+
+            if resp.status_code == 429:
+                retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
+                logger.warning(
+                    "editMessageText 429 chat=%s msg=%s retry_after=%ss attempt=%s",
+                    chat_id, message_id, retry_after, attempt + 1,
+                )
+                await asyncio.sleep(retry_after)
+                continue
+
             if not resp.is_success:
                 body = resp.text
                 if "message is not modified" in body:
-                    return
+                    break
                 if resp.status_code == 400:
-                    # HTML probably malformed (streaming partial tags) — retry as plain text
+                    # HTML probably malformed (streaming partial tag) — retry as plain
                     plain = strip_html_tags(text)
                     r2 = await self._http.post(
                         self._url("editMessageText"),
@@ -148,13 +210,14 @@ class TelegramClient:
                             "editMessageText plain fallback failed chat=%s msg=%s err=%s",
                             chat_id, message_id, r2.text[:200],
                         )
-                    return
+                    break
                 logger.warning(
                     "editMessageText failed chat=%s msg=%s status=%s err=%s",
                     chat_id, message_id, resp.status_code, body[:200],
                 )
-        except Exception as exc:
-            logger.warning("editMessageText network error: %s", exc)
+            break  # success or non-retryable error
+
+        self._last_edit_at[key] = asyncio.get_running_loop().time()
 
     async def send_chat_action(self, chat_id: int, action: str = "typing") -> None:
         try:

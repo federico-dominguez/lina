@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import defaultdict
 
 from .config import Config
@@ -111,6 +112,8 @@ class Bot:
         cancel_event: asyncio.Event,
     ) -> None:
         session_id = self._session_id(chat_id)
+        reply_start = time.monotonic()
+        first_send_ts: float | None = None  # timestamp of the first message sent to the user
 
         # Ensure the session exists in goosed (creates it if needed)
         try:
@@ -183,6 +186,8 @@ class Bot:
                             # Open the thinking bubble (its own Telegram message)
                             html = format_with_thinking(thinking_acc, "", False)
                             thinking_bubble_msg_id = await self._tg.send_message(chat_id, html)
+                            if first_send_ts is None:
+                                first_send_ts = time.monotonic()
                             thinking_bubble = StreamingBubble(
                                 tick=self._cfg.pacer_tick,
                                 edit_fn=_edit_thinking_bubble,
@@ -205,6 +210,8 @@ class Bot:
                             if not html.strip():
                                 html = "…"  # placeholder; overwritten on next tick
                             body_bubble_msg_id = await self._tg.send_message(chat_id, html)
+                            if first_send_ts is None:
+                                first_send_ts = time.monotonic()
                             body_bubble = StreamingBubble(
                                 tick=self._cfg.pacer_tick,
                                 edit_fn=_edit_body_bubble,
@@ -256,6 +263,13 @@ class Bot:
 
         # Final seal of whichever bubble is still active
         await _seal_all()
+
+        total_s = time.monotonic() - reply_start
+        ttft_s = (first_send_ts - reply_start) if first_send_ts else total_s
+        logger.info(
+            "reply: chat=%s ttft=%.2fs total=%.2fs",
+            chat_id, ttft_s, total_s,
+        )
 
         # Belt-and-suspenders: body arrived but no bubble was created somehow
         if body_acc and body_bubble_msg_id is None and thinking_bubble_msg_id is None:
