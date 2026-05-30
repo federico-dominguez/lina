@@ -28,7 +28,7 @@ def pytest_configure(config: pytest.Config) -> None:
     )
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def tg() -> TelegramTestClient:  # type: ignore[misc]
     """Session-scoped connected TelegramTestClient."""
     async with TelegramTestClient() as client:
