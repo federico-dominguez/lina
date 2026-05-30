@@ -80,7 +80,10 @@ class TelegramTestClient:
 
         self._session_dir.mkdir(parents=True, exist_ok=True)
         session_path = str(self._session_dir / "lina_e2e")
+        # parse_mode=None avoids Telethon re-interpreting bot HTML as Markdown
+        # which would corrupt msg.text when the bot sends HTML-mode messages.
         self._client = TelegramClient(session_path, self._api_id, self._api_hash)
+        self._client.parse_mode = None
         self._bot_id: Optional[int] = None
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -116,6 +119,11 @@ class TelegramTestClient:
         Returns a :class:`ResponseCapture` once the bot is silent for
         *stable_window* seconds or *timeout* is reached.
         """
+        if self._bot_id is None:
+            raise RuntimeError(
+                "TelegramTestClient is not connected. "
+                "Call connect() or use async context manager before send_prompt()."
+            )
         timeout = timeout or self._collect_timeout
         stable = stable_window or self._stable_window
 

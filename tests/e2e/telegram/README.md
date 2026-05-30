@@ -26,7 +26,7 @@ Gestioná los secretos via `lina-secrets` — **nunca** los pongas en `.env` del
 ## Instalación de dependencias
 
 ```bash
-cd /home/fede/lina
+# desde la raíz del repo
 pip install -r tests/e2e/telegram/requirements-e2e.txt
 # o con uv:
 uv pip install -r tests/e2e/telegram/requirements-e2e.txt

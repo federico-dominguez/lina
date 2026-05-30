@@ -27,12 +27,9 @@ async def test_stop_mid_stream(tg: TelegramTestClient) -> None:
 
     # Wait briefly for bot to start streaming, then /stop
     await asyncio.sleep(2.0)
-    await tg.send_command("/stop")
 
-    # Collect the stop-acknowledgement with a short window
-    stop_capture = await tg.send_prompt.__func__.__wrapped__ if False else (  # type: ignore[attr-defined]
-        None
-    )
+    # Capture the /stop acknowledgement directly
+    stop_ack_capture = await tg.send_prompt("/stop", timeout=8, stable_window=1.5)
 
     # Cancel the original prompt task (we don't need the full response)
     prompt_task.cancel()
@@ -41,9 +38,7 @@ async def test_stop_mid_stream(tg: TelegramTestClient) -> None:
     except (asyncio.CancelledError, Exception):
         pass
 
-    # Separately listen for the ⛔ reply — it should already be in Telegram
-    # We verify via a fresh short capture after the /stop
-    stop_ack_capture = await tg.send_prompt("/stop", timeout=5, stable_window=1.0)
+    # The /stop reply must contain ⛔ or an equivalent acknowledgement
     final = stop_ack_capture.final_text + (
         stop_ack_capture.thinking_message.final_text if stop_ack_capture.thinking_message else ""
     )
