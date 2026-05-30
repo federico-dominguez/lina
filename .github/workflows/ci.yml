@@ -27,6 +27,14 @@ jobs:
             cov_threshold: 18  # HTTP layer no es unit-testable sin mocks — excepción documentada en docs/architecture/0008-moodle-coverage-exception.md
           - mcp: lina-db
             cov_threshold: 65
+          - mcp: github
+            cov_threshold: 60
+          - mcp: gitlab
+            cov_threshold: 60
+          - mcp: gcalendar
+            cov_threshold: 60
+          - mcp: gns3
+            cov_threshold: 60
 
     steps:
       - name: Checkout

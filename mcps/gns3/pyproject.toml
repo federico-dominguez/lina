@@ -1,23 +1,22 @@
 [project]
-name = "lina-gitlab"
+name = "lina-gns3"
 version = "0.1.0"
-description = "LINA MCP — acceso a GitLab UTEC via REST API."
+description = "LINA MCP — control de proyectos y nodos GNS3 via REST API."
 requires-python = ">=3.10"
 dependencies = [
     "mcp[cli]>=1.2.0",
     "httpx>=0.27",
-    "keyring>=25",
 ]
 
 [project.scripts]
-lina-gitlab = "lina_gitlab.server:main"
+lina-gns3 = "lina_gns3.server:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/lina_gitlab"]
+packages = ["src/lina_gns3"]
 
 [dependency-groups]
 dev = [

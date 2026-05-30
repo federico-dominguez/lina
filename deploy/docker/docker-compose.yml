@@ -232,8 +232,81 @@ services:
       MCP_PORT: "8000"
       LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
 
+  # ─── MCP: lina-github ──────────────────────────────────────────────────────
+  lina-mcp-github:
+    <<: *mcp-defaults
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.mcp
+      args:
+        MCP_DIR: mcps/github
+        MCP_CMD: lina-github
+    image: lina-mcp-github:latest
+    environment:
+      MCP_TRANSPORT: streamable-http
+      MCP_PORT: "8000"
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+
+  # ─── MCP: lina-gitlab ──────────────────────────────────────────────────────
+  lina-mcp-gitlab:
+    <<: *mcp-defaults
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.mcp
+      args:
+        MCP_DIR: mcps/gitlab
+        MCP_CMD: lina-gitlab
+    image: lina-mcp-gitlab:latest
+    environment:
+      MCP_TRANSPORT: streamable-http
+      MCP_PORT: "8000"
+      GITLAB_URL: ${GITLAB_URL:-https://git.utec.edu.uy}
+      GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+
+  # ─── MCP: lina-gcalendar ────────────────────────────────────────────────────
+  # credentials.json se monta desde el host; token.json se persiste en volumen.
+  lina-mcp-gcalendar:
+    <<: *mcp-defaults
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.mcp
+      args:
+        MCP_DIR: mcps/gcalendar
+        MCP_CMD: lina-gcalendar
+    image: lina-mcp-gcalendar:latest
+    read_only: false          # necesita escribir token.json en /run/gcalendar/
+    environment:
+      MCP_TRANSPORT: streamable-http
+      MCP_PORT: "8000"
+      GCALENDAR_CREDENTIALS_FILE: /run/gcalendar/credentials.json
+      GCALENDAR_TOKEN_FILE: /run/gcalendar/token.json
+    volumes:
+      - ${GCALENDAR_CREDENTIALS_FILE:-/dev/null}:/run/gcalendar/credentials.json:ro
+      - lina-gcalendar-token:/run/gcalendar
+
+  # ─── MCP: lina-gns3 ─────────────────────────────────────────────────────────
+  # GNS3 corre en el host en localhost:3080; usa extra_hosts para alcanzarlo.
+  lina-mcp-gns3:
+    <<: *mcp-defaults
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.mcp
+      args:
+        MCP_DIR: mcps/gns3
+        MCP_CMD: lina-gns3
+    image: lina-mcp-gns3:latest
+    environment:
+      MCP_TRANSPORT: streamable-http
+      MCP_PORT: "8000"
+      GNS3_HOST: ${GNS3_HOST:-host.docker.internal}
+      GNS3_PORT: ${GNS3_PORT:-3080}
+      GNS3_USER: ${GNS3_USER:-}
+      GNS3_PASSWORD: ${GNS3_PASSWORD:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
   # ─── MCP Gateway — nginx rate limiting (3.3) ────────────────────────────────
-  # Proxy reverso para todos los MCPs. Expone 8101-8106 en localhost.
+  # Proxy reverso para todos los MCPs. Expone 8101-8110 en localhost.
   # Los MCPs no tienen port mappings propios; sólo son accesibles via este gateway.
   # Límites: shell-policy 30 req/min, moodle 20 req/min, resto 120 req/min.
   lina-mcp-gateway:
@@ -246,6 +319,10 @@ services:
       - lina-mcp-systemd-user
       - lina-mcp-moodle
       - lina-mcp-db
+      - lina-mcp-github
+      - lina-mcp-gitlab
+      - lina-mcp-gcalendar
+      - lina-mcp-gns3
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
@@ -255,6 +332,10 @@ services:
       - "127.0.0.1:8104:8104"
       - "127.0.0.1:8105:8105"
       - "127.0.0.1:8106:8106"
+      - "127.0.0.1:8107:8107"
+      - "127.0.0.1:8108:8108"
+      - "127.0.0.1:8109:8109"
+      - "127.0.0.1:8110:8110"
     logging:
       driver: json-file
       options:
@@ -318,6 +399,7 @@ volumes:
   lina-logs:
   lina-secrets-data:
   lina-backup-data:
+  lina-gcalendar-token:
 
 networks:
   default:

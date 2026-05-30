@@ -64,3 +64,4 @@ goose-session-*.jsonl
 # ─── Build artifacts (binaries) ────────────────────────────────────────
 bin/goosed-linux-amd64
 bin/goosed-*
+deploy/docker/secrets/

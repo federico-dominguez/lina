@@ -103,7 +103,10 @@ def _encode_id(project_id: str | int) -> str:
 # MCP server
 # ---------------------------------------------------------------------------
 
-mcp = FastMCP("lina-gitlab")
+_MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
+_MCP_HTTP_PORT = int(os.environ.get("MCP_PORT", "8000"))
+
+mcp = FastMCP("lina-gitlab", host="0.0.0.0", port=_MCP_HTTP_PORT)
 
 
 @mcp.tool()
@@ -209,6 +212,7 @@ def gitlab_get_file(
         {"ref": ref},
     )
     import base64
+
     content_b64 = data.get("content", "")
     try:
         return base64.b64decode(content_b64).decode("utf-8", errors="replace")
@@ -381,8 +385,21 @@ def gitlab_get_pipeline(
 # Entrypoint
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
-    mcp.run(transport="stdio")
+    import logging
+
+    logging.basicConfig(
+        level=os.environ.get("LINA_LOG_LEVEL", "INFO"),
+        format="[lina-gitlab] %(levelname)s %(message)s",
+        stream=sys.stderr,
+    )
+    log.info(
+        "starting lina-gitlab (url=%s, transport=%s)",
+        GITLAB_URL,
+        _MCP_TRANSPORT,
+    )
+    mcp.run(transport=_MCP_TRANSPORT)
 
 
 if __name__ == "__main__":
