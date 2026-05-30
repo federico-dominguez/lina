@@ -224,9 +224,11 @@ def assert_thinking_max_length(capture: ResponseCapture, max_chars: int = 800) -
     # generally shorter than the raw markdown source.  We allow a small buffer
     # (+30 chars) for the handful of patterns (e.g. headings) that add newlines
     # after conversion: "# Title" (9 chars) → rendered "\nTitle\n\n" (11 chars).
-    if len(content) > max_chars + 30:
+    effective_limit = max_chars + 30
+    if len(content) > effective_limit:
         raise AssertionError(
-            f"Thinking block too long: {len(content)} chars > {max_chars} limit. "
+            f"Thinking block too long: {len(content)} chars > {effective_limit} "
+            f"(base limit {max_chars} + 30 formatting overhead). "
             f"Content start: {content[:100]!r}"
         )
 

@@ -307,6 +307,17 @@ class TestStripInlineMarkdown:
         result = _strip_inline_markdown("**bold** and *italic* and `code`")
         assert result == "bold and italic and code"
 
+    def test_underscores_in_identifiers_preserved(self):
+        """Regression (Copilot review): a_b_c must NOT be stripped to abc."""
+        assert _strip_inline_markdown("O(log_n)") == "O(log_n)"
+        assert _strip_inline_markdown("foo_bar_baz") == "foo_bar_baz"
+        assert _strip_inline_markdown("some_method_name(x)") == "some_method_name(x)"
+
+    def test_italic_underscore_still_works(self):
+        """Boundary-aware italic: _word_ surrounded by spaces is stripped."""
+        result = _strip_inline_markdown("use _this_ option")
+        assert result == "use this option"
+
 
 # ─── format_with_thinking (markdown in thinking) ─────────────────────────────
 

@@ -235,7 +235,12 @@ _LINK_RE = re.compile(r"\[(.+?)\]\((.+?)\)")
 # Patterns used to STRIP (not convert) inline markdown in <pre><code> contexts
 # where HTML tags render as literal text anyway.
 _STRIP_MD_BOLD = re.compile(r"\*\*(.+?)\*\*|__(.+?)__", re.DOTALL)
-_STRIP_MD_ITALIC = re.compile(r"\*(.+?)\*|_(.+?)_", re.DOTALL)
+# Use the same boundary-aware pattern as _ITALIC_RE so that underscores inside
+# identifiers/paths (e.g. ``O(log_n)``, ``foo_bar_baz``) are not stripped.
+_STRIP_MD_ITALIC = re.compile(
+    r"(?<![*])\*(?=[^\s*\n])([^*\n]+?)(?<=[^\s])\*(?![*])"
+    r"|(?<!\w)_(?=[^\s_\n])([^_\n]+?)(?<=[^\s])_(?!\w)",
+)
 _STRIP_MD_CODE = re.compile(r"`([^`]+)`")
 _STRIP_MD_STRIKE = re.compile(r"~~(.+?)~~", re.DOTALL)
 _STRIP_MD_LINK = re.compile(r"\[(.+?)\]\(.+?\)")

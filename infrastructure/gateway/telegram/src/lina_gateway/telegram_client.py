@@ -7,7 +7,7 @@ import logging
 import os
 import tempfile
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -156,7 +156,7 @@ class TelegramClient:
         # ── Per-message edit throttle ─────────────────────────────────────
         key = (chat_id, message_id)
         last = self._last_edit_at.get(key, 0.0)
-        gap = asyncio.get_event_loop().time() - last
+        gap = asyncio.get_running_loop().time() - last
         if gap < _MIN_EDIT_INTERVAL_S:
             await asyncio.sleep(_MIN_EDIT_INTERVAL_S - gap)
 
@@ -217,7 +217,7 @@ class TelegramClient:
                 )
             break  # success or non-retryable error
 
-        self._last_edit_at[key] = asyncio.get_event_loop().time()
+        self._last_edit_at[key] = asyncio.get_running_loop().time()
 
     async def send_chat_action(self, chat_id: int, action: str = "typing") -> None:
         try:
