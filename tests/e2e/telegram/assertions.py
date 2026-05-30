@@ -8,16 +8,29 @@ Designed to be used directly in pytest scenarios.
 from __future__ import annotations
 
 import re
-from typing import Optional
 
-from .capture import CapturedMessage, ResponseCapture
+from .capture import ResponseCapture
 
 # ── HTML integrity ────────────────────────────────────────────────────────────
 
 # Tags supported by Telegram HTML mode
 _TELEGRAM_ALLOWED_TAGS = frozenset(
-    ["b", "strong", "i", "em", "u", "ins", "s", "strike", "del",
-     "code", "pre", "a", "tg-spoiler", "blockquote"]
+    [
+        "b",
+        "strong",
+        "i",
+        "em",
+        "u",
+        "ins",
+        "s",
+        "strike",
+        "del",
+        "code",
+        "pre",
+        "a",
+        "tg-spoiler",
+        "blockquote",
+    ]
 )
 
 _TAG_RE = re.compile(r"<(/?)(\w[\w-]*)(\s[^>]*)?>", re.IGNORECASE)
@@ -65,9 +78,7 @@ def assert_valid_html(text: str, context: str = "") -> None:
         else:
             stack.append(tag)
     if stack:
-        raise AssertionError(
-            f"Unclosed HTML tags {stack}{ctx} in: {text[:300]!r}"
-        )
+        raise AssertionError(f"Unclosed HTML tags {stack}{ctx} in: {text[:300]!r}")
 
     # Check for unescaped & (not part of entity)
     bare_amps = _BARE_AMP_RE.findall(text)
@@ -112,12 +123,11 @@ def assert_message_length(text: str, max_len: int = 4096, context: str = "") -> 
     """Assert text does not exceed Telegram's max message length."""
     ctx = f" [{context}]" if context else ""
     if len(text) > max_len:
-        raise AssertionError(
-            f"Message too long: {len(text)} chars > {max_len}{ctx}"
-        )
+        raise AssertionError(f"Message too long: {len(text)} chars > {max_len}{ctx}")
 
 
 # ── Latency ──────────────────────────────────────────────────────────────────
+
 
 def assert_ttft_under(capture: ResponseCapture, seconds: float) -> None:
     """Assert TTFT (time to first token) is below *seconds*."""
@@ -125,9 +135,7 @@ def assert_ttft_under(capture: ResponseCapture, seconds: float) -> None:
     if ttft is None:
         raise AssertionError("No messages captured — cannot compute TTFT")
     if ttft > seconds:
-        raise AssertionError(
-            f"TTFT too slow: {ttft:.2f}s > {seconds}s threshold"
-        )
+        raise AssertionError(f"TTFT too slow: {ttft:.2f}s > {seconds}s threshold")
 
 
 def assert_ttlt_under(capture: ResponseCapture, seconds: float) -> None:
@@ -136,9 +144,7 @@ def assert_ttlt_under(capture: ResponseCapture, seconds: float) -> None:
     if ttlt is None:
         raise AssertionError("Capture not sealed — cannot compute TTLT")
     if ttlt > seconds:
-        raise AssertionError(
-            f"TTLT too slow: {ttlt:.2f}s > {seconds}s threshold"
-        )
+        raise AssertionError(f"TTLT too slow: {ttlt:.2f}s > {seconds}s threshold")
 
 
 def assert_typewriter_cadence(
@@ -165,6 +171,7 @@ def assert_typewriter_cadence(
 
 
 # ── Thinking separation ───────────────────────────────────────────────────────
+
 
 def assert_thinking_separated(capture: ResponseCapture) -> None:
     """Assert thinking block and final response are in separate messages."""
@@ -212,7 +219,10 @@ def assert_thinking_max_length(capture: ResponseCapture, max_chars: int = 800) -
 
 # ── Content checks ────────────────────────────────────────────────────────────
 
-def assert_contains(capture: ResponseCapture, substring: str, context: str = "") -> None:
+
+def assert_contains(
+    capture: ResponseCapture, substring: str, context: str = ""
+) -> None:
     """Assert the final response contains *substring*."""
     ctx = f" [{context}]" if context else ""
     if substring not in capture.final_text:
@@ -243,6 +253,7 @@ def assert_not_empty(capture: ResponseCapture) -> None:
 
 # ── Composite: full message integrity check ───────────────────────────────────
 
+
 def assert_full_integrity(capture: ResponseCapture, context: str = "") -> None:
     """Run all integrity checks on a capture: HTML validity, markdown leaks,
     message lengths, no open tags at split boundaries."""
@@ -259,3 +270,74 @@ def assert_full_integrity(capture: ResponseCapture, context: str = "") -> None:
 
     if len(chunks) > 1:
         assert_no_open_tags_at_split(chunks)
+
+
+# ── Thinking bubble lifecycle ─────────────────────────────────────────────────
+
+
+def assert_thinking_preceded_body(capture: ResponseCapture, context: str = "") -> None:
+    """Thinking message must have arrived (first_ts) BEFORE the body message."""
+    ctx = f" [{context}]" if context else ""
+    thinking = capture.thinking_message
+    finals = capture.final_messages
+    if thinking is None or not finals:
+        return  # Not enough data — caller should also run assert_thinking_separated
+    body = finals[0]
+    assert thinking.first_ts < body.first_ts, (
+        f"Thinking arrived at t={thinking.first_ts:.3f}s but body arrived at "
+        f"t={body.first_ts:.3f}s — thinking should precede body{ctx}"
+    )
+
+
+def assert_thinking_message_id_before_body(
+    capture: ResponseCapture, context: str = ""
+) -> None:
+    """Thinking message_id < body message_id (thinking was sent first in the chat timeline)."""
+    ctx = f" [{context}]" if context else ""
+    thinking = capture.thinking_message
+    finals = capture.final_messages
+    if thinking is None or not finals:
+        return
+    assert thinking.message_id < finals[0].message_id, (
+        f"Thinking msg_id={thinking.message_id} should be < "
+        f"body msg_id={finals[0].message_id}{ctx}"
+    )
+
+
+def assert_thinking_realtime_updated(
+    capture: ResponseCapture,
+    min_edits: int = 1,
+    context: str = "",
+) -> None:
+    """Thinking bubble must have been edited at least *min_edits* times (live growth)."""
+    ctx = f" [{context}]" if context else ""
+    thinking = capture.thinking_message
+    if thinking is None:
+        return  # No thinking — skip
+    assert thinking.edit_count >= min_edits, (
+        f"Thinking bubble has {thinking.edit_count} edit(s), expected ≥ {min_edits}{ctx}. "
+        "The thinking block may not be growing in real time."
+    )
+
+
+def assert_thinking_sealed_before_body(
+    capture: ResponseCapture,
+    tolerance_s: float = 1.0,
+    context: str = "",
+) -> None:
+    """Thinking bubble's last edit must happen no later than body's first appearance.
+
+    A tolerance of *tolerance_s* accounts for network/async jitter.
+    """
+    ctx = f" [{context}]" if context else ""
+    thinking = capture.thinking_message
+    finals = capture.final_messages
+    if thinking is None or not finals:
+        return
+    body_first_ts = finals[0].first_ts
+    thinking_last_ts = thinking.last_ts
+    assert thinking_last_ts <= body_first_ts + tolerance_s, (
+        f"Thinking was still being updated ({thinking_last_ts:.3f}s) "
+        f"after body arrived ({body_first_ts:.3f}s){ctx}. "
+        "The thinking bubble may not have been sealed before the body message."
+    )

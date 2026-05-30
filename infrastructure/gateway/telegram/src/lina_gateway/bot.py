@@ -16,7 +16,7 @@ from collections import defaultdict
 
 from .config import Config
 from .formatter import format_tool_status, format_with_thinking, markdown_to_telegram_html
-from .goose_client import EventType, GoosedClient, MessageContent, MessageEvent
+from .goose_client import EventType, GoosedClient
 from .pacer import StreamingBubble
 from .telegram_client import MAX_VOICE_FILE_SIZE, TelegramClient, TelegramMessage, voice_prompt
 
@@ -63,7 +63,9 @@ class Bot:
         # ── voice note ─────────────────────────────────────────────────
         if msg.voice:
             if msg.voice.file_size and msg.voice.file_size > MAX_VOICE_FILE_SIZE:
-                await self._tg.send_message(chat_id, "⚠️ El archivo de voz excede el límite de 20 MB.")
+                await self._tg.send_message(
+                    chat_id, "⚠️ El archivo de voz excede el límite de 20 MB."
+                )
                 return
             try:
                 data = await self._tg.download_file(msg.voice.file_id)
@@ -117,24 +119,45 @@ class Bot:
         except Exception as exc:
             logger.warning("Could not ensure session for chat %s: %s", chat_id, exc)
 
-        # Accumulators for the current bubble
+        # Accumulators for the current turn
         thinking_acc = ""
         body_acc = ""
 
-        # The "work bubble" message id (created when first content arrives)
-        bubble_msg_id: int | None = None
-        bubble: StreamingBubble | None = None
+        # Two SEPARATE Telegram messages:
+        #   thinking_bubble → shows only the 💭 reasoning block, live-updated
+        #   body_bubble     → shows the final response text, created after thinking seals
+        thinking_bubble_msg_id: int | None = None
+        thinking_bubble: StreamingBubble | None = None
+        body_bubble_msg_id: int | None = None
+        body_bubble: StreamingBubble | None = None
 
-        # Tool tracking: tool_name → message_id of the tool status card
-        active_tools: dict[str, tuple[str, str, int]] = {}  # tool_name → (tool_name, args, msg_id)
+        # Tool tracking: tool_name → (tool_name, args, msg_id)
+        active_tools: dict[str, tuple[str, str, int]] = {}
 
-        async def _edit_bubble(body: str, thinking: str, sealed: bool) -> None:
-            if bubble_msg_id is None:
+        async def _edit_thinking_bubble(body_unused: str, thinking: str, sealed: bool) -> None:
+            if thinking_bubble_msg_id is None:
                 return
-            html = format_with_thinking(thinking, body, sealed)
+            html = format_with_thinking(thinking, "", sealed)
             if not html.strip():
                 return
-            await self._tg.edit_message(chat_id, bubble_msg_id, html)
+            await self._tg.edit_message(chat_id, thinking_bubble_msg_id, html)
+
+        async def _edit_body_bubble(body: str, thinking_unused: str, sealed: bool) -> None:
+            if body_bubble_msg_id is None:
+                return
+            html = markdown_to_telegram_html(body)
+            if not html.strip():
+                return
+            await self._tg.edit_message(chat_id, body_bubble_msg_id, html)
+
+        async def _seal_all() -> None:
+            nonlocal thinking_bubble, body_bubble
+            if thinking_bubble:
+                await thinking_bubble.seal()
+                thinking_bubble = None
+            if body_bubble:
+                await body_bubble.seal()
+                body_bubble = None
 
         try:
             async for event in self._goosed.reply_stream(session_id, text):
@@ -142,12 +165,8 @@ class Bot:
                     break
 
                 if event.event_type == EventType.ERROR:
-                    if bubble:
-                        await bubble.seal()
-                        bubble = None
-                    await self._tg.send_message(
-                        chat_id, f"⚠️ Error: <code>{event.error}</code>"
-                    )
+                    await _seal_all()
+                    await self._tg.send_message(chat_id, f"⚠️ Error: <code>{event.error}</code>")
                     return
 
                 if event.event_type == EventType.FINISH:
@@ -160,49 +179,60 @@ class Bot:
                 for item in event.contents:
                     if item.content_type == "thinking":
                         thinking_acc += item.thinking
-                        if bubble_msg_id is None:
-                            # Open the live bubble
+                        if thinking_bubble_msg_id is None:
+                            # Open the thinking bubble (its own Telegram message)
                             html = format_with_thinking(thinking_acc, "", False)
-                            bubble_msg_id = await self._tg.send_message(chat_id, html)
-                            bubble = StreamingBubble(
+                            thinking_bubble_msg_id = await self._tg.send_message(chat_id, html)
+                            thinking_bubble = StreamingBubble(
                                 tick=self._cfg.pacer_tick,
-                                edit_fn=_edit_bubble,
+                                edit_fn=_edit_thinking_bubble,
                             )
-                            bubble.start()
+                            thinking_bubble.start()
                         else:
-                            if bubble:
-                                bubble.update(thinking=thinking_acc, body=body_acc)
+                            if thinking_bubble:
+                                thinking_bubble.update(thinking=thinking_acc, body="")
 
                     elif item.content_type == "text":
                         body_acc += item.text
-                        if bubble_msg_id is None:
-                            # No thinking block yet — open bubble with body only
+                        if body_bubble_msg_id is None:
+                            # Seal thinking bubble first (marks it as collapsed/expandable)
+                            if thinking_bubble:
+                                await thinking_bubble.seal()
+                                thinking_bubble = None
+                            # Open a NEW message for the body text
                             html = markdown_to_telegram_html(body_acc)
-                            bubble_msg_id = await self._tg.send_message(chat_id, html)
-                            bubble = StreamingBubble(
+                            if not html.strip():
+                                html = "…"  # placeholder; overwritten on next tick
+                            body_bubble_msg_id = await self._tg.send_message(chat_id, html)
+                            body_bubble = StreamingBubble(
                                 tick=self._cfg.pacer_tick,
-                                edit_fn=_edit_bubble,
+                                edit_fn=_edit_body_bubble,
                             )
-                            bubble.start()
+                            body_bubble.start()
                         else:
-                            if bubble:
-                                bubble.update(thinking=thinking_acc, body=body_acc)
+                            if body_bubble:
+                                body_bubble.update(thinking="", body=body_acc)
 
                     elif item.content_type == "tool_request":
-                        # Seal current bubble before showing tool status
-                        if bubble:
-                            await bubble.seal()
-                            bubble = None
+                        # Seal all active bubbles before showing tool status
+                        await _seal_all()
 
-                        html = format_tool_status(item.tool_name, item.args_preview, False, None, "")
+                        html = format_tool_status(
+                            item.tool_name, item.args_preview, False, None, ""
+                        )
                         tool_msg_id = await self._tg.send_message(chat_id, html)
                         if tool_msg_id is not None:
-                            active_tools[item.tool_name] = (item.tool_name, item.args_preview, tool_msg_id)
+                            active_tools[item.tool_name] = (
+                                item.tool_name,
+                                item.args_preview,
+                                tool_msg_id,
+                            )
 
-                        # Reset bubble for next content
+                        # Reset accumulators for the next reasoning/response turn
                         thinking_acc = ""
                         body_acc = ""
-                        bubble_msg_id = None
+                        thinking_bubble_msg_id = None
+                        body_bubble_msg_id = None
 
                     elif item.content_type == "tool_response":
                         # Update the matching tool status card
@@ -218,17 +248,15 @@ class Bot:
             pass
         except Exception as exc:
             logger.exception("Error during reply stream: %s", exc)
-            if bubble:
-                await bubble.seal()
-                bubble = None
+            await _seal_all()
             await self._tg.send_message(chat_id, f"⚠️ Error inesperado: <code>{exc}</code>")
             return
 
-        # Seal the bubble (final edit with sealed=True)
-        if bubble:
-            await bubble.seal()
-        elif body_acc and bubble_msg_id is None:
-            # No bubble was created (shouldn't happen, but belt-and-suspenders)
+        # Final seal of whichever bubble is still active
+        await _seal_all()
+
+        # Belt-and-suspenders: body arrived but no bubble was created somehow
+        if body_acc and body_bubble_msg_id is None and thinking_bubble_msg_id is None:
             await self._tg.send_message(chat_id, markdown_to_telegram_html(body_acc))
 
     async def run_once(self, offset: int | None) -> int | None:
