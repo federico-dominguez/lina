@@ -164,11 +164,17 @@ class GoosedClient:
         user_text: str,
     ) -> AsyncIterator[MessageEvent]:
         """POST /reply and yield MessageEvent objects from the SSE stream."""
+        import time
         payload = {
             "session_id": session_id,
             "user_message": {
                 "role": "user",
+                "created": int(time.time()),
                 "content": [{"type": "text", "text": user_text}],
+                "metadata": {
+                    "userVisible": True,
+                    "agentVisible": True,
+                },
             },
         }
         async with httpx.AsyncClient(
