@@ -188,6 +188,7 @@ class Bot:
                                 edit_fn=_edit_thinking_bubble,
                             )
                             thinking_bubble.start()
+                            thinking_bubble.update(thinking=thinking_acc, body="")
                         else:
                             if thinking_bubble:
                                 thinking_bubble.update(thinking=thinking_acc, body="")
@@ -209,6 +210,7 @@ class Bot:
                                 edit_fn=_edit_body_bubble,
                             )
                             body_bubble.start()
+                            body_bubble.update(thinking="", body=body_acc)
                         else:
                             if body_bubble:
                                 body_bubble.update(thinking="", body=body_acc)
