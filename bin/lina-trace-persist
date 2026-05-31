@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Persist a DeepSeek reasoning trace to PostgreSQL from CLI (issue #74).
+# Requires LINA_DB_URL in the environment.
+# Usage: lina-trace-persist --session-id <id> --thinking-text <text> [--prompt <prompt>]
+set -euo pipefail
+cd "$HOME/lina"
+exec uv --directory infrastructure/gateway/telegram run lina-trace-persist "$@"
