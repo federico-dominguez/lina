@@ -1,7 +1,8 @@
 # LINA — Roadmap de desarrollo
 
 **Última actualización:** 2026-05-31  
-**Estado actual:** Fase 3 completada (hardening + session persistence). Fase 3.5 en curso: 2/7 issues cerrados.
+**Estado actual:** Fase 3 completada (hardening + session persistence). Fase 4 en curso (multi-agente). Fase 3.5 pospuesta.
+>>>>>>> origin/main
 
 ---
 
@@ -17,20 +18,20 @@
 
 ---
 
-## Fase 3.5 — Memoria e Inteligencia
+## Fase 3.5 — Memoria e Inteligencia (COMPLETADA — 4/7 issues)
 
-> Objetivo: que LINA recuerde mejor, razone más y perciba más canales.  
-> Orden sugerido (cada issue es independiente, hacer en este orden maximiza valor acumulado).
+> Objetivo original: que LINA recuerde mejor, razone más y perciba más canales.  
+> Issues 4-7 pospuestos — priorizamos Fase 4 (multi-agente).
 
 | Prioridad | # | Issue | Qué resuelve | Estado |
 |---|---|---|---|---|
 | 1 | [#60](https://github.com/federico-dominguez/lina/issues/60) | Smart context summarization | Reemplaza inyección cruda de 20 msgs por summary estructurado | ✅ mergeado |
 | 2 | [#61](https://github.com/federico-dominguez/lina/issues/61) | Token/cost metering | Tracking de costo USD por sesión + datos reales del dashboard | ✅ mergeado #72 |
-| 3 | [#62](https://github.com/federico-dominguez/lina/issues/62) | Reasoning trace persistence | Guarda bloques `<think>` en DB para auto-análisis | 🔲 siguiente |
-| 4 | [#63](https://github.com/federico-dominguez/lina/issues/63) | pgvector semantic memory | Búsqueda por significado en recuerdos | 🔲 |
-| 5 | [#64](https://github.com/federico-dominguez/lina/issues/64) | Image understanding | Procesa fotos/capturas enviadas a Telegram | 🔲 |
-| 6 | [#65](https://github.com/federico-dominguez/lina/issues/65) | TTS voice responses | LINA responde con nota de voz cuando Federico habla | 🔲 |
-| 7 | [#66](https://github.com/federico-dominguez/lina/issues/66) | Proactive scheduler | Mensajes programados sin intervención de Federico | 🔲 |
+| 3 | [#62](https://github.com/federico-dominguez/lina/issues/62) | Reasoning trace persistence | Guarda bloques `<think>` en DB para auto-análisis | ✅ mergeado #74 |
+| 4 | [#63](https://github.com/federico-dominguez/lina/issues/63) | pgvector semantic memory | Búsqueda por significado en recuerdos | ✅ mergeado #76 |
+| 5 | [#64](https://github.com/federico-dominguez/lina/issues/64) | Image understanding | Procesa fotos/capturas enviadas a Telegram | 🔲 backlog |
+| 6 | [#65](https://github.com/federico-dominguez/lina/issues/65) | TTS voice responses | LINA responde con nota de voz cuando Federico habla | 🔲 backlog |
+| 7 | [#66](https://github.com/federico-dominguez/lina/issues/66) | Proactive scheduler | Mensajes programados sin intervención de Federico | 🔲 backlog |
 
 ### Detalle #60 — Smart context summarization
 
@@ -53,19 +54,57 @@ Nueva sesión detectada (is_new=True)
 
 ---
 
-## Fase 4 — Autonomía Plena
+## Fase 4 — Autonomía Plena (Multi-Agente)
 
-> Prerequisito: Fase 3.5 completa (especialmente #61 y #62 para observabilidad del agente).  
+> **Prioridad actual.** Empezamos sin esperar Fase 3.5 completa.  
+> Objetivo: LINA con agentes especializados (dev, ops, assistant) y capacidad de automejora.  
 > Orden estricto por dependencias:
 
-| Orden | # | Issue | Prerequisito |
-|---|---|---|---|
-| 1 | [#15](https://github.com/federico-dominguez/lina/issues/15) | ADR 0008 — elegir framework multi-agente | — |
-| 2 | [#48](https://github.com/federico-dominguez/lina/issues/48) | Hot-reload MCPs sin reiniciar goosed | — |
-| 3 | [#67](https://github.com/federico-dominguez/lina/issues/67) | Observability stack (Prometheus + Grafana) | rec. #61 |
-| 4 | [#51](https://github.com/federico-dominguez/lina/issues/51) | lina-self-modify — ciclo completo de automejora | #48 |
-| 5 | [#50](https://github.com/federico-dominguez/lina/issues/50) | Multi-agente con lina-orchestrator | #15 + #51 |
-| 6 | [#68](https://github.com/federico-dominguez/lina/issues/68) | lina-android-remote — control del celular | opc. #64 |
+| Orden | # | Issue | Qué resuelve | Prerequisito |
+|---|---|---|---|---|
+| 0 | — | Saneamiento de repo + merge Fase 3 a `main` | Limpiar branches viejas, unificar código base | — |
+| 1 | [#15](https://github.com/federico-dominguez/lina/issues/15) | ADR 0010 — elegir framework multi-agente | Decisión arquitectónica para el orquestador | — |
+| 2 | [#48](https://github.com/federico-dominguez/lina/issues/48) | Hot-reload MCPs sin reiniciar goosed | Modificar MCP sin downtime ni rebuild | — |
+| 3 | [#51](https://github.com/federico-dominguez/lina/issues/51) | lina-self-modify — ciclo completo de automejora | LINA modifica su código, corre tests y deploya | #48 |
+| 4 | [#50](https://github.com/federico-dominguez/lina/issues/50) | lina-orchestrator — multi-agente dev/ops/assistant | 3 agentes especializados con delegación inteligente | #15 + #51 |
+| 5 | [#67](https://github.com/federico-dominguez/lina/issues/67) | Observability stack (Prometheus + Grafana) | Métricas, dashboards, alertas | — |
+| 6 | [#68](https://github.com/federico-dominguez/lina/issues/68) | lina-android-remote — control del celular | Control remoto del celular de Federico | opc. |
+
+### Plan detallado Fase 4
+
+**Paso 0 — Saneamiento de repo** (este PR)
+- Mergear `feat/fase-3-hardening` → `main`
+- Borrar branches remotas ya mergeadas (~20)
+- Borrar branches locales equivalentes
+
+**Paso 1 — ADR 0010: Framework multi-agente**
+- Investigar Agno, CrewAI, LangGraph, AutoGen
+- Evaluar integración con MCPs, latencia, debuggability
+- Escribir ADR con recomendación
+
+**Paso 2 — Hot-reload MCPs**
+- Endpoint en goosed o sidecar para reload de MCPs sin restart
+- Alternativa: file watcher automático
+- Tool `reload_mcp(name)` en lina-self-modify
+
+**Paso 3 — lina-self-modify**
+- Tools: modify_file, run_tests, run_lint, reload_mcp, rollback_mcp
+- Pipeline pre-deploy: modify → lint → test → reload
+- Rollback automático si falla
+
+**Paso 4 — lina-orchestrator**
+- Sistema multi-agente con 3 agentes iniciales:
+  - `lina-dev` (código, PRs, refactors)
+  - `lina-ops` (infra, deploys, monitoreo)
+  - `lina-assistant` (Moodle, calendario, tareas generales)
+- Clasificación de intención → delegación → respuesta consolidada
+- Servicio nuevo en docker-compose + tests E2E
+
+**Paso 5 — Observability stack**
+- Prometheus + Grafana en docker-compose
+- Métricas de gateway, orquestador, PostgreSQL
+- Dashboard de tokens, latencia, errores, sesiones activas
+>>>>>>> origin/main
 
 ---
 
