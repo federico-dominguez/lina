@@ -75,5 +75,46 @@ class Config:
 def _require(name: str) -> str:
     value = os.environ.get(name)
     if not value:
+        # Fallback: try lina-secrets file backend (container mode, existing secrets)
+        value = _try_secrets_file(name)
+    if not value:
         raise RuntimeError(f"Required environment variable {name!r} is not set")
     return value
+
+
+def _try_secrets_file(name: str) -> str | None:
+    """Try reading from lina-secrets file backend (volume-mounted at /run/secrets/lina).
+
+    Maps env var name → secrets key name:
+        TELEGRAM_BOT_TOKEN  →  telegram__bot_token
+        GOOSE_SERVER_SECRET_KEY  →  goosed__secret_key
+        etc.
+    """
+    secrets_dir = "/run/secrets/lina"
+    if not os.path.isdir(secrets_dir):
+        return None
+
+    # Mapping of env var → secrets file key
+    _SECRETS_MAP: dict[str, str] = {
+        "TELEGRAM_BOT_TOKEN": "telegram__bot_token",
+        "TELEGRAM_API_ID": "telegram__api_id",
+        "TELEGRAM_API_HASH": "telegram__api_hash",
+        "TELEGRAM_BOT_USERNAME": "telegram__bot_username",
+        "TELEGRAM_PHONE": "telegram__phone",
+        "DEEPSEEK_API_KEY": "deepseek__api_key",
+    }
+    file_key = _SECRETS_MAP.get(name)
+    if not file_key:
+        return None
+
+    filepath = os.path.join(secrets_dir, file_key)
+    if not os.path.isfile(filepath):
+        return None
+
+    try:
+        content = open(filepath, encoding="utf-8").read().rstrip("\n")
+        if content:
+            return content
+    except OSError:
+        pass
+    return None

@@ -32,8 +32,9 @@ services:
 
   # ─── PostgreSQL ─────────────────────────────────────────────────────────────
   lina-db:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
+    shm_size: 256mb       # pgvector requiere shared memory para indices IVFFlat
     environment:
       POSTGRES_USER: lina
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lina_dev}
@@ -459,6 +460,8 @@ services:
         condition: service_healthy
       lina-db:
         condition: service_healthy
+    volumes:
+      - lina-secrets-data:/run/secrets/lina:ro
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       GOOSED_URL: https://goosed:3000
