@@ -17,6 +17,8 @@ import logging
 import time
 from collections import defaultdict
 
+import httpx
+
 from .config import Config
 from .formatter import (
     format_tool_status,
@@ -33,6 +35,16 @@ logger = logging.getLogger(__name__)
 _STOP_COMMANDS = {"/stop", "stop", "/Stop", "Stop", "/STOP", "STOP"}
 _TG_CHAR_LIMIT = 4096
 _OVERFLOW_MARGIN = 200  # start splitting when content approaches the limit
+
+# httpx exceptions that indicate a goosed restart/connection drop (infrastructure,
+# NOT agent errors). These should never be shown verbatim to the user.
+_GOOSED_TRANSPORT_ERRORS = (
+    httpx.RemoteProtocolError,
+    httpx.ConnectError,
+    httpx.ReadError,
+    httpx.WriteError,
+)
+_GOOSED_RESTART_TIMEOUT = 90.0  # seconds to wait for goosed to come back up
 
 
 class Bot:
@@ -96,11 +108,19 @@ class Bot:
 
         # ── Goosed health check ─────────────────────────────────────────
         if not await self._goosed.is_alive():
-            await self._tg.send_message(
-                chat_id,
-                "⚠️ <b>goosed no está disponible.</b> Verificá que el servicio esté corriendo.",
+            # goosed may be mid-restart — wait briefly before giving up
+            status_id = await self._tg.send_message(
+                chat_id, "⏳ LINA se está reiniciando, un momento..."
             )
-            return
+            recovered = await self._wait_for_goosed()
+            if not recovered:
+                await self._tg.edit_message(
+                    chat_id,
+                    status_id,
+                    "⚠️ LINA no está disponible. Intentá de nuevo en unos segundos.",
+                )
+                return
+            await self._tg.edit_message(chat_id, status_id, "✅ LINA de vuelta.")
 
         # ── Typing indicator ────────────────────────────────────────────
         await self._tg.send_chat_action(chat_id, "typing")
@@ -118,12 +138,24 @@ class Bot:
             # Clear reaction on original message
             await self._tg.set_reaction(chat_id, msg.message_id, "")
 
+    async def _wait_for_goosed(self, *, timeout: float = _GOOSED_RESTART_TIMEOUT) -> bool:
+        """Poll until goosed responds to /status or timeout expires. Returns True if recovered."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while loop.time() < deadline:
+            await asyncio.sleep(3.0)
+            if await self._goosed.is_alive():
+                return True
+        return False
+
     async def _reply(
         self,
         chat_id: int,
         user_msg_id: int,
         text: str,
         cancel_event: asyncio.Event,
+        *,
+        _retry: bool = False,
     ) -> None:
         session_id = self._session_id(chat_id)
         reply_start = time.monotonic()
@@ -312,10 +344,41 @@ class Bot:
 
         except asyncio.CancelledError:
             pass
-        except Exception as exc:
-            logger.exception("Error during reply stream: %s", exc)
+        except _GOOSED_TRANSPORT_ERRORS as exc:
+            # Connection dropped — goosed is restarting (model change, watchdog, OOM).
+            # Never surface raw transport errors to the user.
+            logger.warning("goosed connection lost (likely restart): %s", exc)
             await _seal_all()
-            await self._tg.send_message(chat_id, f"⚠️ Error inesperado: <code>{exc}</code>")
+            if _retry:
+                # Already retried once — give up gracefully
+                await self._tg.send_message(
+                    chat_id, "⚠️ LINA no está disponible. Intentá de nuevo."
+                )
+                return
+            status_id = await self._tg.send_message(
+                chat_id, "⏳ LINA se está reiniciando, un momento..."
+            )
+            recovered = await self._wait_for_goosed()
+            if not recovered:
+                await self._tg.edit_message(
+                    chat_id,
+                    status_id,
+                    "⚠️ LINA no está disponible. Intentá de nuevo.",
+                )
+                return
+            await self._tg.edit_message(chat_id, status_id, "✅ LINA de vuelta. Reprocesando...")
+            # Invalidate cached session — force ensure_session to create/resume fresh
+            self._sessions.pop(chat_id, None)
+            await asyncio.sleep(1.0)  # let goosed settle
+            await self._reply(chat_id, user_msg_id, text, cancel_event, _retry=True)
+            return
+        except Exception as exc:
+            logger.exception("Unexpected error during reply: %s", exc)
+            await _seal_all()
+            # Expose only the error type, not the full message (may contain internals)
+            await self._tg.send_message(
+                chat_id, f"⚠️ Error inesperado (<code>{type(exc).__name__}</code>). Revisá los logs."
+            )
             return
 
         # Final seal of whichever bubble is still active
