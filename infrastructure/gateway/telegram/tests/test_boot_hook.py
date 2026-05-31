@@ -18,6 +18,7 @@ from lina_gateway.boot_hook import (
     on_shutdown,
     save_message,
     save_token_usage,
+    save_trace,
 )
 
 # ─── Test doubles ─────────────────────────────────────────────────────────────
@@ -532,3 +533,71 @@ class TestSaveTokenUsage:
         params = call_args[1:]
         assert round(params[6], 8) == round(0.00052, 8)  # cost_usd_est = delta
         assert params[7] == 0.00152  # accumulated_cost_usd stored as-is
+
+
+# ─── save_trace ───────────────────────────────────────────────────────────────
+
+
+class TestSaveTrace:
+    """save_trace: reasoning trace persistence (issue #62)."""
+
+    @pytest.mark.asyncio
+    async def test_swallows_connection_error(self) -> None:
+        """DB unreachable → no exception raised."""
+        import asyncpg
+
+        with patch.object(asyncpg, "connect", new=AsyncMock(side_effect=OSError("no db"))):
+            await save_trace("postgresql://fake", "telegram-1", "razoné algo")
+
+    @pytest.mark.asyncio
+    async def test_empty_thinking_skipped(self) -> None:
+        """Empty/whitespace thinking_text must not hit the DB."""
+        import asyncpg
+
+        fake_connect = AsyncMock()
+        with patch.object(asyncpg, "connect", new=fake_connect):
+            await save_trace("postgresql://fake", "telegram-1", "   ")
+        fake_connect.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_inserts_row_with_thinking_text(self) -> None:
+        """Thinking text and prompt_hash are persisted correctly."""
+        import asyncpg
+
+        fake_conn = AsyncMock()
+        fake_conn.fetchval = AsyncMock(return_value=3)  # turn_number = 3
+        fake_conn.execute = AsyncMock()
+        fake_conn.close = AsyncMock()
+
+        with patch.object(asyncpg, "connect", new=AsyncMock(return_value=fake_conn)):
+            await save_trace(
+                "postgresql://fake",
+                "telegram-42",
+                "Primero necesito obtener el attempt_id",
+                "abcdef1234",
+            )
+
+        assert fake_conn.execute.called
+        call_args = fake_conn.execute.call_args[0]
+        params = call_args[1:]
+        assert params[0] == "telegram-42"  # session_id
+        assert params[1] == 3  # turn_number from fetchval
+        assert params[2] == "Primero necesito obtener el attempt_id"  # thinking_text
+        assert params[3] == "abcdef1234"  # prompt_hash
+        assert params[4] == "deepseek-v4-flash"  # default model
+
+    @pytest.mark.asyncio
+    async def test_default_turn_number_zero_on_new_session(self) -> None:
+        """When no prior trace exists, turn_number defaults to 0."""
+        import asyncpg
+
+        fake_conn = AsyncMock()
+        fake_conn.fetchval = AsyncMock(return_value=0)
+        fake_conn.execute = AsyncMock()
+        fake_conn.close = AsyncMock()
+
+        with patch.object(asyncpg, "connect", new=AsyncMock(return_value=fake_conn)):
+            await save_trace("postgresql://fake", "telegram-new", "pensé algo nuevo")
+
+        params = fake_conn.execute.call_args[0][1:]
+        assert params[1] == 0  # turn_number = 0
