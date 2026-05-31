@@ -1,0 +1,26 @@
+# /etc/sudoers.d/lina
+#
+# Allowlist de comandos que LINA puede ejecutar con sudo SIN contraseña.
+# NUNCA usar NOPASSWD: ALL — equivaldría a acceso root irrestricto.
+#
+# Instalación:
+#   sudo install -m 440 -o root -g root deploy/sudoers.d/lina /etc/sudoers.d/lina
+#   sudo visudo -c   # verificar sintaxis antes de cerrar sesión
+#
+# El usuario debe coincidir con el dueño de la sesión (normalmente "fede").
+# Ajustar si el username difiere.
+#
+# Referencia de seguridad:
+#   - Cada comando tiene un path absoluto (sin wildcards en el binario).
+#   - El wildcard * en argumentos está permitido por diseño (necesario para
+#     especificar paquetes y servicios), pero el binario en sí está fijo.
+#   - apt-get: permite instalar/desinstalar paquetes y actualizar índices.
+#   - lina-deploy: wrapper con allowlist interna de servicios (ver deploy/lina-deploy.sh).
+#   - dpkg: permite instalar .deb descargados directamente.
+
+# Nota de seguridad: los comodines * en apt-get permiten flags arbitrarios
+# (ej: -o APT::Update::Pre-Invoke::=/script) que pueden ejecutar código arbitrario
+# como root via hooks de apt. Para mayor seguridad, ruteá las instalaciones de
+# paquetes a través del script lina-deploy que tiene una allowlist de comandos.
+# Si necesitás apt-get directo, usá el wrapper con lista explícita de paquetes.
+fede ALL=(ALL) NOPASSWD: /usr/local/bin/lina-deploy *

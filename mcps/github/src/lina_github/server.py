@@ -59,6 +59,20 @@ def _patch(path: str, json: dict) -> Any:
         return r.json()
 
 
+def _put(path: str, json: dict) -> Any:
+    with _client() as c:
+        r = c.put(path, json=json)
+        r.raise_for_status()
+        return r.json()
+
+
+def _delete(path: str, json: dict | None = None) -> Any:
+    with _client() as c:
+        r = c.request("DELETE", path, json=json)
+        r.raise_for_status()
+        return r.json() if r.content else {}
+
+
 # ── Tools ─────────────────────────────────────────────────────────────────────
 @mcp.tool()
 def github_list_repos(owner: str, page: int = 1, per_page: int = 30) -> list[dict]:
@@ -193,6 +207,144 @@ def github_search_code(query: str, page: int = 1, per_page: int = 10) -> list[di
     """Busca código en GitHub. Ej: query='org:myorg filename:Makefile'."""
     data = _get("/search/code", params={"q": query, "page": page, "per_page": per_page})
     return data.get("items", [])
+
+
+# ── Write tools ───────────────────────────────────────────────────────────────
+
+
+@mcp.tool()
+def github_create_branch(owner: str, repo: str, branch: str, sha: str) -> dict:
+    """Crea una branch a partir de un SHA (commit, tag, o HEAD de otra rama).
+
+    Args:
+        sha: SHA del commit de origen. Obtenerlo con github_list_branches.
+    """
+    return _post(
+        f"/repos/{owner}/{repo}/git/refs", json={"ref": f"refs/heads/{branch}", "sha": sha}
+    )
+
+
+@mcp.tool()
+def github_delete_branch(owner: str, repo: str, branch: str) -> dict:
+    """Elimina una branch del repositorio."""
+    return _delete(f"/repos/{owner}/{repo}/git/refs/heads/{branch}")
+
+
+@mcp.tool()
+def github_create_or_update_file(
+    owner: str,
+    repo: str,
+    path: str,
+    content: str,
+    message: str,
+    branch: str,
+    sha: str = "",
+) -> dict:
+    """Crea o actualiza un archivo en el repositorio (commit directo vía API).
+
+    Args:
+        content: contenido en texto plano (se encode a base64 internamente).
+        sha:     SHA del blob actual si el archivo ya existe (requerido para update).
+                 Dejarlo vacío para crear archivos nuevos.
+    """
+    import base64
+
+    payload: dict[str, Any] = {
+        "message": message,
+        "content": base64.b64encode(content.encode()).decode(),
+        "branch": branch,
+    }
+    if sha:
+        payload["sha"] = sha
+    return _put(f"/repos/{owner}/{repo}/contents/{path}", json=payload)
+
+
+@mcp.tool()
+def github_delete_file(
+    owner: str,
+    repo: str,
+    path: str,
+    message: str,
+    sha: str,
+    branch: str,
+) -> dict:
+    """Elimina un archivo del repositorio.
+
+    Args:
+        sha: SHA del blob del archivo (obtenido con github_get_file).
+    """
+    return _delete(
+        f"/repos/{owner}/{repo}/contents/{path}",
+        json={"message": message, "sha": sha, "branch": branch},
+    )
+
+
+@mcp.tool()
+def github_add_comment(owner: str, repo: str, issue_number: int, body: str) -> dict:
+    """Agrega un comentario a un issue o pull request."""
+    return _post(f"/repos/{owner}/{repo}/issues/{issue_number}/comments", json={"body": body})
+
+
+@mcp.tool()
+def github_close_issue(owner: str, repo: str, issue_number: int, comment: str = "") -> dict:
+    """Cierra un issue. Si se provee 'comment', lo agrega antes de cerrar.
+
+    Returns:
+        Dict con claves 'issue' (respuesta del PATCH) y 'comment' (respuesta
+        del POST si se envio comentario, None en caso contrario).
+    """
+    comment_result = None
+    if comment:
+        comment_result = _post(
+            f"/repos/{owner}/{repo}/issues/{issue_number}/comments",
+            json={"body": comment},
+        )
+    issue_result = _patch(
+        f"/repos/{owner}/{repo}/issues/{issue_number}",
+        json={"state": "closed"},
+    )
+    return {"issue": issue_result, "comment": comment_result}
+
+
+@mcp.tool()
+def github_request_review(
+    owner: str,
+    repo: str,
+    pull_number: int,
+    reviewers: list[str] | None = None,
+    team_reviewers: list[str] | None = None,
+) -> dict:
+    """Solicita review en un pull request.
+
+    Args:
+        reviewers:      lista de usuarios (ej: ['copilot-ai']).
+        team_reviewers: lista de equipos (ej: ['my-org/backend-team']).
+    """
+    payload: dict[str, Any] = {}
+    if reviewers:
+        payload["reviewers"] = reviewers
+    if team_reviewers:
+        payload["team_reviewers"] = team_reviewers
+    return _post(f"/repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers", json=payload)
+
+
+@mcp.tool()
+def github_merge_pr(
+    owner: str,
+    repo: str,
+    pull_number: int,
+    commit_title: str = "",
+    merge_method: str = "squash",
+) -> dict:
+    """Mergea un pull request.
+
+    Args:
+        merge_method: merge | squash | rebase (default: squash).
+    """
+    payload: dict[str, Any] = {"merge_method": merge_method}
+    if commit_title:
+        payload["commit_title"] = commit_title
+    return _put(f"/repos/{owner}/{repo}/pulls/{pull_number}/merge", json=payload)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
