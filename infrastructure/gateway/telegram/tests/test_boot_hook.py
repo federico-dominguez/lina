@@ -9,7 +9,9 @@ import pytest
 
 from lina_gateway.boot_hook import (
     _INTERRUPTION_WINDOW,
+    SmartContext,
     get_last_messages,
+    get_smart_context,
     on_boot,
     on_shutdown,
     save_message,
@@ -276,3 +278,125 @@ class TestGetLastMessages:
         assert len(result) == 2
         assert result[0] == {"role": "user", "content": "hola"}
         assert result[1] == {"role": "assistant", "content": "buenas"}
+
+
+# ─── SmartContext ─────────────────────────────────────────────────────────────
+
+
+class TestSmartContext:
+    """SmartContext.has_data and format_warmup_prompt logic."""
+
+    def test_empty_has_no_data(self) -> None:
+        ctx = SmartContext(summary="", messages=[])
+        assert ctx.has_data is False
+
+    def test_summary_only_has_data(self) -> None:
+        ctx = SmartContext(summary="Hicimos deploy del gateway.", messages=[])
+        assert ctx.has_data is True
+
+    def test_messages_only_has_data(self) -> None:
+        ctx = SmartContext(summary="", messages=[{"role": "user", "content": "hola"}])
+        assert ctx.has_data is True
+
+    def test_format_warmup_includes_summary(self) -> None:
+        ctx = SmartContext(summary="El deploy salió bien.", messages=[])
+        prompt = ctx.format_warmup_prompt()
+        assert "El deploy salió bien." in prompt
+        assert "CONTEXTO_RECUPERADO_AUTOMATICAMENTE" in prompt
+        assert "✅ Sesión reanudada." in prompt
+
+    def test_format_warmup_includes_messages(self) -> None:
+        ctx = SmartContext(
+            summary="",
+            messages=[
+                {"role": "user", "content": "hola LINA"},
+                {"role": "assistant", "content": "buenas Fede"},
+            ],
+        )
+        prompt = ctx.format_warmup_prompt()
+        assert "Fede: hola LINA" in prompt
+        assert "LINA: buenas Fede" in prompt
+
+    def test_format_warmup_both_sections(self) -> None:
+        ctx = SmartContext(
+            summary="Resumen de sesión.",
+            messages=[{"role": "user", "content": "ok"}],
+        )
+        prompt = ctx.format_warmup_prompt()
+        assert "## Resumen de sesión anterior" in prompt
+        assert "## Últimos mensajes" in prompt
+
+
+# ─── get_smart_context ───────────────────────────────────────────────────────
+
+
+class TestGetSmartContext:
+    """get_smart_context returns SmartContext, never raises."""
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_on_connection_error(self) -> None:
+        import asyncpg
+
+        with patch.object(asyncpg, "connect", new=AsyncMock(side_effect=OSError("no db"))):
+            ctx = await get_smart_context("postgresql://fake", "telegram-1")
+
+        assert not ctx.has_data
+        assert ctx.summary == ""
+        assert ctx.messages == []
+
+    @pytest.mark.asyncio
+    async def test_combines_summary_and_messages(self) -> None:
+        """When DB has a summary and recent messages, both are returned."""
+        import asyncpg
+
+        summary_row = {"raw_summary": "Deploy del gateway completado."}
+        message_rows = [
+            {"role": "user", "content": "listo?", "turn_number": 5},
+            {"role": "assistant", "content": "sí, online", "turn_number": 6},
+        ]
+
+        fake_conn = AsyncMock()
+        fake_conn.fetchrow = AsyncMock(return_value=summary_row)
+        fake_conn.fetch = AsyncMock(return_value=message_rows)
+        fake_conn.close = AsyncMock()
+
+        with patch.object(asyncpg, "connect", new=AsyncMock(return_value=fake_conn)):
+            ctx = await get_smart_context("postgresql://fake", "telegram-1")
+
+        assert ctx.has_data is True
+        assert ctx.summary == "Deploy del gateway completado."
+        assert len(ctx.messages) == 2
+
+    @pytest.mark.asyncio
+    async def test_no_summary_but_has_messages(self) -> None:
+        """When there's no summary yet, messages alone are returned."""
+        import asyncpg
+
+        fake_conn = AsyncMock()
+        fake_conn.fetchrow = AsyncMock(return_value=None)  # no summary row
+        fake_conn.fetch = AsyncMock(
+            return_value=[{"role": "user", "content": "hola", "turn_number": 0}]
+        )
+        fake_conn.close = AsyncMock()
+
+        with patch.object(asyncpg, "connect", new=AsyncMock(return_value=fake_conn)):
+            ctx = await get_smart_context("postgresql://fake", "telegram-1")
+
+        assert ctx.has_data is True
+        assert ctx.summary == ""
+        assert len(ctx.messages) == 1
+
+    @pytest.mark.asyncio
+    async def test_empty_db_returns_no_data(self) -> None:
+        """First-ever session: no summary, no messages — has_data is False."""
+        import asyncpg
+
+        fake_conn = AsyncMock()
+        fake_conn.fetchrow = AsyncMock(return_value=None)
+        fake_conn.fetch = AsyncMock(return_value=[])
+        fake_conn.close = AsyncMock()
+
+        with patch.object(asyncpg, "connect", new=AsyncMock(return_value=fake_conn)):
+            ctx = await get_smart_context("postgresql://fake", "telegram-1")
+
+        assert ctx.has_data is False

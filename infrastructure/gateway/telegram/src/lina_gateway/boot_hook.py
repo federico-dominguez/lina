@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -221,3 +221,134 @@ async def get_last_messages(
     except Exception as exc:
         logger.debug("boot_hook: get_last_messages failed (session=%s): %s", session_id, exc)
     return []
+
+
+# ─── Smart context (issue #60) ────────────────────────────────────────────────
+
+# How many raw recent messages to include alongside the summary.
+_RECENT_MESSAGES_LIMIT = 5
+
+
+async def _get_latest_summary(
+    conn: Any,
+    session_id: str,
+) -> str | None:
+    """Return raw_summary for the most recent session_summaries row, or None."""
+    row = await conn.fetchrow(
+        """
+        SELECT raw_summary
+        FROM session_summaries
+        WHERE session_id = $1
+        ORDER BY updated_at DESC
+        LIMIT 1
+        """,
+        session_id,
+    )
+    return row["raw_summary"] if row else None
+
+
+async def _get_recent_messages(
+    conn: Any,
+    session_id: str,
+    limit: int,
+) -> list[dict[str, str]]:
+    """Return the last *limit* messages for *session_id*, oldest-first."""
+    rows = await conn.fetch(
+        """
+        SELECT role, content
+        FROM (
+            SELECT role, content, turn_number
+            FROM session_messages
+            WHERE session_id = $1
+            ORDER BY turn_number DESC
+            LIMIT $2
+        ) sub
+        ORDER BY turn_number ASC
+        """,
+        session_id,
+        limit,
+    )
+    return [{"role": r["role"], "content": r["content"]} for r in rows]
+
+
+class SmartContext:
+    """Compact context bundle built from structured DB data.
+
+    Attributes:
+        summary:  Prose summary of the last session (may be empty string).
+        messages: Last N raw messages oldest-first (may be empty list).
+        has_data: True if there is anything worth injecting.
+    """
+
+    __slots__ = ("summary", "messages")
+
+    def __init__(self, summary: str, messages: list[dict[str, str]]) -> None:
+        self.summary = summary
+        self.messages = messages
+
+    @property
+    def has_data(self) -> bool:
+        return bool(self.summary or self.messages)
+
+    def format_warmup_prompt(self) -> str:
+        """Return the complete warmup prompt string to send to goosed."""
+        parts: list[str] = [
+            "[SISTEMA: CONTEXTO_RECUPERADO_AUTOMATICAMENTE]\n"
+            "LINA fue reiniciada. Contexto de la sesión anterior para retomar "
+            "sin pedirle al usuario que repita nada:\n"
+        ]
+
+        if self.summary:
+            parts.append(f"## Resumen de sesión anterior\n{self.summary}\n")
+
+        if self.messages:
+            recent = "\n".join(
+                f"{'Fede' if m['role'] == 'user' else 'LINA'}: {m['content']}"
+                for m in self.messages
+            )
+            parts.append(f"## Últimos mensajes\n{recent}\n")
+
+        parts.append(
+            "[FIN_CONTEXTO]\n"
+            'Confirma que recibiste el contexto respondiendo SOLO con: "✅ Sesión reanudada."'
+        )
+        return "\n".join(parts)
+
+
+async def get_smart_context(
+    db_url: str,
+    session_id: str,
+    *,
+    recent_limit: int = _RECENT_MESSAGES_LIMIT,
+) -> SmartContext:
+    """Build a compact context bundle for warmup injection (issue #60).
+
+    Combines:
+    1. The structured prose summary from ``session_summaries`` (~200 tokens).
+    2. The last *recent_limit* raw messages for continuity (~300 tokens).
+
+    Total budget is roughly 3–5× smaller than the previous 20-message raw dump.
+    Returns a ``SmartContext`` with empty fields on any DB error (best-effort).
+    """
+    try:
+        import asyncpg
+
+        # Two separate connections: asyncpg connections are single-operation;
+        # running asyncio.gather on the same connection raises
+        # "another operation is in progress".
+        conn_s = await asyncpg.connect(db_url, timeout=5)
+        try:
+            summary = await _get_latest_summary(conn_s, session_id)
+        finally:
+            await conn_s.close()
+
+        conn_m = await asyncpg.connect(db_url, timeout=5)
+        try:
+            messages = await _get_recent_messages(conn_m, session_id, recent_limit)
+        finally:
+            await conn_m.close()
+
+        return SmartContext(summary=summary or "", messages=messages)
+    except Exception as exc:
+        logger.debug("boot_hook: get_smart_context failed (session=%s): %s", session_id, exc)
+    return SmartContext(summary="", messages=[])

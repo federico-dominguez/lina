@@ -19,7 +19,7 @@ from collections import defaultdict
 
 import httpx
 
-from .boot_hook import get_last_messages, save_message
+from .boot_hook import get_smart_context, save_message
 from .config import Config
 from .formatter import (
     format_tool_status,
@@ -431,39 +431,28 @@ class Bot:
         session_id: str,
         cancel_event: asyncio.Event,
     ) -> None:
-        """Inject the last N messages from DB into a freshly-created goosed session.
+        """Inject a compact smart context bundle into a freshly-created goosed session.
+
+        Uses ``get_smart_context`` (issue #60) which combines:
+        - A structured prose summary from ``session_summaries`` (~200 tokens)
+        - The last 5 raw messages for immediate continuity (~300 tokens)
+
+        This replaces the previous raw 20-message dump (~4 000 tokens) with a
+        ≤700-token warmup that is more focused and signal-dense.
 
         Shows a brief status message to the user while loading, then edits it
         once context is ready (or swallows errors silently if DB/goosed is down).
-
-        Only called when ``ensure_session`` confirmed this is a *new* session
-        (i.e. goosed lost its in-memory history due to a restart).
+        Only called when ``ensure_session`` confirmed this is a *new* session.
         """
         db_url = self._cfg.lina_db_url
         if not db_url:
             return
-        try:
-            messages = await get_last_messages(db_url, session_id, limit=20)
-        except Exception as exc:
-            logger.debug("_maybe_inject_context: could not load messages: %s", exc)
-            return
 
-        if not messages:
+        ctx = await get_smart_context(db_url, session_id)
+        if not ctx.has_data:
             return  # first session ever — nothing to inject
 
-        # Format previous messages as a readable context block
-        formatted = "\n".join(
-            f"{'Fede' if m['role'] == 'user' else 'LINA'}: {m['content']}" for m in messages
-        )
-        warmup_prompt = (
-            "[SISTEMA: CONTEXTO_RECUPERADO_AUTOMATICAMENTE]\n"
-            "LINA fue reiniciada y esta es una nueva sesión de goosed. "
-            "Los siguientes son los últimos mensajes de la sesión anterior "
-            "para que puedas retomar el contexto sin pedirle al usuario que repita nada:\n\n"
-            f"{formatted}\n\n"
-            "[FIN_CONTEXTO]\n"
-            'Confirma que recibiste el contexto respondiendo SOLO con: "✅ Sesión reanudada."'
-        )
+        warmup_prompt = ctx.format_warmup_prompt()
 
         status_id = await self._tg.send_message(
             chat_id, "📚 Recuperando contexto de sesión anterior..."
