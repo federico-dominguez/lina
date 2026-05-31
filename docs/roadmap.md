@@ -1,7 +1,7 @@
 # LINA — Roadmap de desarrollo
 
 **Última actualización:** 2026-05-31  
-**Estado actual:** Fase 3 completada (hardening + session persistence). Fase 3.5 en curso: 2/7 issues cerrados.
+**Estado actual:** Fase 3 completada (hardening + session persistence). Fase 3.5 en curso: 4/7 issues cerrados.
 
 ---
 
@@ -26,9 +26,9 @@
 |---|---|---|---|---|
 | 1 | [#60](https://github.com/federico-dominguez/lina/issues/60) | Smart context summarization | Reemplaza inyección cruda de 20 msgs por summary estructurado | ✅ mergeado |
 | 2 | [#61](https://github.com/federico-dominguez/lina/issues/61) | Token/cost metering | Tracking de costo USD por sesión + datos reales del dashboard | ✅ mergeado #72 |
-| 3 | [#62](https://github.com/federico-dominguez/lina/issues/62) | Reasoning trace persistence | Guarda bloques `<think>` en DB para auto-análisis | 🔲 siguiente |
-| 4 | [#63](https://github.com/federico-dominguez/lina/issues/63) | pgvector semantic memory | Búsqueda por significado en recuerdos | 🔲 |
-| 5 | [#64](https://github.com/federico-dominguez/lina/issues/64) | Image understanding | Procesa fotos/capturas enviadas a Telegram | 🔲 |
+| 3 | [#62](https://github.com/federico-dominguez/lina/issues/62) | Reasoning trace persistence | Guarda bloques `<think>` en DB para auto-análisis | ✅ mergeado #74 |
+| 4 | [#63](https://github.com/federico-dominguez/lina/issues/63) | pgvector semantic memory | Búsqueda por significado en recuerdos | ✅ mergeado #76 |
+| 5 | [#64](https://github.com/federico-dominguez/lina/issues/64) | Image understanding | Procesa fotos/capturas enviadas a Telegram | 🔲 siguiente |
 | 6 | [#65](https://github.com/federico-dominguez/lina/issues/65) | TTS voice responses | LINA responde con nota de voz cuando Federico habla | 🔲 |
 | 7 | [#66](https://github.com/federico-dominguez/lina/issues/66) | Proactive scheduler | Mensajes programados sin intervención de Federico | 🔲 |
 
