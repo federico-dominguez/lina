@@ -88,6 +88,11 @@ services:
       - ${HOME}/.config/goose/memory:/root/.config/goose/memory:rw
       - ${HOME}/.config/goose/gateway:/root/.config/goose/gateway:rw
       - lina-logs:/app/logs
+      # Acceso al repo lina para git autonomo.
+      # La deploy key (~/lina/.ssh/lina_deploy) debe estar creada y con write
+      # access al repo — ver docs/runbooks/ para el procedimiento de setup.
+      - ${HOME}:/home/user:rw
+      - ${HOME}/.ssh:/root/.ssh:ro
     ports:
       - "127.0.0.1:3000:3000"
     healthcheck:
@@ -170,10 +175,22 @@ services:
         MCP_DIR: mcps/shell-policy
         MCP_CMD: lina-shell-policy
     image: lina-mcp-shell-policy:latest
+    depends_on:
+      - lina-docker-proxy
     environment:
       MCP_TRANSPORT: streamable-http
       MCP_PORT: "8000"
       LINA_SHELL_AUDIT_DIR: /tmp/lina-audit
+      # Habilita comandos privilegiados (apt, sudo allowlist) — requiere además
+      # allow_sudo=True en cada llamada a sh_run para activarse.
+      LINA_SHELL_ALLOW_SUDO: "1"
+      # Docker management via socket proxy (sin acceso al socket completo).
+      DOCKER_HOST: tcp://lina-docker-proxy:2375
+    volumes:
+      - ${HOME}:/home/user:rw
+    networks:
+      - default
+      - lina-docker-proxy-net
 
   # ─── MCP: lina-systemd-user ─────────────────────────────────────────────────
   # Requiere D-Bus socket del usuario host.
@@ -375,6 +392,38 @@ services:
         max-size: "5m"
         max-file: "2"
 
+  # ─── Docker socket proxy (Tecnativa) ────────────────────────────────────────
+  # Expone un subconjunto restringido del Docker daemon para que LINA pueda
+  # arrancar/parar/reiniciar sus contenedores SIN tener acceso al socket completo.
+  # Allowlist de endpoints:
+  #   CONTAINERS: 1 + POST: 1 → GET /containers + start/stop/restart
+  #   EXEC: 0  → sin docker exec (no escape de sandbox)
+  #   BUILD: 0 → sin docker build (sin exfiltrar secrets vía Dockerfile)
+  #   IMAGES: 0, NETWORKS: 0, VOLUMES: 0, SERVICES: 0
+  # Referencia: https://github.com/Tecnativa/docker-socket-proxy
+  lina-docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      IMAGES: 0
+      NETWORKS: 0
+      VOLUMES: 0
+      SERVICES: 0
+      TASKS: 0
+      EXEC: 0
+      BUILD: 0
+      POST: 1    # permite start/stop/restart sobre contenedores
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - lina-docker-proxy-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
   # ─── Telegram Gateway (Issue #16) ────────────────────────────────────────
   # Servicio Python independiente que reemplaza el gateway embebido en goosed.
   # Pollea Telegram, reenvía mensajes a goosed /reply (SSE) y muestra
@@ -415,4 +464,8 @@ networks:
     # Red dedicada para el MCP de Moodle — aisla el servicio del resto del
     # stack. NOTA: esto no restringe egress por dominio; para limitar tráfico
     # a *.utec.edu.uy se requieren reglas de firewall/iptables adicionales.
+  lina-docker-proxy-net:
+    # Red interna entre lina-docker-proxy y lina-mcp-shell-policy.
+    # Sólo estos dos servicios la comparten — el socket proxy NO está en la red
+    # default ni es accesible desde otros contenedores.
 

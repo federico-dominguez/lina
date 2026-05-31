@@ -162,6 +162,143 @@ class TestWorkflowRuns:
         assert result[0]["id"] == 99
 
 
+# ── Write tools ────────────────────────────────────────────────────────────────
+
+class TestCreateBranch:
+    @respx.mock
+    def test_posts_ref(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_TOKEN", "tok")
+        import lina_github.server as m
+        importlib.reload(m)
+        import json as _json
+        route = respx.post("https://api.github.com/repos/o/r/git/refs").mock(
+            return_value=httpx.Response(201, json={"ref": "refs/heads/feat/x", "object": {"sha": "abc"}})
+        )
+        result = m.github_create_branch("o", "r", "feat/x", "abc123")
+        assert result["ref"] == "refs/heads/feat/x"
+        body = _json.loads(route.calls[0].request.content)
+        assert body["ref"] == "refs/heads/feat/x"
+        assert body["sha"] == "abc123"
+
+
+class TestDeleteBranch:
+    @respx.mock
+    def test_calls_delete(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_TOKEN", "tok")
+        import lina_github.server as m
+        importlib.reload(m)
+        respx.delete("https://api.github.com/repos/o/r/git/refs/heads/feat/x").mock(
+            return_value=httpx.Response(204)
+        )
+        result = m.github_delete_branch("o", "r", "feat/x")
+        assert result == {}
+
+
+class TestCreateOrUpdateFile:
+    @respx.mock
+    def test_encodes_base64(self, monkeypatch):
+        import base64, json as _json
+        monkeypatch.setenv("GITHUB_TOKEN", "tok")
+        import lina_github.server as m
+        importlib.reload(m)
+        route = respx.put("https://api.github.com/repos/o/r/contents/README.md").mock(
+            return_value=httpx.Response(200, json={"content": {"name": "README.md"}})
+        )
+        m.github_create_or_update_file("o", "r", "README.md", "hello", "init", "main")
+        body = _json.loads(route.calls[0].request.content)
+        decoded = base64.b64decode(body["content"]).decode()
+        assert decoded == "hello"
+        assert body["branch"] == "main"
+
+    @respx.mock
+    def test_includes_sha_for_update(self, monkeypatch):
+        import json as _json
+        monkeypatch.setenv("GITHUB_TOKEN", "tok")
+        import lina_github.server as m
+        importlib.reload(m)
+        route = respx.put("https://api.github.com/repos/o/r/contents/f.py").mock(
+            return_value=httpx.Response(200, json={"content": {}})
+        )
+        m.github_create_or_update_file("o", "r", "f.py", "x", "upd", "main", sha="deadbeef")
+        body = _json.loads(route.calls[0].request.content)
+        assert body["sha"] == "deadbeef"
+
+
+class TestAddComment:
+    @respx.mock
+    def test_posts_body(self, monkeypatch):
+        import json as _json
+        monkeypatch.setenv("GITHUB_TOKEN", "tok")
+        import lina_github.server as m
+        importlib.reload(m)
+        route = respx.post("https://api.github.com/repos/o/r/issues/5/comments").mock(
+            return_value=httpx.Response(201, json={"id": 9, "body": "hi"})
+        )
+        result = m.github_add_comment("o", "r", 5, "hi")
+        assert result["id"] == 9
+        body = _json.loads(route.calls[0].request.content)
+        assert body["body"] == "hi"
+
+
+class TestCloseIssue:
+    @respx.mock
+    def test_patches_state_closed(self, monkeypatch):
+        import json as _json
+        monkeypatch.setenv("GITHUB_TOKEN", "tok")
+        import lina_github.server as m
+        importlib.reload(m)
+        respx.patch("https://api.github.com/repos/o/r/issues/3").mock(
+            return_value=httpx.Response(200, json={"number": 3, "state": "closed"})
+        )
+        result = m.github_close_issue("o", "r", 3)
+        assert result["state"] == "closed"
+
+    @respx.mock
+    def test_adds_comment_before_close(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_TOKEN", "tok")
+        import lina_github.server as m
+        importlib.reload(m)
+        comment_route = respx.post("https://api.github.com/repos/o/r/issues/3/comments").mock(
+            return_value=httpx.Response(201, json={"id": 1})
+        )
+        respx.patch("https://api.github.com/repos/o/r/issues/3").mock(
+            return_value=httpx.Response(200, json={"number": 3, "state": "closed"})
+        )
+        m.github_close_issue("o", "r", 3, comment="Done!")
+        assert comment_route.called
+
+
+class TestRequestReview:
+    @respx.mock
+    def test_posts_reviewers(self, monkeypatch):
+        import json as _json
+        monkeypatch.setenv("GITHUB_TOKEN", "tok")
+        import lina_github.server as m
+        importlib.reload(m)
+        route = respx.post("https://api.github.com/repos/o/r/pulls/7/requested_reviewers").mock(
+            return_value=httpx.Response(201, json={"number": 7})
+        )
+        m.github_request_review("o", "r", 7, reviewers=["copilot-ai"])
+        body = _json.loads(route.calls[0].request.content)
+        assert "copilot-ai" in body["reviewers"]
+
+
+class TestMergePr:
+    @respx.mock
+    def test_puts_with_squash(self, monkeypatch):
+        import json as _json
+        monkeypatch.setenv("GITHUB_TOKEN", "tok")
+        import lina_github.server as m
+        importlib.reload(m)
+        route = respx.put("https://api.github.com/repos/o/r/pulls/2/merge").mock(
+            return_value=httpx.Response(200, json={"merged": True, "sha": "aaa"})
+        )
+        result = m.github_merge_pr("o", "r", 2)
+        assert result["merged"] is True
+        body = _json.loads(route.calls[0].request.content)
+        assert body["merge_method"] == "squash"
+
+
 # ── transport / port env vars ─────────────────────────────────────────────────
 
 class TestEnvConfig:

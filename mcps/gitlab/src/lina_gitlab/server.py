@@ -91,6 +91,20 @@ def _post(path: str, json: dict[str, Any]) -> Any:
         return r.json()
 
 
+def _put(path: str, json: dict[str, Any]) -> Any:
+    with _client() as c:
+        r = c.put(path, json=json)
+        r.raise_for_status()
+        return r.json()
+
+
+def _delete(path: str) -> Any:
+    with _client() as c:
+        r = c.delete(path)
+        r.raise_for_status()
+        return r.json() if r.content else {}
+
+
 def _encode_id(project_id: str | int) -> str:
     """URL-encode un project_id si contiene '/' (namespace/path)."""
     s = str(project_id)
@@ -378,6 +392,182 @@ def gitlab_get_pipeline(
         "created_at": p.get("created_at"),
         "updated_at": p.get("updated_at"),
         "web_url": p["web_url"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Write tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def gitlab_create_branch(project_id: str, branch: str, ref: str) -> dict:
+    """Crea una branch a partir de otra branch, tag o commit SHA.
+
+    Args:
+        project_id: ID numérico o 'namespace/path'.
+        branch:     Nombre de la nueva branch.
+        ref:        Branch, tag o SHA de origen.
+    """
+    data = _post(
+        f"/projects/{_encode_id(project_id)}/repository/branches",
+        {"branch": branch, "ref": ref},
+    )
+    return {
+        "name": data["name"],
+        "commit_sha": data["commit"]["id"][:12],
+        "web_url": data.get("web_url", ""),
+    }
+
+
+@mcp.tool()
+def gitlab_delete_branch(project_id: str, branch: str) -> dict:
+    """Elimina una branch del repositorio.
+
+    Args:
+        project_id: ID numérico o 'namespace/path'.
+        branch:     Nombre de la branch a eliminar.
+    """
+    encoded_branch = branch.replace("/", "%2F")
+    return _delete(f"/projects/{_encode_id(project_id)}/repository/branches/{encoded_branch}")
+
+
+@mcp.tool()
+def gitlab_create_or_update_file(
+    project_id: str,
+    file_path: str,
+    content: str,
+    commit_message: str,
+    branch: str,
+    start_branch: str = "",
+) -> dict:
+    """Crea o actualiza un archivo en el repositorio con un commit.
+
+    La API de GitLab detecta automáticamente si el archivo existe (create vs update).
+
+    Args:
+        project_id:     ID numérico o 'namespace/path'.
+        file_path:      Ruta del archivo (ej: 'README.md').
+        content:        Contenido en texto plano.
+        commit_message: Mensaje del commit.
+        branch:         Branch donde se hace el commit.
+        start_branch:   Branch de origen si se quiere crear una nueva branch con el cambio.
+    """
+    import base64
+
+    encoded_path = file_path.replace("/", "%2F")
+    endpoint = f"/projects/{_encode_id(project_id)}/repository/files/{encoded_path}"
+
+    payload: dict[str, Any] = {
+        "branch": branch,
+        "content": base64.b64encode(content.encode()).decode(),
+        "commit_message": commit_message,
+        "encoding": "base64",
+    }
+    if start_branch:
+        payload["start_branch"] = start_branch
+
+    # Intentar PUT (update); si falla con 400/404 se intenta POST (create).
+    try:
+        data = _put(endpoint, payload)
+    except Exception:
+        data = _post(endpoint, payload)  # type: ignore[arg-type]
+
+    return {
+        "file_path": data.get("file_path", file_path),
+        "branch": data.get("branch", branch),
+    }
+
+
+@mcp.tool()
+def gitlab_add_comment(
+    project_id: str,
+    noteable_type: str,
+    noteable_iid: int,
+    body: str,
+) -> dict:
+    """Agrega un comentario a un issue o merge request.
+
+    Args:
+        project_id:     ID numérico o 'namespace/path'.
+        noteable_type:  'issues' o 'merge_requests'.
+        noteable_iid:   IID del issue o MR.
+        body:           Texto del comentario (Markdown soportado).
+    """
+    data = _post(
+        f"/projects/{_encode_id(project_id)}/{noteable_type}/{noteable_iid}/notes",
+        {"body": body},
+    )
+    return {
+        "id": data["id"],
+        "author": data["author"]["username"],
+        "created_at": data.get("created_at"),
+    }
+
+
+@mcp.tool()
+def gitlab_close_issue(
+    project_id: str,
+    issue_iid: int,
+    comment: str = "",
+) -> dict:
+    """Cierra un issue. Si se provee 'comment', lo agrega antes de cerrar.
+
+    Args:
+        project_id: ID numérico o 'namespace/path'.
+        issue_iid:  IID del issue (no el ID global).
+        comment:    Comentario a agregar antes de cerrar (opcional).
+    """
+    if comment:
+        _post(
+            f"/projects/{_encode_id(project_id)}/issues/{issue_iid}/notes",
+            {"body": comment},
+        )
+    data = _put(
+        f"/projects/{_encode_id(project_id)}/issues/{issue_iid}",
+        {"state_event": "close"},
+    )
+    return {
+        "iid": data["iid"],
+        "title": data["title"],
+        "state": data["state"],
+        "web_url": data["web_url"],
+    }
+
+
+@mcp.tool()
+def gitlab_merge_mr(
+    project_id: str,
+    mr_iid: int,
+    merge_commit_message: str = "",
+    squash: bool = False,
+    should_remove_source_branch: bool = False,
+) -> dict:
+    """Acepta (mergea) un merge request.
+
+    Args:
+        project_id:                  ID numérico o 'namespace/path'.
+        mr_iid:                      IID del MR.
+        merge_commit_message:        Mensaje del merge commit (opcional).
+        squash:                      Si hacer squash de los commits (default: False).
+        should_remove_source_branch: Si eliminar la branch origen al mergear (default: False).
+    """
+    payload: dict[str, Any] = {
+        "squash": squash,
+        "should_remove_source_branch": should_remove_source_branch,
+    }
+    if merge_commit_message:
+        payload["merge_commit_message"] = merge_commit_message
+    data = _put(
+        f"/projects/{_encode_id(project_id)}/merge_requests/{mr_iid}/merge",
+        payload,
+    )
+    return {
+        "iid": data["iid"],
+        "title": data["title"],
+        "state": data["state"],
+        "merged_at": data.get("merged_at"),
+        "web_url": data["web_url"],
     }
 
 
