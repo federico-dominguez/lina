@@ -16,13 +16,13 @@ Herramientas expuestas:
     get_daily_cost           — costo estimado por día (últimos N días) (issue #61)
     get_deepseek_balance          — saldo actual de la cuenta DeepSeek via API oficial (issue #61)
     get_deepseek_user_summary     — balance + gasto mensual exacto desde platform.deepseek.com
-    get_deepseek_monthly_usage    — tokens por modelo y tipo desde platform.deepseek.com (números reales del dashboard)
-    get_deepseek_monthly_cost     — costo USD por modelo y tipo desde platform.deepseek.com (idéntico al dashboard)
+    get_deepseek_monthly_usage    — tokens por modelo y tipo desde platform.deepseek.com
+    get_deepseek_monthly_cost     — costo USD por modelo desde platform.deepseek.com (= dashboard)
 
 Variables de entorno:
     LINA_DB_URL              URL de conexión (default: postgresql://lina:lina_dev@localhost:5432/lina)
     DEEPSEEK_API_KEY         API key de DeepSeek para get_deepseek_balance (opcional)
-    DEEPSEEK_PLATFORM_TOKEN  Token de sesión de platform.deepseek.com para usage/cost real (opcional)
+    DEEPSEEK_PLATFORM_TOKEN  Token de sesión de platform.deepseek.com (opcional)
 """
 
 from __future__ import annotations
@@ -593,8 +593,8 @@ def get_deepseek_balance() -> dict:
 
 def _platform_request(path: str, platform_token: str) -> dict:
     """Make an authenticated GET to platform.deepseek.com and return parsed JSON."""
-    import urllib.request as _ur
     import json as _json
+    import urllib.request as _ur
 
     req = _ur.Request(
         f"https://platform.deepseek.com{path}",
@@ -627,7 +627,10 @@ def get_deepseek_user_summary() -> dict:
     """
     platform_token = os.environ.get("DEEPSEEK_PLATFORM_TOKEN", "")
     if not platform_token:
-        return {"error": "DEEPSEEK_PLATFORM_TOKEN no configurado. Obtenerlo de platform.deepseek.com (sesión de navegador)."}
+        return {
+            "error": "DEEPSEEK_PLATFORM_TOKEN no configurado. "
+            "Obtenerlo de platform.deepseek.com (sesión de navegador)."
+        }
 
     try:
         data = _platform_request("/api/v0/users/get_user_summary", platform_token)
@@ -646,7 +649,11 @@ def get_deepseek_user_summary() -> dict:
             "monthly_token_usage": biz.get("monthly_token_usage", "0"),
             "token_estimation": usd_wallet.get("token_estimation", "0"),
         }
-        _audit("get_deepseek_user_summary", {}, f"balance=${result['balance_usd'][:6]} monthly=${result['monthly_cost_usd'][:6]}")
+        _audit(
+            "get_deepseek_user_summary",
+            {},
+            f"balance=${result['balance_usd'][:6]} monthly=${result['monthly_cost_usd'][:6]}",
+        )
         return result
     except Exception as exc:
         return {"error": str(exc)}
@@ -697,7 +704,11 @@ def get_deepseek_monthly_usage(year: int, month: int) -> dict:
                 "output_tokens": usage_map.get("RESPONSE_TOKEN", 0),
                 "requests": usage_map.get("REQUEST", 0),
             }
-        _audit("get_deepseek_monthly_usage", {"year": year, "month": month}, f"models={list(result.keys())}")
+        _audit(
+            "get_deepseek_monthly_usage",
+            {"year": year, "month": month},
+            f"models={list(result.keys())}",
+        )
         return {"year": year, "month": month, "usage": result}
     except Exception as exc:
         return {"error": str(exc)}
@@ -761,8 +772,17 @@ def get_deepseek_monthly_cost(year: int, month: int) -> dict:
                 "output_cost_usd": round(output, 8),
                 "total_usd": round(model_total, 8),
             }
-        _audit("get_deepseek_monthly_cost", {"year": year, "month": month}, f"total=${round(grand_total, 4)}")
-        return {"year": year, "month": month, "total_usd": round(grand_total, 8), "by_model": by_model}
+        _audit(
+            "get_deepseek_monthly_cost",
+            {"year": year, "month": month},
+            f"total=${round(grand_total, 4)}",
+        )
+        return {
+            "year": year,
+            "month": month,
+            "total_usd": round(grand_total, 8),
+            "by_model": by_model,
+        }
     except Exception as exc:
         return {"error": str(exc)}
 

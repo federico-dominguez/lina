@@ -232,14 +232,14 @@ async def get_last_messages(
 # For exact monthly totals matching the DeepSeek dashboard, use balance snapshots.
 _PRICING: dict[str, dict[str, float]] = {
     "deepseek-v4-flash": {
-        "input_cache_miss": 0.14,    # $0.14/1M  (input_cache_miss_tokens)
-        "input_cache_hit": 0.0028,   # $0.0028/1M (input_cache_hit_tokens)
-        "output": 0.28,              # $0.28/1M  (output_tokens)
+        "input_cache_miss": 0.14,  # $0.14/1M  (input_cache_miss_tokens)
+        "input_cache_hit": 0.0028,  # $0.0028/1M (input_cache_hit_tokens)
+        "output": 0.28,  # $0.28/1M  (output_tokens)
     },
     "deepseek-v4-pro": {
-        "input_cache_miss": 0.435,   # $0.435/1M (input_cache_miss_tokens)
-        "input_cache_hit": 0.003625, # $0.003625/1M (input_cache_hit_tokens)
-        "output": 0.87,              # $0.87/1M  (output_tokens)
+        "input_cache_miss": 0.435,  # $0.435/1M (input_cache_miss_tokens)
+        "input_cache_hit": 0.003625,  # $0.003625/1M (input_cache_hit_tokens)
+        "output": 0.87,  # $0.87/1M  (output_tokens)
     },
     # Legacy aliases
     "deepseek-chat": {
@@ -403,7 +403,6 @@ async def record_balance_snapshot(
     except Exception as exc:
         logger.debug("boot_hook: record_balance_snapshot failed: %s", exc)
         return None
-
 
 
 # How many raw recent messages to include alongside the summary.
