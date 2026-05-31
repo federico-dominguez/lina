@@ -267,6 +267,7 @@ services:
       MCP_PORT: "8000"
       LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_PLATFORM_TOKEN: ${DEEPSEEK_PLATFORM_TOKEN:-}
 
   # ─── MCP: lina-github ──────────────────────────────────────────────────────
   lina-mcp-github:
@@ -466,6 +467,7 @@ services:
       GATEWAY_PACER_TICK: "1.5"
       TELEGRAM_POLL_TIMEOUT: "30"
       LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
       GATEWAY_NOTIFY_CHAT_IDS: ${GATEWAY_NOTIFY_CHAT_IDS:-}
     # No ports needed — outbound only (Telegram API + goosed internal)
     logging:

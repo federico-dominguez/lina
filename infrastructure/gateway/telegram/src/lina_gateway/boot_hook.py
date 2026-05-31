@@ -225,14 +225,33 @@ async def get_last_messages(
 
 # ─── Token / cost metering (issue #61, fix #72) ──────────────────────────────
 
-# Pricing table kept as fallback for tests and edge cases where token_state
-# is unavailable. Real costs come from goosed's token_state.accumulatedCost.
+# Real DeepSeek pricing from official billing CSV (verified 2026-05-31).
+# Keys: input_cache_miss, input_cache_hit, output — all USD per 1 million tokens.
+# Note: goosed's token_state doesn't distinguish cache hits from misses;
+# accumulatedCost from goosed is used as-is (best available per-turn estimate).
+# For exact monthly totals matching the DeepSeek dashboard, use balance snapshots.
 _PRICING: dict[str, dict[str, float]] = {
-    "deepseek-v4-flash": {"input": 0.14, "output": 0.28},
-    "deepseek-v4-pro": {"input": 1.74, "output": 3.48},
-    # legacy aliases (deprecated 2026-07-24, kept for historical records)
-    "deepseek-chat": {"input": 0.14, "output": 0.28},
-    "deepseek-reasoner": {"input": 1.74, "output": 3.48},
+    "deepseek-v4-flash": {
+        "input_cache_miss": 0.14,    # $0.14/1M  (input_cache_miss_tokens)
+        "input_cache_hit": 0.0028,   # $0.0028/1M (input_cache_hit_tokens)
+        "output": 0.28,              # $0.28/1M  (output_tokens)
+    },
+    "deepseek-v4-pro": {
+        "input_cache_miss": 0.435,   # $0.435/1M (input_cache_miss_tokens)
+        "input_cache_hit": 0.003625, # $0.003625/1M (input_cache_hit_tokens)
+        "output": 0.87,              # $0.87/1M  (output_tokens)
+    },
+    # Legacy aliases
+    "deepseek-chat": {
+        "input_cache_miss": 0.14,
+        "input_cache_hit": 0.0028,
+        "output": 0.28,
+    },
+    "deepseek-reasoner": {
+        "input_cache_miss": 0.435,
+        "input_cache_hit": 0.003625,
+        "output": 0.87,
+    },
 }
 _DEFAULT_MODEL = "deepseek-v4-flash"
 
@@ -248,10 +267,25 @@ def _estimate_tokens(text: str) -> int:
     return max(1, -(-len(text) // 3))  # ceiling division
 
 
-def _calculate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
-    """Return estimated cost in USD given model and token counts."""
+def _calculate_cost(
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    *,
+    cache_hit_tokens: int = 0,
+) -> float:
+    """Return estimated cost in USD given model and token counts.
+
+    If cache_hit_tokens is provided, it's separated from cache_miss tokens;
+    otherwise all input tokens are treated as cache misses (conservative estimate).
+    """
     prices = _PRICING.get(model, _PRICING[_DEFAULT_MODEL])
-    cost = (prompt_tokens * prices["input"] + completion_tokens * prices["output"]) / 1_000_000
+    cache_miss = max(0, prompt_tokens - cache_hit_tokens)
+    cost = (
+        cache_miss * prices["input_cache_miss"]
+        + cache_hit_tokens * prices["input_cache_hit"]
+        + completion_tokens * prices["output"]
+    ) / 1_000_000
     return round(cost, 8)
 
 
@@ -313,7 +347,64 @@ async def save_token_usage(
         logger.debug("boot_hook: save_token_usage failed (session=%s): %s", session_id, exc)
 
 
-# ─── Smart context (issue #60) ────────────────────────────────────────────────
+# ─── Balance snapshot tracking (issue #61 real cost) ─────────────────────────
+
+
+async def record_balance_snapshot(
+    db_url: str,
+    deepseek_api_key: str,
+    source: str = "periodic",
+) -> float | None:
+    """Fetch the current DeepSeek balance and persist it to balance_snapshots.
+
+    Returns the balance in USD, or None on any error. Best-effort, never raises.
+
+    Strategy: by snapshotting the balance periodically (on startup, hourly, etc.)
+    and computing balance deltas, we get exact spend figures matching the
+    DeepSeek dashboard — regardless of cache hit/miss pricing nuances.
+    """
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(
+            "https://api.deepseek.com/user/balance",
+            headers={"Authorization": f"Bearer {deepseek_api_key}", "Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            import json
+
+            data = json.loads(resp.read())
+
+        balance_infos = data.get("balance_infos", [])
+        usd_info = next((b for b in balance_infos if b.get("currency") == "USD"), None)
+        if not usd_info:
+            logger.warning("boot_hook: no USD balance in DeepSeek response")
+            return None
+        balance = float(usd_info["topped_up_balance"])
+        api_key_hint = deepseek_api_key[-4:] if len(deepseek_api_key) >= 4 else "????"
+
+        import asyncpg
+
+        conn = await asyncpg.connect(db_url, timeout=5)
+        try:
+            await conn.execute(
+                "INSERT INTO balance_snapshots (balance_usd, source, api_key_hint) "
+                "VALUES ($1, $2, $3)",
+                balance,
+                source,
+                api_key_hint,
+            )
+        finally:
+            await conn.close()
+
+        logger.info("boot_hook: balance snapshot recorded $%.4f (source=%s)", balance, source)
+        return balance
+
+    except Exception as exc:
+        logger.debug("boot_hook: record_balance_snapshot failed: %s", exc)
+        return None
+
+
 
 # How many raw recent messages to include alongside the summary.
 _RECENT_MESSAGES_LIMIT = 5

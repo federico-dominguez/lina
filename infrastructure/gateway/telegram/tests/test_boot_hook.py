@@ -438,9 +438,9 @@ class TestCalculateCost:
         assert abs(cost - 0.42) < 1e-6
 
     def test_pro_model(self) -> None:
-        # 1M input @ $1.74 + 1M output @ $3.48 = $5.22
+        # 1M input (cache miss) @ $0.435 + 1M output @ $0.87 = $1.305
         cost = _calculate_cost("deepseek-v4-pro", 1_000_000, 1_000_000)
-        assert abs(cost - 5.22) < 1e-6
+        assert abs(cost - 1.305) < 1e-6
 
     def test_legacy_alias_chat(self) -> None:
         cost_chat = _calculate_cost("deepseek-chat", 100_000, 100_000)

@@ -5,7 +5,7 @@ import logging
 import signal
 from contextlib import suppress
 
-from .boot_hook import on_boot, on_shutdown
+from .boot_hook import on_boot, on_shutdown, record_balance_snapshot
 from .bot import Bot
 from .config import Config
 
@@ -24,6 +24,12 @@ async def _run() -> None:
 
     # ── Boot notification (best-effort) ───────────────────────────────────────
     await on_boot(bot.tg, cfg.lina_db_url, cfg.notify_chat_ids)
+
+    # ── Balance snapshot on startup (best-effort) ─────────────────────────────
+    if cfg.lina_db_url and cfg.deepseek_api_key:
+        asyncio.create_task(
+            record_balance_snapshot(cfg.lina_db_url, cfg.deepseek_api_key, source="startup")
+        )
 
     # ── Graceful shutdown via SIGTERM / SIGINT ────────────────────────────────
     loop = asyncio.get_running_loop()
