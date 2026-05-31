@@ -8,8 +8,10 @@ instructions: |
   Seguí estos pasos en orden:
 
   1. **Determiná el session_id** de la sesión activa de Telegram. El formato es
-     `telegram-{chat_id}` (ej: `telegram-123456789`). Podés obtenerlo del contexto
-     actual o llamar `get_last_sessions(1)` para ver el más reciente.
+     `telegram-{chat_id}` (ej: `telegram-123456789`). El `chat_id` es el ID numérico
+     del chat de Telegram visible en el contexto de la conversación actual.
+     **No uses `get_last_sessions(1)`** — esa función devuelve IDs en formato
+     `YYYYMMDD_N` (tabla legacy) que NO coinciden con el formato que usa `summarize_session_smart`.
 
   2. **Generá el resumen** de la sesión en formato estructurado:
      - Temas tratados (lista de bullets concisos)

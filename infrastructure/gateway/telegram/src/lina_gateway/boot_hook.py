@@ -16,7 +16,6 @@ raised — the gateway must continue operating even if the DB is temporarily dow
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
@@ -334,15 +333,22 @@ async def get_smart_context(
     try:
         import asyncpg
 
-        conn = await asyncpg.connect(db_url, timeout=5)
+        # Two separate connections: asyncpg connections are single-operation;
+        # running asyncio.gather on the same connection raises
+        # "another operation is in progress".
+        conn_s = await asyncpg.connect(db_url, timeout=5)
         try:
-            summary, messages = await asyncio.gather(
-                _get_latest_summary(conn, session_id),
-                _get_recent_messages(conn, session_id, recent_limit),
-            )
-            return SmartContext(summary=summary or "", messages=messages)
+            summary = await _get_latest_summary(conn_s, session_id)
         finally:
-            await conn.close()
+            await conn_s.close()
+
+        conn_m = await asyncpg.connect(db_url, timeout=5)
+        try:
+            messages = await _get_recent_messages(conn_m, session_id, recent_limit)
+        finally:
+            await conn_m.close()
+
+        return SmartContext(summary=summary or "", messages=messages)
     except Exception as exc:
         logger.debug("boot_hook: get_smart_context failed (session=%s): %s", session_id, exc)
     return SmartContext(summary="", messages=[])
