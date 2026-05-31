@@ -6,8 +6,8 @@ import pytest
 
 from lina_gateway.pacer import StreamingBubble, trim_work_log
 
-
 # ─── trim_work_log ───────────────────────────────────────────────────────────
+
 
 class TestTrimWorkLog:
     def test_short_log_unchanged(self):
@@ -31,6 +31,7 @@ class TestTrimWorkLog:
 
 
 # ─── StreamingBubble ─────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 class TestStreamingBubble:

@@ -3,7 +3,6 @@
 from lina_gateway.formatter import (
     _strip_inline_markdown,
     code_block,
-    collapse_newlines,
     format_tool_status,
     format_with_thinking,
     looks_like_diff,
@@ -15,8 +14,8 @@ from lina_gateway.formatter import (
     wrap_long_pre_blocks,
 )
 
-
 # ─── split_message ───────────────────────────────────────────────────────────
+
 
 class TestSplitMessage:
     def test_short_message_unchanged(self):
@@ -46,6 +45,7 @@ class TestSplitMessage:
 
 # ─── strip_ansi ──────────────────────────────────────────────────────────────
 
+
 class TestStripAnsi:
     def test_removes_colors(self):
         assert strip_ansi("\x1b[32mgreen\x1b[0m") == "green"
@@ -56,6 +56,7 @@ class TestStripAnsi:
 
 # ─── strip_html_tags ─────────────────────────────────────────────────────────
 
+
 class TestStripHtmlTags:
     def test_removes_tags(self):
         assert strip_html_tags("<b>bold</b> text") == "bold text"
@@ -65,6 +66,7 @@ class TestStripHtmlTags:
 
 
 # ─── truncate_chars ──────────────────────────────────────────────────────────
+
 
 class TestTruncateChars:
     def test_short_unchanged(self):
@@ -83,6 +85,7 @@ class TestTruncateChars:
 
 # ─── looks_like_diff ─────────────────────────────────────────────────────────
 
+
 class TestLooksLikeDiff:
     def test_git_diff(self):
         assert looks_like_diff("diff --git a/foo b/foo\n--- a/foo\n+++ b/foo")
@@ -96,6 +99,7 @@ class TestLooksLikeDiff:
 
 # ─── code_block ──────────────────────────────────────────────────────────────
 
+
 class TestCodeBlock:
     def test_with_lang(self):
         result = code_block("python", "x = 1")
@@ -105,7 +109,7 @@ class TestCodeBlock:
     def test_without_lang(self):
         result = code_block(None, "x = 1")
         assert "<pre><code>" in result
-        assert 'class=' not in result
+        assert "class=" not in result
 
     def test_escapes_body(self):
         result = code_block(None, "<script>")
@@ -113,6 +117,7 @@ class TestCodeBlock:
 
 
 # ─── wrap_long_pre_blocks ────────────────────────────────────────────────────
+
 
 class TestWrapLongPreBlocks:
     def test_short_block_not_wrapped(self):
@@ -133,6 +138,7 @@ class TestWrapLongPreBlocks:
 
 
 # ─── format_with_thinking ────────────────────────────────────────────────────
+
 
 class TestFormatWithThinking:
     def test_no_thinking_returns_body(self):
@@ -160,6 +166,7 @@ class TestFormatWithThinking:
 
 # ─── format_tool_status ──────────────────────────────────────────────────────
 
+
 class TestFormatToolStatus:
     def test_in_progress_shows_gear(self):
         result = format_tool_status("shell_exec", "ls -la", False, None, "")
@@ -179,7 +186,7 @@ class TestFormatToolStatus:
     def test_diff_output_gets_diff_lang(self):
         diff = "--- a/foo\n+++ b/foo\n@@ -1,1 +1,2 @@\n-old\n+new"
         result = format_tool_status("shell_exec", "", True, True, diff)
-        assert 'language-diff' in result
+        assert "language-diff" in result
 
     def test_no_result_no_output_bubble(self):
         result = format_tool_status("shell_exec", "cmd", True, True, "")
@@ -187,6 +194,7 @@ class TestFormatToolStatus:
 
 
 # ─── markdown_to_telegram_html ───────────────────────────────────────────────
+
 
 class TestMarkdownToTelegramHtml:
     def test_bold(self):
@@ -201,7 +209,7 @@ class TestMarkdownToTelegramHtml:
 
     def test_code_block(self):
         result = markdown_to_telegram_html("```python\nx = 1\n```")
-        assert 'language-python' in result
+        assert "language-python" in result
         assert "x = 1" in result
 
     def test_heading(self):
@@ -281,6 +289,7 @@ class TestMarkdownToTelegramHtml:
 
 # ─── _strip_inline_markdown ──────────────────────────────────────────────────
 
+
 class TestStripInlineMarkdown:
     def test_strips_bold(self):
         assert _strip_inline_markdown("**bold**") == "bold"
@@ -320,6 +329,7 @@ class TestStripInlineMarkdown:
 
 
 # ─── format_with_thinking (markdown in thinking) ─────────────────────────────
+
 
 class TestFormatWithThinkingMarkdown:
     def test_bold_in_thinking_converted(self):
