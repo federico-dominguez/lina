@@ -266,6 +266,7 @@ services:
       MCP_TRANSPORT: streamable-http
       MCP_PORT: "8000"
       LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
 
   # ─── MCP: lina-github ──────────────────────────────────────────────────────
   lina-mcp-github:
