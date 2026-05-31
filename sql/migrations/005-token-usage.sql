@@ -11,7 +11,7 @@
 --     time so historical records are not affected by price changes.
 --   • model defaults to 'deepseek-v4-flash' (= deepseek-chat, non-thinking).
 --     When the gateway knows the model, it passes it explicitly.
---   • No UNIQUE constraint on (session_id, turn_number) to allow retry writes.
+--   • No UNIQUE constraint to allow retry writes.
 
 CREATE TABLE IF NOT EXISTS token_usage (
     id                    BIGSERIAL    PRIMARY KEY,

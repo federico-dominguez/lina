@@ -228,7 +228,7 @@ async def get_last_messages(
 # Pricing table (USD per 1 million tokens), as of 2026-05-31.
 # Keys are model identifiers returned by goosed / DeepSeek API.
 # deepseek-chat → deepseek-v4-flash (non-thinking)
-# deepseek-reasoner → deepseek-v4-flash (thinking mode)  [deprecated alias]
+# deepseek-reasoner → deepseek-v4-pro (thinking mode)  [deprecated alias]
 # deepseek-v4-flash → non-thinking / flash
 # deepseek-v4-pro → thinking / pro
 _PRICING: dict[str, dict[str, float]] = {

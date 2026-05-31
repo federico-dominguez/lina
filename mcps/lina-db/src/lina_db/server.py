@@ -478,14 +478,6 @@ def get_session_summary(session_id: str) -> dict | None:
 
 # ─── Token / cost metering (issue #61) ───────────────────────────────────────
 
-# Pricing per 1M tokens (USD), as of 2026-05-31.
-_PRICING: dict[str, dict[str, float]] = {
-    "deepseek-v4-flash": {"input": 0.14, "output": 0.28},
-    "deepseek-v4-pro": {"input": 1.74, "output": 3.48},
-    "deepseek-chat": {"input": 0.14, "output": 0.28},  # deprecated alias
-    "deepseek-reasoner": {"input": 1.74, "output": 3.48},  # deprecated alias
-}
-
 
 @mcp.tool()
 def get_session_cost(session_id: str) -> dict:
