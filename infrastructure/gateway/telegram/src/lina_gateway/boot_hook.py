@@ -135,3 +135,89 @@ async def on_shutdown(
             await tg.send_message(chat_id, "⚠️ Reiniciándome. Vuelvo en ~30s.")
         except Exception as exc:
             logger.warning("boot_hook: failed to notify chat %s on shutdown: %s", chat_id, exc)
+
+
+# ─── Session message persistence (issue #56) ─────────────────────────────────
+
+
+async def save_message(
+    db_url: str,
+    session_id: str,
+    role: str,
+    content: str,
+) -> None:
+    """Persist a single conversation turn to ``session_messages``. Best-effort.
+
+    Args:
+        db_url:     PostgreSQL connection URL.
+        session_id: Gateway deterministic ID (e.g. ``telegram-123456789``).
+        role:       One of ``"user"`` | ``"assistant"`` | ``"system"``.
+        content:    Plain-text message body (no HTML).
+    """
+    try:
+        import asyncpg
+
+        conn = await asyncpg.connect(db_url, timeout=5)
+        try:
+            # turn_number = next value after the current max for this session
+            await conn.execute(
+                """
+                INSERT INTO session_messages (session_id, turn_number, role, content)
+                VALUES (
+                    $1,
+                    COALESCE(
+                        (SELECT MAX(turn_number) + 1
+                         FROM session_messages
+                         WHERE session_id = $1),
+                        0
+                    ),
+                    $2, $3
+                )
+                """,
+                session_id,
+                role,
+                content,
+            )
+        finally:
+            await conn.close()
+    except Exception as exc:
+        logger.debug("boot_hook: save_message failed (session=%s): %s", session_id, exc)
+
+
+async def get_last_messages(
+    db_url: str,
+    session_id: str,
+    *,
+    limit: int = 20,
+) -> list[dict[str, str]]:
+    """Return the last *limit* messages for a session, ordered oldest-first.
+
+    Each dict has ``role`` and ``content`` keys.
+    Returns an empty list on any error (best-effort).
+    """
+    try:
+        import asyncpg
+
+        conn = await asyncpg.connect(db_url, timeout=5)
+        try:
+            rows = await conn.fetch(
+                """
+                SELECT role, content
+                FROM (
+                    SELECT role, content, turn_number
+                    FROM session_messages
+                    WHERE session_id = $1
+                    ORDER BY turn_number DESC
+                    LIMIT $2
+                ) sub
+                ORDER BY turn_number ASC
+                """,
+                session_id,
+                limit,
+            )
+            return [{"role": r["role"], "content": r["content"]} for r in rows]
+        finally:
+            await conn.close()
+    except Exception as exc:
+        logger.debug("boot_hook: get_last_messages failed (session=%s): %s", session_id, exc)
+    return []
