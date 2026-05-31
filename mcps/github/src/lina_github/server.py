@@ -211,6 +211,7 @@ def github_search_code(query: str, page: int = 1, per_page: int = 10) -> list[di
 
 # ── Write tools ───────────────────────────────────────────────────────────────
 
+
 @mcp.tool()
 def github_create_branch(owner: str, repo: str, branch: str, sha: str) -> dict:
     """Crea una branch a partir de un SHA (commit, tag, o HEAD de otra rama).
@@ -218,7 +219,9 @@ def github_create_branch(owner: str, repo: str, branch: str, sha: str) -> dict:
     Args:
         sha: SHA del commit de origen. Obtenerlo con github_list_branches.
     """
-    return _post(f"/repos/{owner}/{repo}/git/refs", json={"ref": f"refs/heads/{branch}", "sha": sha})
+    return _post(
+        f"/repos/{owner}/{repo}/git/refs", json={"ref": f"refs/heads/{branch}", "sha": sha}
+    )
 
 
 @mcp.tool()
@@ -245,6 +248,7 @@ def github_create_or_update_file(
                  Dejarlo vacío para crear archivos nuevos.
     """
     import base64
+
     payload: dict[str, Any] = {
         "message": message,
         "content": base64.b64encode(content.encode()).decode(),
@@ -283,10 +287,23 @@ def github_add_comment(owner: str, repo: str, issue_number: int, body: str) -> d
 
 @mcp.tool()
 def github_close_issue(owner: str, repo: str, issue_number: int, comment: str = "") -> dict:
-    """Cierra un issue. Si se provee 'comment', lo agrega antes de cerrar."""
+    """Cierra un issue. Si se provee 'comment', lo agrega antes de cerrar.
+
+    Returns:
+        Dict con claves 'issue' (respuesta del PATCH) y 'comment' (respuesta
+        del POST si se envio comentario, None en caso contrario).
+    """
+    comment_result = None
     if comment:
-        _post(f"/repos/{owner}/{repo}/issues/{issue_number}/comments", json={"body": comment})
-    return _patch(f"/repos/{owner}/{repo}/issues/{issue_number}", json={"state": "closed"})
+        comment_result = _post(
+            f"/repos/{owner}/{repo}/issues/{issue_number}/comments",
+            json={"body": comment},
+        )
+    issue_result = _patch(
+        f"/repos/{owner}/{repo}/issues/{issue_number}",
+        json={"state": "closed"},
+    )
+    return {"issue": issue_result, "comment": comment_result}
 
 
 @mcp.tool()

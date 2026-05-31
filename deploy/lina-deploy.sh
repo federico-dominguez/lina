@@ -23,7 +23,10 @@
 
 set -euo pipefail
 
-COMPOSE_FILE="/home/fede/lina/deploy/docker/docker-compose.yml"
+# Ruta al compose file. Puede sobreescribirse via variable de entorno.
+# Por defecto se computa relativo al script, lo que lo hace portable.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMPOSE_FILE="${LINA_COMPOSE_FILE:-${SCRIPT_DIR}/docker/docker-compose.yml}"
 LOG_FILE="/var/log/lina-deploy.log"
 
 ALLOWED_SERVICES=(

@@ -18,10 +18,9 @@
 #   - lina-deploy: wrapper con allowlist interna de servicios (ver deploy/lina-deploy.sh).
 #   - dpkg: permite instalar .deb descargados directamente.
 
-fede ALL=(ALL) NOPASSWD: /usr/bin/apt-get install *
-fede ALL=(ALL) NOPASSWD: /usr/bin/apt-get remove *
-fede ALL=(ALL) NOPASSWD: /usr/bin/apt-get purge *
-fede ALL=(ALL) NOPASSWD: /usr/bin/apt-get update
-fede ALL=(ALL) NOPASSWD: /usr/bin/apt-get autoremove
-fede ALL=(ALL) NOPASSWD: /usr/bin/dpkg -i *
+# Nota de seguridad: los comodines * en apt-get permiten flags arbitrarios
+# (ej: -o APT::Update::Pre-Invoke::=/script) que pueden ejecutar código arbitrario
+# como root via hooks de apt. Para mayor seguridad, ruteá las instalaciones de
+# paquetes a través del script lina-deploy que tiene una allowlist de comandos.
+# Si necesitás apt-get directo, usá el wrapper con lista explícita de paquetes.
 fede ALL=(ALL) NOPASSWD: /usr/local/bin/lina-deploy *

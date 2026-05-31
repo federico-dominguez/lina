@@ -92,7 +92,11 @@ services:
       # La deploy key (~/lina/.ssh/lina_deploy) debe estar creada y con write
       # access al repo — ver docs/runbooks/ para el procedimiento de setup.
       - ${HOME}:/home/user:rw
-      - ${HOME}/.ssh:/root/.ssh:ro
+      # Solo la deploy key dedicada al repo lina (NO todo ~/.ssh).
+      # Crear con: ssh-keygen -t ed25519 -f ~/lina/.ssh/lina_deploy -N ''
+      # Agregar la clave pública como Deploy Key con write access en GitHub.
+      - ${HOME}/lina/.ssh/lina_deploy:/root/.ssh/id_ed25519:ro
+      - ${HOME}/lina/.ssh/lina_deploy.pub:/root/.ssh/id_ed25519.pub:ro
     ports:
       - "127.0.0.1:3000:3000"
     healthcheck:

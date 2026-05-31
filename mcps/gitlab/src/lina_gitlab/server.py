@@ -467,10 +467,13 @@ def gitlab_create_or_update_file(
     if start_branch:
         payload["start_branch"] = start_branch
 
-    # Intentar PUT (update); si falla con 400/404 se intenta POST (create).
+    # Intentar PUT (update); si falla SOLO por 400/404 se intenta POST (create).
+    # Cualquier otro error (auth, red, 5xx) se re-lanza para no enmascarar el problema real.
     try:
         data = _put(endpoint, payload)
-    except Exception:
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code not in (400, 404):
+            raise
         data = _post(endpoint, payload)  # type: ignore[arg-type]
 
     return {
