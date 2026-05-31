@@ -8,7 +8,6 @@
 # Required env vars (loaded from EnvironmentFile in the .service unit):
 #   TELEGRAM_BOT_TOKEN     — Telegram bot token
 #   TELEGRAM_CHAT_ID       — Telegram chat ID to notify (Federico's)
-#   GOOSE_SERVER__SECRET_KEY — used for healthcheck curl
 #
 # Optional env vars (with defaults):
 #   COMPOSE_FILE           — path to docker-compose.yml
@@ -18,7 +17,10 @@
 set -euo pipefail
 
 COMPOSE_FILE="${COMPOSE_FILE:-$HOME/lina/deploy/docker/docker-compose.yml}"
-CONTAINER_NAME="${CONTAINER_NAME:-docker-goosed-1}"
+# Container name follows Docker Compose project naming: <project>-<service>-<n>.
+# With 'cd ~/lina && docker compose …' the project name is 'lina',
+# so the container is 'lina-goosed-1'.
+CONTAINER_NAME="${CONTAINER_NAME:-lina-goosed-1}"
 HEALTHCHECK_INTERVAL="${HEALTHCHECK_INTERVAL:-30}"
 MAX_FAILURES="${MAX_FAILURES:-3}"
 

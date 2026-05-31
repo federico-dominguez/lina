@@ -465,7 +465,7 @@ services:
       GATEWAY_PACER_TICK: "1.5"
       TELEGRAM_POLL_TIMEOUT: "30"
       LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
-      GATEWAY_NOTIFY_CHAT_IDS: ${GOOSE_GATEWAY_TRUSTED_CHAT_IDS:-}
+      GATEWAY_NOTIFY_CHAT_IDS: ${GATEWAY_NOTIFY_CHAT_IDS:-}
     # No ports needed — outbound only (Telegram API + goosed internal)
     logging:
       driver: json-file

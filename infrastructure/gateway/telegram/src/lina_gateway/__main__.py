@@ -40,6 +40,12 @@ async def _run() -> None:
         with suppress(asyncio.CancelledError):
             await t
 
+    # Consume bot_task result to surface any unhandled exception in logs.
+    if bot_task in done and not bot_task.cancelled():
+        exc = bot_task.exception()
+        if exc is not None:
+            logging.getLogger(__name__).error("Bot task exited with error: %s", exc)
+
     # ── Shutdown notification (best-effort) ───────────────────────────────────
     # Only send "Reiniciándome" when we received an explicit stop signal.
     # If bot_task ended on its own (unexpected), skip to avoid noise.

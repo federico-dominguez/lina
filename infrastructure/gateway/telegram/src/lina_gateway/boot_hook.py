@@ -86,9 +86,8 @@ async def on_boot(
     ``chat_id`` in *chat_ids*.  If the previous run was not terminated cleanly
     (crash or OOM) the message includes a recovery note.
     """
-    if not chat_ids:
-        return
-
+    # Record the lifecycle event first, regardless of notification config.
+    # This ensures crash detection works even when chat_ids is empty.
     was_interrupted = False
     if db_url:
         last_type, last_ts = await _last_event(db_url)
@@ -99,6 +98,9 @@ async def on_boot(
             if age < _INTERRUPTION_WINDOW:
                 was_interrupted = True
         await _record_event(db_url, "started")
+
+    if not chat_ids:
+        return
 
     if was_interrupted:
         msg = (
