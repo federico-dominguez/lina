@@ -7,7 +7,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from lina_gateway.boot_hook import _INTERRUPTION_WINDOW, on_boot, on_shutdown
+from lina_gateway.boot_hook import (
+    _INTERRUPTION_WINDOW,
+    get_last_messages,
+    on_boot,
+    on_shutdown,
+    save_message,
+)
 
 # ─── Test doubles ─────────────────────────────────────────────────────────────
 
@@ -206,3 +212,67 @@ class TestOnShutdown:
             await on_shutdown(tg, db_url=None, chat_ids=[1001])
 
         assert called == []
+
+
+# ─── save_message / get_last_messages (issue #56) ────────────────────────────
+
+
+class TestSaveMessage:
+    """save_message swallows errors — never raises to caller."""
+
+    @pytest.mark.asyncio
+    async def test_swallows_asyncpg_import_error(self) -> None:
+        """If asyncpg is unavailable, save_message must not raise."""
+        import sys
+
+        original = sys.modules.get("asyncpg")
+        sys.modules["asyncpg"] = None  # type: ignore[assignment]
+        try:
+            await save_message("postgresql://fake", "telegram-1", "user", "hello")
+        finally:
+            if original is None:
+                del sys.modules["asyncpg"]
+            else:
+                sys.modules["asyncpg"] = original
+
+    @pytest.mark.asyncio
+    async def test_swallows_connection_error(self) -> None:
+        """If the DB is unreachable, save_message must not raise."""
+        import asyncpg
+
+        with patch.object(asyncpg, "connect", new=AsyncMock(side_effect=OSError("no db"))):
+            # Should not raise
+            await save_message("postgresql://fake", "telegram-1", "user", "hello")
+
+
+class TestGetLastMessages:
+    """get_last_messages returns [] on any failure, never raises."""
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_on_connection_error(self) -> None:
+        import asyncpg
+
+        with patch.object(asyncpg, "connect", new=AsyncMock(side_effect=OSError("no db"))):
+            result = await get_last_messages("postgresql://fake", "telegram-1")
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_returns_messages_in_order(self) -> None:
+        """Returned messages are oldest-first (turn_number ASC)."""
+        import asyncpg
+
+        rows = [
+            {"role": "user", "content": "hola", "turn_number": 0},
+            {"role": "assistant", "content": "buenas", "turn_number": 1},
+        ]
+
+        fake_conn = AsyncMock()
+        fake_conn.fetch = AsyncMock(return_value=rows)
+        fake_conn.close = AsyncMock()
+
+        with patch.object(asyncpg, "connect", new=AsyncMock(return_value=fake_conn)):
+            result = await get_last_messages("postgresql://fake", "telegram-1", limit=5)
+
+        assert len(result) == 2
+        assert result[0] == {"role": "user", "content": "hola"}
+        assert result[1] == {"role": "assistant", "content": "buenas"}

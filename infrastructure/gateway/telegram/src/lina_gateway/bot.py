@@ -19,6 +19,7 @@ from collections import defaultdict
 
 import httpx
 
+from .boot_hook import get_last_messages, save_message
 from .config import Config
 from .formatter import (
     format_tool_status,
@@ -63,6 +64,8 @@ class Bot:
         self._cancels: dict[int, asyncio.Event] = defaultdict(asyncio.Event)
         # chat_id → True if currently processing
         self._busy: dict[int, bool] = {}
+        # chat_ids for which session context has been injected this process lifetime
+        self._sessions_initialized: set[int] = set()
 
     @property
     def tg(self) -> TelegramClient:
@@ -162,11 +165,18 @@ class Bot:
         first_send_ts: float | None = None  # timestamp of the first message sent to the user
 
         # Ensure the session exists in goosed (creates it if needed)
+        session_is_new = False
         try:
-            session_id = await self._goosed.ensure_session(session_id)
+            session_id, session_is_new = await self._goosed.ensure_session(session_id)
             self._sessions[chat_id] = session_id
         except Exception as exc:
             logger.warning("Could not ensure session for chat %s: %s", chat_id, exc)
+
+        # First message to this chat in this process lifetime: inject previous context
+        if chat_id not in self._sessions_initialized:
+            self._sessions_initialized.add(chat_id)
+            if self._cfg.lina_db_url and session_is_new:
+                await self._maybe_inject_context(chat_id, session_id, cancel_event)
 
         # Accumulators for the current turn
         thinking_acc = ""
@@ -394,6 +404,90 @@ class Bot:
         # Belt-and-suspenders: body arrived but no bubble was created somehow
         if body_acc and body_bubble_msg_id is None and thinking_bubble_msg_id is None:
             await self._tg.send_message(chat_id, markdown_to_telegram_html(body_acc))
+
+        # Persist this turn for session recovery across restarts (best-effort)
+        if self._cfg.lina_db_url and text.strip() and body_acc.strip():
+            asyncio.create_task(
+                self._persist_turn(session_id, text, body_acc),
+                name=f"persist-turn-{chat_id}",
+            )
+
+    # ─── Session persistence helpers ─────────────────────────────────────────
+
+    async def _persist_turn(self, session_id: str, user_text: str, assistant_text: str) -> None:
+        """Save a user+assistant turn to PostgreSQL. Silently swallows errors."""
+        db_url = self._cfg.lina_db_url
+        if not db_url:
+            return
+        try:
+            await save_message(db_url, session_id, "user", user_text)
+            await save_message(db_url, session_id, "assistant", assistant_text)
+        except Exception as exc:
+            logger.debug("_persist_turn failed for session %s: %s", session_id, exc)
+
+    async def _maybe_inject_context(
+        self,
+        chat_id: int,
+        session_id: str,
+        cancel_event: asyncio.Event,
+    ) -> None:
+        """Inject the last N messages from DB into a freshly-created goosed session.
+
+        Shows a brief status message to the user while loading, then edits it
+        once context is ready (or swallows errors silently if DB/goosed is down).
+
+        Only called when ``ensure_session`` confirmed this is a *new* session
+        (i.e. goosed lost its in-memory history due to a restart).
+        """
+        db_url = self._cfg.lina_db_url
+        if not db_url:
+            return
+        try:
+            messages = await get_last_messages(db_url, session_id, limit=20)
+        except Exception as exc:
+            logger.debug("_maybe_inject_context: could not load messages: %s", exc)
+            return
+
+        if not messages:
+            return  # first session ever — nothing to inject
+
+        # Format previous messages as a readable context block
+        formatted = "\n".join(
+            f"{'Fede' if m['role'] == 'user' else 'LINA'}: {m['content']}" for m in messages
+        )
+        warmup_prompt = (
+            "[SISTEMA: CONTEXTO_RECUPERADO_AUTOMATICAMENTE]\n"
+            "LINA fue reiniciada y esta es una nueva sesión de goosed. "
+            "Los siguientes son los últimos mensajes de la sesión anterior "
+            "para que puedas retomar el contexto sin pedirle al usuario que repita nada:\n\n"
+            f"{formatted}\n\n"
+            "[FIN_CONTEXTO]\n"
+            'Confirma que recibiste el contexto respondiendo SOLO con: "✅ Sesión reanudada."'
+        )
+
+        status_id = await self._tg.send_message(
+            chat_id, "📚 Recuperando contexto de sesión anterior..."
+        )
+
+        try:
+            async with asyncio.timeout(20.0):
+                async for event in self._goosed.reply_stream(session_id, warmup_prompt):
+                    if cancel_event.is_set():
+                        break
+                    # Consume events but don't show them to the user
+        except TimeoutError:
+            logger.warning("_maybe_inject_context: warmup timed out for session %s", session_id)
+        except Exception as exc:
+            logger.warning(
+                "_maybe_inject_context: warmup failed for session %s: %s", session_id, exc
+            )
+
+        try:
+            await self._tg.edit_message(
+                chat_id, status_id, "📚 Contexto de sesión anterior recuperado."
+            )
+        except Exception:
+            pass  # status edit is best-effort
 
     async def run_once(self, offset: int | None) -> int | None:
         """Poll once. Returns the new offset."""
