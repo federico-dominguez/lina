@@ -5,6 +5,7 @@ description = "LINA MCP — memoria persistente en PostgreSQL."
 requires-python = ">=3.10"
 dependencies = [
     "mcp[cli]>=1.2.0",
+    "pgvector>=0.3.6",
     "psycopg2-binary>=2.9",
 ]
 

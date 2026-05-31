@@ -20,6 +20,8 @@ Herramientas expuestas:
     get_deepseek_monthly_cost     — costo USD por modelo desde platform.deepseek.com (= dashboard)
     get_last_traces          — últimos N bloques <think> de LINA (issue #62)
     search_traces            — búsqueda full-text en reasoning traces de LINA (issue #62)
+    store_semantic_memory    — guarda un recuerdo con embedding vectorial (issue #63)
+    search_semantic_memory   — búsqueda semántica por similitud de coseno (issue #63)
 
 Variables de entorno:
     LINA_DB_URL              URL de conexión (default: postgresql://lina:lina_dev@localhost:5432/lina)
@@ -37,6 +39,8 @@ from typing import Any
 import psycopg2
 import psycopg2.extras
 from mcp.server.fastmcp import FastMCP
+from pgvector.psycopg2 import register_vector
+REPLACE
 
 log = logging.getLogger("lina-db")
 
@@ -65,7 +69,9 @@ LINA_DB_URL = os.environ.get(
 
 def _conn() -> psycopg2.extensions.connection:
     """Abre una conexión nueva al pool. Llamar y cerrar explícitamente."""
-    return psycopg2.connect(LINA_DB_URL)
+    conn = psycopg2.connect(LINA_DB_URL)
+    register_vector(conn)
+    return conn
 
 
 def _execute(sql: str, params: tuple = (), *, fetch: str = "none") -> Any:
@@ -105,6 +111,46 @@ def _audit(tool: str, args: dict, result_summary: str) -> None:
         )
     except Exception as exc:  # noqa: BLE001
         log.warning("audit log falló: %s", exc)
+
+
+def _embed(text: str) -> list[float]:
+    """Genera un embedding vectorial usando la API de DeepSeek.
+
+    Usa el modelo text-embedding-3-small (1536 dimensiones) via
+    https://api.deepseek.com/v1/embeddings. Requiere DEEPSEEK_API_KEY.
+
+    Args:
+        text: texto a embeber (max ~8000 tokens).
+
+    Returns:
+        Lista de floats (1536 dimensiones).
+    """
+    import urllib.request as _ur
+    import json as _json
+
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("DEEPSEEK_API_KEY no configurada — no se puede generar embedding")
+
+    payload = _json.dumps({
+        "model": "text-embedding-3-small",
+        "input": text,
+    }).encode("utf-8")
+
+    req = _ur.Request(
+        "https://api.deepseek.com/v1/embeddings",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+    with _ur.urlopen(req, timeout=30) as resp:
+        data = _json.loads(resp.read().decode())
+
+    embedding = data["data"][0]["embedding"]
+    return embedding
 
 
 # ─── tools ────────────────────────────────────────────────────────────────────
@@ -902,6 +948,140 @@ def search_traces(query: str, limit: int = 10) -> list[dict]:
         return result
     except Exception as exc:
         return [{"error": str(exc)}]
+
+
+# ─── Semantic memory tools (issue #63) ────────────────────────────────────────
+
+
+@mcp.tool()
+def store_semantic_memory(
+    key: str,
+    value: str,
+    ttl_seconds: int | None = None,
+    auto_embed: bool = True,
+    embedding: list[float] | None = None,
+) -> str:
+    """Guarda o actualiza un recuerdo persistente con embedding vectorial.
+
+    Si ``auto_embed=True`` (default), genera automáticamente el embedding
+    llamando a DeepSeek Embeddings API (modelo ``text-embedding-3-small``,
+    1536 dimensiones). Alternativamente, se puede pasar `embedding` explícito.
+
+    Args:
+        key:         identificador único del recuerdo
+        value:       contenido textual a almacenar
+        ttl_seconds: tiempo de vida en segundos (None = permanente)
+        auto_embed:  si es True, genera embedding via API (default)
+        embedding:   vector explícito (1536 floats) — ignora auto_embed si se provee
+
+    Returns:
+        "ok" si es nuevo, "updated" si sobreescribió uno existente.
+    """
+    if not key.strip():
+        raise ValueError("key no puede estar vacía")
+    if not value.strip():
+        raise ValueError("value no puede estar vacío")
+    if ttl_seconds is not None and ttl_seconds <= 0:
+        raise ValueError("ttl_seconds debe ser un entero positivo")
+
+    # Resolver embedding
+    if embedding:
+        emb = embedding
+    elif auto_embed:
+        emb = _embed(value)
+    else:
+        emb = None
+
+    if ttl_seconds is not None:
+        expires_sql = "NOW() + (%s * INTERVAL '1 second')"
+        expires_param = (ttl_seconds,)
+    else:
+        expires_sql = "NULL"
+        expires_param = ()
+
+    existing = _execute("SELECT id FROM memories WHERE key = %s", (key,), fetch="one")
+
+    if existing:
+        if emb:
+            _execute(
+                f"UPDATE memories SET value = %s, updated_at = NOW(), expires_at = {expires_sql},"  # noqa: S608
+                " embedding = %s WHERE key = %s",
+                (value, *expires_param, emb, key),
+            )
+        else:
+            _execute(
+                f"UPDATE memories SET value = %s, updated_at = NOW(), expires_at = {expires_sql}"  # noqa: S608
+                " WHERE key = %s",
+                (value, *expires_param, key),
+            )
+        result = "updated"
+    else:
+        if emb:
+            _execute(
+                f"INSERT INTO memories (key, value, expires_at, embedding) VALUES (%s, %s, {expires_sql}, %s)",  # noqa: S608
+                (key, value, *expires_param, emb),
+            )
+        else:
+            _execute(
+                f"INSERT INTO memories (key, value, expires_at) VALUES (%s, %s, {expires_sql})",  # noqa: S608
+                (key, value, *expires_param),
+            )
+        result = "ok"
+
+    _audit("store_semantic_memory", {"key": key, "auto_embed": auto_embed}, result)
+    return result
+
+
+@mcp.tool()
+def search_semantic_memory(
+    query: str,
+    limit: int = 10,
+    threshold: float = 0.5,
+) -> list[dict]:
+    """Busca recuerdos semánticamente similares a la query.
+
+    Genera embedding de la query via DeepSeek Embeddings API y realiza
+    búsqueda ANN (IVFFlat) por cosine similarity en la tabla memories.
+
+    Args:
+        query:     texto a buscar semánticamente
+        limit:     máximo de resultados (default 10, max 50)
+        threshold: similitud mínima de coseno (0 a 1, default 0.5).
+                   Mayor = más restrictivo.
+
+    Returns:
+        Lista de dicts con key, value, similarity (cosine distance → similarity),
+        updated_at. Ordenada por similitud descendente.
+    """
+    if not query.strip():
+        raise ValueError("query no puede estar vacía")
+    n = max(1, min(int(limit), 50))
+    t = max(0.0, min(float(threshold), 1.0))
+
+    emb = _embed(query)
+    emb_str = "[" + ",".join(str(v) for v in emb) + "]"
+
+    # Cosine distance → similarity: 1 - distance
+    rows = _execute(
+        """
+        SELECT key, value,
+               1 - (embedding <=> %s::vector) AS similarity,
+               updated_at
+        FROM memories
+        WHERE embedding IS NOT NULL
+          AND (expires_at IS NULL OR expires_at > NOW())
+          AND 1 - (embedding <=> %s::vector) >= %s
+        ORDER BY embedding <=> %s::vector
+        LIMIT %s
+        """,
+        (emb_str, emb_str, t, emb_str, n),
+        fetch="all",
+    )
+    if rows:
+        for r in rows:
+            r["similarity"] = round(float(r["similarity"]), 4)
+    _audit("search_semantic_memory", {"query": query[:100], "threshold": t}, f"hits={len(rows or [])}")
+    return rows or []
 
 
 # ─── entrypoint ───────────────────────────────────────────────────────────────
