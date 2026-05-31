@@ -1,18 +1,24 @@
 """lina-db MCP — memoria persistente, sesiones y preferencias en PostgreSQL.
 
 Herramientas expuestas:
-    store_memory      — guarda/actualiza un recuerdo (clave-valor)
-    get_memory        — recupera un recuerdo por clave
-    search_memory     — búsqueda por texto en memorias activas
-    summarize_session — persiste el resumen de una sesión
-    get_last_sessions — recupera los N resúmenes más recientes
-    store_preference  — guarda/actualiza una preferencia
-    get_preferences   — lista preferencias (todas o filtradas por clave)
-    get_audit_logs    — recupera los últimos N registros de auditoría
-    get_daily_summary — resumen diario de uso por MCP/tool (audit.daily_summary)
+    store_memory             — guarda/actualiza un recuerdo (clave-valor)
+    get_memory               — recupera un recuerdo por clave
+    search_memory            — búsqueda por texto en memorias activas
+    summarize_session        — persiste el resumen de una sesión (legacy)
+    summarize_session_smart  — persiste resumen estructurado con topics/facts/pending
+    get_session_summary      — recupera el resumen estructurado de una sesión
+    get_last_sessions        — recupera los N resúmenes más recientes
+    store_preference         — guarda/actualiza una preferencia
+    get_preferences          — lista preferencias (todas o filtradas por clave)
+    get_audit_logs           — recupera los últimos N registros de auditoría
+    get_daily_summary        — resumen diario de uso por MCP/tool (audit.daily_summary)
+    get_session_cost         — costo estimado acumulado de una sesión (issue #61)
+    get_daily_cost           — costo estimado por día (últimos N días) (issue #61)
+    get_deepseek_balance     — saldo actual de la cuenta DeepSeek via API oficial (issue #61)
 
 Variables de entorno:
-    LINA_DB_URL   URL de conexión (default: postgresql://lina:lina_dev@localhost:5432/lina)
+    LINA_DB_URL       URL de conexión (default: postgresql://lina:lina_dev@localhost:5432/lina)
+    DEEPSEEK_API_KEY  API key de DeepSeek para get_deepseek_balance (opcional)
 """
 
 from __future__ import annotations
@@ -468,6 +474,117 @@ def get_session_summary(session_id: str) -> dict | None:
         fetch="one",
     )
     return dict(row) if row else None
+
+
+# ─── Token / cost metering (issue #61) ───────────────────────────────────────
+
+
+@mcp.tool()
+def get_session_cost(session_id: str) -> dict:
+    """Retorna el costo estimado acumulado de una sesión de Telegram.
+
+    Suma todos los turnos registrados en ``token_usage`` para ``session_id``.
+
+    Args:
+        session_id: ID de la sesión (ej: "telegram-123456789").
+
+    Returns:
+        Dict con session_id, turns, prompt_tokens_est, completion_tokens_est,
+        total_tokens_est, cost_usd_est (suma).  Si no hay datos, devuelve ceros.
+    """
+    row = _execute(
+        """
+        SELECT
+            COUNT(*)                        AS turns,
+            COALESCE(SUM(prompt_tokens_est), 0)     AS prompt_tokens_est,
+            COALESCE(SUM(completion_tokens_est), 0) AS completion_tokens_est,
+            COALESCE(SUM(prompt_tokens_est + completion_tokens_est), 0) AS total_tokens_est,
+            COALESCE(SUM(cost_usd_est), 0)          AS cost_usd_est
+        FROM token_usage
+        WHERE session_id = %s
+        """,
+        (session_id,),
+        fetch="one",
+    )
+    result = dict(row) if row else {}
+    result["session_id"] = session_id
+    return result
+
+
+@mcp.tool()
+def get_daily_cost(days: int = 7) -> list[dict]:
+    """Resumen de costo estimado por día (últimos N días).
+
+    Agrupa todos los turnos de ``token_usage`` por fecha UTC y retorna
+    la suma de tokens y costo por día.
+
+    Args:
+        days: Número de días hacia atrás (default 7, max 90).
+
+    Returns:
+        Lista de dicts con day, turns, prompt_tokens_est, completion_tokens_est,
+        total_tokens_est, cost_usd_est, ordenada más-reciente primero.
+    """
+    n = max(1, min(int(days), 90))
+    return (
+        _execute(
+            """
+            SELECT
+                DATE(created_at AT TIME ZONE 'UTC') AS day,
+                COUNT(*)                             AS turns,
+                SUM(prompt_tokens_est)               AS prompt_tokens_est,
+                SUM(completion_tokens_est)           AS completion_tokens_est,
+                SUM(prompt_tokens_est + completion_tokens_est) AS total_tokens_est,
+                SUM(cost_usd_est)                    AS cost_usd_est
+            FROM token_usage
+            WHERE created_at >= NOW() - (%s * INTERVAL '1 day')
+            GROUP BY DATE(created_at AT TIME ZONE 'UTC')
+            ORDER BY day DESC
+            """,
+            (n,),
+            fetch="all",
+        )
+        or []
+    )
+
+
+@mcp.tool()
+def get_deepseek_balance() -> dict:
+    """Consulta el saldo actual de la cuenta DeepSeek via su API oficial.
+
+    Llama a ``GET https://api.deepseek.com/user/balance`` usando la API key
+    configurada en el entorno (variable ``DEEPSEEK_API_KEY``).
+
+    Returns:
+        Dict con is_available y balance_infos (lista de objetos con
+        currency, total_balance, granted_balance, topped_up_balance).
+        Si la API key no está disponible o la llamada falla, retorna
+        un dict con error explicativo.
+
+    Note:
+        DeepSeek no expone historial de uso por sesión — solo el saldo restante.
+        Usar ``get_session_cost`` / ``get_daily_cost`` para desglose local.
+    """
+    import urllib.request
+
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+    if not api_key:
+        return {"error": "DEEPSEEK_API_KEY no configurada en el entorno del MCP"}
+
+    try:
+        req = urllib.request.Request(
+            "https://api.deepseek.com/user/balance",
+            headers={"Accept": "application/json", "Authorization": f"Bearer {api_key}"},
+            method="GET",
+        )
+        import json as _json
+
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = _json.loads(resp.read().decode())
+        _audit("get_deepseek_balance", {}, f"is_available={data.get('is_available')}")
+        return data
+    except Exception as exc:
+        return {"error": str(exc)}
 
 
 # ─── entrypoint ───────────────────────────────────────────────────────────────
