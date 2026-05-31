@@ -21,7 +21,7 @@ def _make_config() -> Config:
         {
             "TELEGRAM_BOT_TOKEN": "123:TEST",
             "GOOSED_URL": "https://goosed:3000",
-            "GOOSE_SERVER__SECRET_KEY": "secret",
+            "GOOSE_SERVER_SECRET_KEY": "secret",
             "GOOSE_GATEWAY_TRUSTED_USERS": "telegram:9999",
         },
         clear=False,
@@ -150,7 +150,7 @@ class TestTransportErrorNotExposedToUser:
         bot._goosed.ensure_session = AsyncMock(return_value="telegram-9999")
 
         async def _failing_stream(*_: object):  # type: ignore[override]
-            raise httpx.ConnectError("connection refused")
+            raise httpx.ConnectError("connection refused", request=MagicMock())
             yield
 
         bot._goosed.reply_stream = _failing_stream  # type: ignore[assignment]
@@ -183,9 +183,7 @@ class TestGoosedRestartRetry:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise httpx.RemoteProtocolError(
-                    "peer closed", request=MagicMock()
-                )
+                raise httpx.RemoteProtocolError("peer closed", request=MagicMock())
             from lina_gateway.goose_client import EventType, MessageContent, MessageEvent
 
             yield MessageEvent(

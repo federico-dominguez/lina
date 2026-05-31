@@ -143,9 +143,9 @@ class Bot:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
         while loop.time() < deadline:
-            await asyncio.sleep(3.0)
             if await self._goosed.is_alive():
                 return True
+            await asyncio.sleep(3.0)
         return False
 
     async def _reply(
