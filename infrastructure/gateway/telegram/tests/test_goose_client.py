@@ -1,6 +1,5 @@
 """Tests for goosed SSE event parsing."""
 
-import json
 
 from lina_gateway.goose_client import EventType, _parse_event
 

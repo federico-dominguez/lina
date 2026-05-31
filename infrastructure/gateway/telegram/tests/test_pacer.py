@@ -6,7 +6,6 @@ import pytest
 
 from lina_gateway.pacer import StreamingBubble, trim_work_log
 
-
 # ─── trim_work_log ───────────────────────────────────────────────────────────
 
 class TestTrimWorkLog:

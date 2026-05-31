@@ -3,7 +3,6 @@
 from lina_gateway.formatter import (
     _strip_inline_markdown,
     code_block,
-    collapse_newlines,
     format_tool_status,
     format_with_thinking,
     looks_like_diff,
@@ -14,7 +13,6 @@ from lina_gateway.formatter import (
     truncate_chars,
     wrap_long_pre_blocks,
 )
-
 
 # ─── split_message ───────────────────────────────────────────────────────────
 

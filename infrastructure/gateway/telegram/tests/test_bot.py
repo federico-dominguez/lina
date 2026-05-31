@@ -8,9 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from lina_gateway.bot import Bot, _GOOSED_TRANSPORT_ERRORS
+from lina_gateway.bot import _GOOSED_TRANSPORT_ERRORS, Bot
 from lina_gateway.config import Config
-
 
 # ─── Test doubles ─────────────────────────────────────────────────────────────
 

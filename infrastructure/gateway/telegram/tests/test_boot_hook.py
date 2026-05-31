@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from lina_gateway.boot_hook import _INTERRUPTION_WINDOW, on_boot, on_shutdown
-
 
 # ─── Test doubles ─────────────────────────────────────────────────────────────
 

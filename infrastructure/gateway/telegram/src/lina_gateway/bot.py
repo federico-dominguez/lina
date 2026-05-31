@@ -351,9 +351,7 @@ class Bot:
             await _seal_all()
             if _retry:
                 # Already retried once — give up gracefully
-                await self._tg.send_message(
-                    chat_id, "⚠️ LINA no está disponible. Intentá de nuevo."
-                )
+                await self._tg.send_message(chat_id, "⚠️ LINA no está disponible. Intentá de nuevo.")
                 return
             status_id = await self._tg.send_message(
                 chat_id, "⏳ LINA se está reiniciando, un momento..."
