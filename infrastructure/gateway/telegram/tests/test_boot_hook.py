@@ -438,9 +438,9 @@ class TestCalculateCost:
         assert abs(cost - 0.42) < 1e-6
 
     def test_pro_model(self) -> None:
-        # 1M input @ $1.74 + 1M output @ $3.48 = $5.22
+        # 1M input (cache miss) @ $0.435 + 1M output @ $0.87 = $1.305
         cost = _calculate_cost("deepseek-v4-pro", 1_000_000, 1_000_000)
-        assert abs(cost - 5.22) < 1e-6
+        assert abs(cost - 1.305) < 1e-6
 
     def test_legacy_alias_chat(self) -> None:
         cost_chat = _calculate_cost("deepseek-chat", 100_000, 100_000)
@@ -466,14 +466,21 @@ class TestSaveTokenUsage:
 
         with patch.object(asyncpg, "connect", new=AsyncMock(side_effect=OSError("no db"))):
             # Must not raise
-            await save_token_usage("postgresql://fake", "telegram-1", "hola", "buenas")
+            await save_token_usage(
+                "postgresql://fake",
+                "telegram-1",
+                input_tokens=100,
+                output_tokens=50,
+                accumulated_cost_usd=0.00025,
+            )
 
     @pytest.mark.asyncio
-    async def test_inserts_row_with_correct_values(self) -> None:
-        """Correct values are computed and passed to the INSERT query."""
+    async def test_inserts_row_with_real_tokens(self) -> None:
+        """Real token values from goosed token_state are persisted correctly."""
         import asyncpg
 
         fake_conn = AsyncMock()
+        fake_conn.fetchval = AsyncMock(return_value=None)  # no prior row → delta = full cost
         fake_conn.execute = AsyncMock()
         fake_conn.close = AsyncMock()
 
@@ -481,20 +488,47 @@ class TestSaveTokenUsage:
             await save_token_usage(
                 "postgresql://fake",
                 "telegram-99",
-                "abc",  # 3 chars → 1 token
-                "abcdefghi",  # 9 chars → 3 tokens
-                model="deepseek-v4-flash",
+                input_tokens=420,
+                output_tokens=85,
+                accumulated_cost_usd=0.00025,
             )
 
         assert fake_conn.execute.called
         call_args = fake_conn.execute.call_args[0]
         # positional args after the SQL: session_id, model, prompt_chars,
-        # completion_chars, prompt_tokens_est, completion_tokens_est, cost_usd_est
+        # completion_chars, prompt_tokens_est, completion_tokens_est,
+        # cost_usd_est, accumulated_cost_usd
         params = call_args[1:]
         assert params[0] == "telegram-99"  # session_id
         assert params[1] == "deepseek-v4-flash"  # model
-        assert params[2] == 3  # prompt_chars
-        assert params[3] == 9  # completion_chars
-        assert params[4] == 1  # prompt_tokens_est (3/3=1)
-        assert params[5] == 3  # completion_tokens_est (9/3=3)
-        assert params[6] > 0  # cost_usd_est > 0
+        assert params[2] == 0  # prompt_chars (not tracked with real tokens)
+        assert params[3] == 0  # completion_chars
+        assert params[4] == 420  # prompt_tokens_est (real)
+        assert params[5] == 85  # completion_tokens_est (real)
+        assert params[6] == 0.00025  # cost_usd_est = delta (no prior row)
+        assert params[7] == 0.00025  # accumulated_cost_usd
+
+    @pytest.mark.asyncio
+    async def test_per_turn_cost_delta(self) -> None:
+        """Turn cost = accumulatedCost - last recorded accumulated cost."""
+        import asyncpg
+
+        fake_conn = AsyncMock()
+        # Simulate prior row with accumulated_cost_usd = 0.00100
+        fake_conn.fetchval = AsyncMock(return_value=0.00100)
+        fake_conn.execute = AsyncMock()
+        fake_conn.close = AsyncMock()
+
+        with patch.object(asyncpg, "connect", new=AsyncMock(return_value=fake_conn)):
+            await save_token_usage(
+                "postgresql://fake",
+                "telegram-99",
+                input_tokens=200,
+                output_tokens=60,
+                accumulated_cost_usd=0.00152,
+            )
+
+        call_args = fake_conn.execute.call_args[0]
+        params = call_args[1:]
+        assert round(params[6], 8) == round(0.00052, 8)  # cost_usd_est = delta
+        assert params[7] == 0.00152  # accumulated_cost_usd stored as-is

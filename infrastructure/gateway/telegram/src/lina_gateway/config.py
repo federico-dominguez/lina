@@ -30,6 +30,8 @@ class Config:
     # PostgreSQL DSN for the lina-db instance.  Optional — boot hook is disabled
     # when unset (gateway operates normally, just without crash detection).
     lina_db_url: str | None
+    # DeepSeek API key for balance snapshot tracking (issue #61).
+    deepseek_api_key: str | None
     # Telegram chat IDs that receive boot/shutdown notifications.
     # Derived from GOOSE_GATEWAY_TRUSTED_USERS (same format: "telegram:<id>")
     # unless overridden via GATEWAY_NOTIFY_CHAT_IDS (comma-separated integers).
@@ -50,6 +52,7 @@ class Config:
         self.poll_timeout = int(os.environ.get("TELEGRAM_POLL_TIMEOUT", "30"))
 
         self.lina_db_url = os.environ.get("LINA_DB_URL") or None
+        self.deepseek_api_key = os.environ.get("DEEPSEEK_API_KEY") or None
 
         # GATEWAY_NOTIFY_CHAT_IDS takes priority; falls back to extracting numeric
         # IDs from GOOSE_GATEWAY_TRUSTED_USERS ("telegram:<id>" entries).

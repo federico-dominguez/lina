@@ -352,3 +352,171 @@ class TestGetDeepseekBalance:
         monkeypatch.setattr(urllib.request, "urlopen", _fail)
         result = get_deepseek_balance()
         assert "error" in result
+
+
+# ── Tests for platform.deepseek.com tools ─────────────────────────────────────
+
+_PLATFORM_SUMMARY_RESPONSE = {
+    "code": 0,
+    "msg": "",
+    "data": {
+        "biz_code": 0,
+        "biz_msg": "",
+        "biz_data": {
+            "normal_wallets": [{"currency": "USD", "balance": "9.9539719542", "token_estimation": "23699933"}],
+            "bonus_wallets": [{"currency": "USD", "balance": "0", "token_estimation": "0"}],
+            "monthly_costs": [{"currency": "USD", "amount": "5.0460280458"}],
+            "monthly_token_usage": "222950661",
+        },
+    },
+}
+
+_PLATFORM_AMOUNT_RESPONSE = {
+    "code": 0,
+    "msg": "",
+    "data": {
+        "biz_data": {
+            "total": [
+                {
+                    "model": "deepseek-v4-pro",
+                    "usage": [
+                        {"type": "PROMPT_CACHE_HIT_TOKEN", "amount": "23968256"},
+                        {"type": "PROMPT_CACHE_MISS_TOKEN", "amount": "3684931"},
+                        {"type": "RESPONSE_TOKEN", "amount": "407336"},
+                        {"type": "REQUEST", "amount": "832"},
+                    ],
+                }
+            ]
+        }
+    },
+}
+
+_PLATFORM_COST_RESPONSE = {
+    "code": 0,
+    "msg": "",
+    "data": {
+        "biz_data": [
+            {
+                "total": [
+                    {
+                        "model": "deepseek-v4-pro",
+                        "usage": [
+                            {"type": "PROMPT_CACHE_HIT_TOKEN", "amount": "0.0868849280000000"},
+                            {"type": "PROMPT_CACHE_MISS_TOKEN", "amount": "1.6029449850000000"},
+                            {"type": "RESPONSE_TOKEN", "amount": "0.3543823200000000"},
+                        ],
+                    }
+                ]
+            }
+        ]
+    },
+}
+
+
+def _make_fake_urlopen(response_data: dict):
+    """Returns a fake urlopen that returns JSON response_data."""
+    import io
+    import json
+
+    class _FakeResp:
+        def read(self):
+            return json.dumps(response_data).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    def _fake_urlopen(req, timeout=None):
+        return _FakeResp()
+
+    return _fake_urlopen
+
+
+class TestGetDeepseekUserSummary:
+    def test_no_token_returns_error(self, monkeypatch):
+        from lina_db.server import get_deepseek_user_summary
+
+        monkeypatch.delenv("DEEPSEEK_PLATFORM_TOKEN", raising=False)
+        result = get_deepseek_user_summary()
+        assert "error" in result
+        assert "DEEPSEEK_PLATFORM_TOKEN" in result["error"]
+
+    def test_network_error_returns_error(self, monkeypatch):
+        import urllib.request
+        from lina_db.server import get_deepseek_user_summary
+
+        monkeypatch.setenv("DEEPSEEK_PLATFORM_TOKEN", "fake-token")
+
+        def _fail(*args, **kwargs):
+            raise OSError("network error")
+
+        monkeypatch.setattr(urllib.request, "urlopen", _fail)
+        result = get_deepseek_user_summary()
+        assert "error" in result
+
+    def test_returns_parsed_balance(self, monkeypatch):
+        import urllib.request
+        from lina_db.server import get_deepseek_user_summary
+
+        monkeypatch.setenv("DEEPSEEK_PLATFORM_TOKEN", "fake-token")
+        monkeypatch.setattr(urllib.request, "urlopen", _make_fake_urlopen(_PLATFORM_SUMMARY_RESPONSE))
+
+        result = get_deepseek_user_summary()
+        assert "error" not in result
+        assert result["balance_usd"] == "9.9539719542"
+        assert result["monthly_cost_usd"] == "5.0460280458"
+        assert result["monthly_token_usage"] == "222950661"
+
+
+class TestGetDeepseekMonthlyUsage:
+    def test_no_token_returns_error(self, monkeypatch):
+        from lina_db.server import get_deepseek_monthly_usage
+
+        monkeypatch.delenv("DEEPSEEK_PLATFORM_TOKEN", raising=False)
+        result = get_deepseek_monthly_usage(year=2026, month=5)
+        assert "error" in result
+
+    def test_returns_token_breakdown(self, monkeypatch):
+        import urllib.request
+        from lina_db.server import get_deepseek_monthly_usage
+
+        monkeypatch.setenv("DEEPSEEK_PLATFORM_TOKEN", "fake-token")
+        monkeypatch.setattr(urllib.request, "urlopen", _make_fake_urlopen(_PLATFORM_AMOUNT_RESPONSE))
+
+        result = get_deepseek_monthly_usage(year=2026, month=5)
+        assert "error" not in result
+        assert result["year"] == 2026
+        assert result["month"] == 5
+        pro = result["usage"]["deepseek-v4-pro"]
+        assert pro["cache_hit_tokens"] == 23968256
+        assert pro["cache_miss_tokens"] == 3684931
+        assert pro["output_tokens"] == 407336
+        assert pro["requests"] == 832
+
+
+class TestGetDeepseekMonthlyCost:
+    def test_no_token_returns_error(self, monkeypatch):
+        from lina_db.server import get_deepseek_monthly_cost
+
+        monkeypatch.delenv("DEEPSEEK_PLATFORM_TOKEN", raising=False)
+        result = get_deepseek_monthly_cost(year=2026, month=5)
+        assert "error" in result
+
+    def test_returns_cost_breakdown(self, monkeypatch):
+        import urllib.request
+        from lina_db.server import get_deepseek_monthly_cost
+
+        monkeypatch.setenv("DEEPSEEK_PLATFORM_TOKEN", "fake-token")
+        monkeypatch.setattr(urllib.request, "urlopen", _make_fake_urlopen(_PLATFORM_COST_RESPONSE))
+
+        result = get_deepseek_monthly_cost(year=2026, month=5)
+        assert "error" not in result
+        assert result["year"] == 2026
+        pro = result["by_model"]["deepseek-v4-pro"]
+        assert abs(pro["cache_hit_cost_usd"] - 0.086884928) < 1e-6
+        assert abs(pro["cache_miss_cost_usd"] - 1.602944985) < 1e-6
+        expected_total = round(0.086884928 + 1.602944985 + 0.354382320, 8)
+        assert pro["total_usd"] == expected_total
+        assert result["total_usd"] == expected_total

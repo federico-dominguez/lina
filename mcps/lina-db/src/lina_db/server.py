@@ -14,11 +14,15 @@ Herramientas expuestas:
     get_daily_summary        — resumen diario de uso por MCP/tool (audit.daily_summary)
     get_session_cost         — costo estimado acumulado de una sesión (issue #61)
     get_daily_cost           — costo estimado por día (últimos N días) (issue #61)
-    get_deepseek_balance     — saldo actual de la cuenta DeepSeek via API oficial (issue #61)
+    get_deepseek_balance          — saldo actual de la cuenta DeepSeek via API oficial (issue #61)
+    get_deepseek_user_summary     — balance + gasto mensual exacto desde platform.deepseek.com
+    get_deepseek_monthly_usage    — tokens por modelo y tipo desde platform.deepseek.com
+    get_deepseek_monthly_cost     — costo USD por modelo desde platform.deepseek.com (= dashboard)
 
 Variables de entorno:
-    LINA_DB_URL       URL de conexión (default: postgresql://lina:lina_dev@localhost:5432/lina)
-    DEEPSEEK_API_KEY  API key de DeepSeek para get_deepseek_balance (opcional)
+    LINA_DB_URL              URL de conexión (default: postgresql://lina:lina_dev@localhost:5432/lina)
+    DEEPSEEK_API_KEY         API key de DeepSeek para get_deepseek_balance (opcional)
+    DEEPSEEK_PLATFORM_TOKEN  Token de sesión de platform.deepseek.com (opcional)
 """
 
 from __future__ import annotations
@@ -583,6 +587,202 @@ def get_deepseek_balance() -> dict:
             data = _json.loads(resp.read().decode())
         _audit("get_deepseek_balance", {}, f"is_available={data.get('is_available')}")
         return data
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def _platform_request(path: str, platform_token: str) -> dict:
+    """Make an authenticated GET to platform.deepseek.com and return parsed JSON."""
+    import json as _json
+    import urllib.request as _ur
+
+    req = _ur.Request(
+        f"https://platform.deepseek.com{path}",
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {platform_token}",
+        },
+        method="GET",
+    )
+    with _ur.urlopen(req, timeout=15) as resp:
+        return _json.loads(resp.read().decode())
+
+
+@mcp.tool()
+def get_deepseek_user_summary() -> dict:
+    """Consulta el resumen de cuenta DeepSeek Platform: balance, gasto mensual y tokens usados.
+
+    Llama a ``GET platform.deepseek.com/api/v0/users/get_user_summary`` con el
+    token de sesión de la plataforma (``DEEPSEEK_PLATFORM_TOKEN``).
+
+    Los números devueltos son **idénticos** a los del dashboard de platform.deepseek.com.
+
+    Returns:
+        Dict con:
+        - balance_usd: saldo de cuenta en USD (ej. "9.95")
+        - monthly_cost_usd: gasto del mes actual en USD (ej. "5.05")
+        - monthly_token_usage: tokens usados en el mes
+        - token_estimation: tokens estimados restantes con el balance actual
+        Si el token no está configurado o expiró, retorna un dict con error.
+    """
+    platform_token = os.environ.get("DEEPSEEK_PLATFORM_TOKEN", "")
+    if not platform_token:
+        return {
+            "error": "DEEPSEEK_PLATFORM_TOKEN no configurado. "
+            "Obtenerlo de platform.deepseek.com (sesión de navegador)."
+        }
+
+    try:
+        data = _platform_request("/api/v0/users/get_user_summary", platform_token)
+        if data.get("code") != 0:
+            return {"error": f"API error: {data.get('msg', 'unknown')} (code={data.get('code')})"}
+
+        biz = data["data"]["biz_data"]
+        wallets = biz.get("normal_wallets", [])
+        usd_wallet = next((w for w in wallets if w.get("currency") == "USD"), {})
+        monthly_costs = biz.get("monthly_costs", [])
+        usd_cost = next((c for c in monthly_costs if c.get("currency") == "USD"), {})
+
+        result = {
+            "balance_usd": usd_wallet.get("balance", "0"),
+            "monthly_cost_usd": usd_cost.get("amount", "0"),
+            "monthly_token_usage": biz.get("monthly_token_usage", "0"),
+            "token_estimation": usd_wallet.get("token_estimation", "0"),
+        }
+        _audit(
+            "get_deepseek_user_summary",
+            {},
+            f"balance=${result['balance_usd'][:6]} monthly=${result['monthly_cost_usd'][:6]}",
+        )
+        return result
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+def get_deepseek_monthly_usage(year: int, month: int) -> dict:
+    """Consulta tokens usados por modelo en un mes, desde la API real de DeepSeek Platform.
+
+    Llama a ``GET platform.deepseek.com/api/v0/usage/amount?month={month}&year={year}``.
+    Desglose por modelo (deepseek-v4-flash, deepseek-v4-pro) y tipo de token
+    (PROMPT_CACHE_HIT_TOKEN, PROMPT_CACHE_MISS_TOKEN, RESPONSE_TOKEN, REQUEST).
+
+    Args:
+        year:  Año (ej. 2026)
+        month: Mes 1-12 (ej. 5 = mayo)
+
+    Returns:
+        Dict con lista por modelo. Ejemplo:
+        {
+          "deepseek-v4-flash": {
+            "cache_hit_tokens": 178058496,
+            "cache_miss_tokens": 15741513,
+            "output_tokens": 1067772,
+            "requests": 3648
+          }, ...
+        }
+    """
+    platform_token = os.environ.get("DEEPSEEK_PLATFORM_TOKEN", "")
+    if not platform_token:
+        return {"error": "DEEPSEEK_PLATFORM_TOKEN no configurado."}
+
+    try:
+        data = _platform_request(f"/api/v0/usage/amount?month={month}&year={year}", platform_token)
+        if data.get("code") != 0:
+            return {"error": f"API error: {data.get('msg')} (code={data.get('code')})"}
+
+        models_raw = data["data"]["biz_data"].get("total", [])
+        result: dict[str, dict] = {}
+        for model_entry in models_raw:
+            model = model_entry["model"]
+            usage_map: dict[str, int] = {}
+            for u in model_entry.get("usage", []):
+                usage_map[u["type"]] = int(u["amount"])
+            result[model] = {
+                "cache_hit_tokens": usage_map.get("PROMPT_CACHE_HIT_TOKEN", 0),
+                "cache_miss_tokens": usage_map.get("PROMPT_CACHE_MISS_TOKEN", 0),
+                "output_tokens": usage_map.get("RESPONSE_TOKEN", 0),
+                "requests": usage_map.get("REQUEST", 0),
+            }
+        _audit(
+            "get_deepseek_monthly_usage",
+            {"year": year, "month": month},
+            f"models={list(result.keys())}",
+        )
+        return {"year": year, "month": month, "usage": result}
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+def get_deepseek_monthly_cost(year: int, month: int) -> dict:
+    """Consulta el costo real en USD por modelo y tipo de token para un mes dado.
+
+    Llama a ``GET platform.deepseek.com/api/v0/usage/cost?month={month}&year={year}``.
+    Los números son **idénticos** a los del dashboard de DeepSeek Platform.
+
+    Args:
+        year:  Año (ej. 2026)
+        month: Mes 1-12 (ej. 5 = mayo)
+
+    Returns:
+        Dict con costo total y desglose por modelo. Ejemplo:
+        {
+          "total_usd": 5.0460,
+          "by_model": {
+            "deepseek-v4-flash": {
+              "cache_hit_cost_usd": 0.4986,
+              "cache_miss_cost_usd": 2.2039,
+              "output_cost_usd": 0.2990,
+              "total_usd": 3.0015
+            }, ...
+          }
+        }
+    """
+    platform_token = os.environ.get("DEEPSEEK_PLATFORM_TOKEN", "")
+    if not platform_token:
+        return {"error": "DEEPSEEK_PLATFORM_TOKEN no configurado."}
+
+    try:
+        data = _platform_request(f"/api/v0/usage/cost?month={month}&year={year}", platform_token)
+        if data.get("code") != 0:
+            return {"error": f"API error: {data.get('msg')} (code={data.get('code')})"}
+
+        # API returns a list; first element has "total" key
+        biz_data = data["data"]["biz_data"]
+        entries = biz_data if isinstance(biz_data, list) else [biz_data]
+        total_entry = entries[0] if entries else {}
+        models_raw = total_entry.get("total", [])
+
+        by_model: dict[str, dict] = {}
+        grand_total = 0.0
+        for model_entry in models_raw:
+            model = model_entry["model"]
+            cost_map: dict[str, float] = {}
+            for u in model_entry.get("usage", []):
+                cost_map[u["type"]] = float(u["amount"])
+            cache_hit = cost_map.get("PROMPT_CACHE_HIT_TOKEN", 0.0)
+            cache_miss = cost_map.get("PROMPT_CACHE_MISS_TOKEN", 0.0)
+            output = cost_map.get("RESPONSE_TOKEN", 0.0)
+            model_total = cache_hit + cache_miss + output
+            grand_total += model_total
+            by_model[model] = {
+                "cache_hit_cost_usd": round(cache_hit, 8),
+                "cache_miss_cost_usd": round(cache_miss, 8),
+                "output_cost_usd": round(output, 8),
+                "total_usd": round(model_total, 8),
+            }
+        _audit(
+            "get_deepseek_monthly_cost",
+            {"year": year, "month": month},
+            f"total=${round(grand_total, 4)}",
+        )
+        return {
+            "year": year,
+            "month": month,
+            "total_usd": round(grand_total, 8),
+            "by_model": by_model,
+        }
     except Exception as exc:
         return {"error": str(exc)}
 

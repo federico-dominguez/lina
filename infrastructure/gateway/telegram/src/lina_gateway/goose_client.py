@@ -43,6 +43,17 @@ class MessageContent:
 
 
 @dataclass
+class TokenState:
+    """Token usage and cost from goosed's token_state field (real values from DeepSeek)."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    # Monotonic per-session accumulated cost in USD (not per-turn — caller must diff)
+    accumulated_cost: float = 0.0
+
+
+@dataclass
 class MessageEvent:
     event_type: EventType
     # For Message events
@@ -50,6 +61,7 @@ class MessageEvent:
     contents: list[MessageContent] = field(default_factory=list)
     # For Finish events
     finish_reason: str = ""
+    token_state: TokenState | None = None
     # For Error events
     error: str = ""
 
@@ -82,7 +94,20 @@ def _parse_event(data: dict[str, Any]) -> MessageEvent | None:
         return MessageEvent(event_type=etype, error=data.get("error", "unknown error"))
 
     if etype == EventType.FINISH:
-        return MessageEvent(event_type=etype, finish_reason=data.get("reason", "stop"))
+        ts_raw = data.get("token_state") or {}
+        token_state: TokenState | None = None
+        if ts_raw:
+            token_state = TokenState(
+                input_tokens=int(ts_raw.get("inputTokens", 0)),
+                output_tokens=int(ts_raw.get("outputTokens", 0)),
+                total_tokens=int(ts_raw.get("totalTokens", 0)),
+                accumulated_cost=float(ts_raw.get("accumulatedCost", 0.0)),
+            )
+        return MessageEvent(
+            event_type=etype,
+            finish_reason=data.get("reason", "stop"),
+            token_state=token_state,
+        )
 
     if etype == EventType.MESSAGE:
         msg = data.get("message", {})
