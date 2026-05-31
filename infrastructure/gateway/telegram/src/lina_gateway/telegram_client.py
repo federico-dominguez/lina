@@ -110,7 +110,9 @@ class TelegramClient:
                     retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
                     logger.warning(
                         "sendMessage 429 chat=%s retry_after=%ss attempt=%s",
-                        chat_id, retry_after, attempt + 1,
+                        chat_id,
+                        retry_after,
+                        attempt + 1,
                     )
                     await asyncio.sleep(retry_after)
                     continue
@@ -185,7 +187,10 @@ class TelegramClient:
                 retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
                 logger.warning(
                     "editMessageText 429 chat=%s msg=%s retry_after=%ss attempt=%s",
-                    chat_id, message_id, retry_after, attempt + 1,
+                    chat_id,
+                    message_id,
+                    retry_after,
+                    attempt + 1,
                 )
                 await asyncio.sleep(retry_after)
                 continue
@@ -204,12 +209,17 @@ class TelegramClient:
                     if not r2.is_success and "message is not modified" not in r2.text:
                         logger.warning(
                             "editMessageText plain fallback failed chat=%s msg=%s err=%s",
-                            chat_id, message_id, r2.text[:200],
+                            chat_id,
+                            message_id,
+                            r2.text[:200],
                         )
                     break
                 logger.warning(
                     "editMessageText failed chat=%s msg=%s status=%s err=%s",
-                    chat_id, message_id, resp.status_code, body[:200],
+                    chat_id,
+                    message_id,
+                    resp.status_code,
+                    body[:200],
                 )
             break  # success or non-retryable error
 

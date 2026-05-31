@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +71,7 @@ class StreamingBubble:
         while not self._sealed.is_set():
             try:
                 await asyncio.wait_for(asyncio.shield(self._sealed.wait()), timeout=self._tick)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
             h = hash((self._thinking, self._body))

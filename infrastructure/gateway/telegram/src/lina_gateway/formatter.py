@@ -28,9 +28,9 @@ PRE_LINE_THRESHOLD = 10
 # ─── ANSI stripping ──────────────────────────────────────────────────────────
 
 _ANSI_RE = re.compile(
-    r"\x1b\[[0-9;?]*[A-Za-z]"          # CSI sequence
+    r"\x1b\[[0-9;?]*[A-Za-z]"  # CSI sequence
     r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC sequence
-    r"|\x1b[@-Z\\-_]"                   # 2-byte escape
+    r"|\x1b[@-Z\\-_]"  # 2-byte escape
 )
 
 
@@ -115,7 +115,9 @@ def looks_like_diff(text: str) -> bool:
         return True
     if t.startswith("@@ ") and " @@" in t:
         return True
-    header_lines = [ln for ln in text.splitlines()[:4] if ln.startswith("+++ ") or ln.startswith("--- ")]
+    header_lines = [
+        ln for ln in text.splitlines()[:4] if ln.startswith("+++ ") or ln.startswith("--- ")
+    ]
     return len(header_lines) >= 2
 
 
@@ -171,8 +173,12 @@ def wrap_long_pre_blocks(html: str) -> str:
         inner_len = len(block)
         line_count = block.count("\n") + 1
         current = "".join(out_parts).rstrip()
-        already_wrapped = current.endswith("<blockquote expandable>") or current.endswith("<blockquote>")
-        if not already_wrapped and (inner_len > PRE_CHAR_THRESHOLD or line_count > PRE_LINE_THRESHOLD):
+        already_wrapped = current.endswith("<blockquote expandable>") or current.endswith(
+            "<blockquote>"
+        )
+        if not already_wrapped and (
+            inner_len > PRE_CHAR_THRESHOLD or line_count > PRE_LINE_THRESHOLD
+        ):
             out_parts.append(f"<blockquote expandable>{block}</blockquote>")
         else:
             out_parts.append(block)
@@ -497,11 +503,7 @@ def format_with_thinking(thinking: str, body: str, sealed: bool) -> str:
     # Apply full markdown conversion so DeepSeek's **bold** / *italic* in
     # reasoning text is rendered properly instead of leaking as raw markers.
     thinking_body_html = markdown_to_telegram_html(thinking_trimmed)
-    thinking_html = (
-        f"{tag}💭 <i>Razonando...</i>\n"
-        f"{thinking_body_html}{suffix}"
-        "</blockquote>"
-    )
+    thinking_html = f"{tag}💭 <i>Razonando...</i>\n{thinking_body_html}{suffix}</blockquote>"
     body_html = markdown_to_telegram_html(body)
     if not body_html:
         return thinking_html

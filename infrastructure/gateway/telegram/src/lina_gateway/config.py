@@ -16,15 +16,15 @@ class Config:
     max_voice_bytes: int
 
     # --- goosed ---
-    goosed_url: str          # e.g. http://lina-goosed:3000
-    goosed_secret: str       # GOOSE_SERVER_SECRET_KEY
+    goosed_url: str  # e.g. http://lina-goosed:3000
+    goosed_secret: str  # GOOSE_SERVER_SECRET_KEY
     goosed_connect_timeout: float
     goosed_read_timeout: float
 
     # --- Behaviour ---
     # Interval (seconds) between editMessageText calls (pacer tick).
     pacer_tick: float
-    poll_timeout: int        # Telegram long-poll timeout in seconds
+    poll_timeout: int  # Telegram long-poll timeout in seconds
 
     # --- Session recovery (issue #49) ---
     # PostgreSQL DSN for the lina-db instance.  Optional — boot hook is disabled
@@ -38,9 +38,7 @@ class Config:
     def __init__(self) -> None:
         self.bot_token = _require("TELEGRAM_BOT_TOKEN")
         raw_trusted = os.environ.get("GOOSE_GATEWAY_TRUSTED_USERS", "")
-        self.trusted_users = frozenset(
-            p.strip() for p in raw_trusted.split(",") if p.strip()
-        )
+        self.trusted_users = frozenset(p.strip() for p in raw_trusted.split(",") if p.strip())
         self.max_voice_bytes = int(os.environ.get("MAX_VOICE_BYTES", str(20 * 1024 * 1024)))
 
         self.goosed_url = os.environ.get("GOOSED_URL", "http://lina-goosed:3000").rstrip("/")
@@ -58,8 +56,7 @@ class Config:
         raw_notify = os.environ.get("GATEWAY_NOTIFY_CHAT_IDS", "")
         if raw_notify.strip():
             self.notify_chat_ids = [
-                int(x.strip()) for x in raw_notify.split(",")
-                if x.strip().lstrip("-").isdigit()
+                int(x.strip()) for x in raw_notify.split(",") if x.strip().lstrip("-").isdigit()
             ]
         else:
             self.notify_chat_ids = [

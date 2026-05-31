@@ -18,7 +18,12 @@ import time
 from collections import defaultdict
 
 from .config import Config
-from .formatter import format_tool_status, format_with_thinking, markdown_to_telegram_html, split_message
+from .formatter import (
+    format_tool_status,
+    format_with_thinking,
+    markdown_to_telegram_html,
+    split_message,
+)
 from .goose_client import EventType, GoosedClient
 from .pacer import StreamingBubble
 from .telegram_client import MAX_VOICE_FILE_SIZE, TelegramClient, TelegramMessage, voice_prompt
@@ -320,7 +325,9 @@ class Bot:
         ttft_s = (first_send_ts - reply_start) if first_send_ts else total_s
         logger.info(
             "reply: chat=%s ttft=%.2fs total=%.2fs",
-            chat_id, ttft_s, total_s,
+            chat_id,
+            ttft_s,
+            total_s,
         )
 
         # Belt-and-suspenders: body arrived but no bubble was created somehow

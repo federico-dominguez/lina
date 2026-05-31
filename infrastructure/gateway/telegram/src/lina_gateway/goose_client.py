@@ -10,7 +10,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import httpx
@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 
 # ─── MessageEvent types (mirrors goose-server reply.rs) ─────────────────────
 
-class EventType(str, Enum):
+
+class EventType(StrEnum):
     MESSAGE = "Message"
     FINISH = "Finish"
     ERROR = "Error"
@@ -32,7 +33,7 @@ class EventType(str, Enum):
 
 @dataclass
 class MessageContent:
-    content_type: str   # "text", "thinking", "tool_request", "tool_response", ...
+    content_type: str  # "text", "thinking", "tool_request", "tool_response", ...
     text: str = ""
     thinking: str = ""
     tool_name: str = ""
@@ -92,7 +93,9 @@ def _parse_event(data: dict[str, Any]) -> MessageEvent | None:
             if item_type == "text":
                 contents.append(MessageContent(content_type="text", text=item.get("text", "")))
             elif item_type == "thinking":
-                contents.append(MessageContent(content_type="thinking", thinking=item.get("thinking", "")))
+                contents.append(
+                    MessageContent(content_type="thinking", thinking=item.get("thinking", ""))
+                )
             elif item_type == "tool_use" or item_type == "tool_request":
                 tool_call = item.get("tool_call") or item
                 if isinstance(tool_call, dict) and "Err" in tool_call:
@@ -105,28 +108,40 @@ def _parse_event(data: dict[str, Any]) -> MessageEvent | None:
                     except Exception:
                         args = {}
                 preview = _parse_tool_args(args)
-                contents.append(MessageContent(
-                    content_type="tool_request",
-                    tool_name=name,
-                    args_preview=preview,
-                ))
+                contents.append(
+                    MessageContent(
+                        content_type="tool_request",
+                        tool_name=name,
+                        args_preview=preview,
+                    )
+                )
             elif item_type == "tool_result" or item_type == "tool_response":
                 result = item.get("tool_result") or item
                 if isinstance(result, dict):
                     ok = result.get("Ok") or result
-                    items = ok if isinstance(ok, list) else ok.get("content", []) if isinstance(ok, dict) else []
+                    items = (
+                        ok
+                        if isinstance(ok, list)
+                        else ok.get("content", [])
+                        if isinstance(ok, dict)
+                        else []
+                    )
                     text = " ".join(
-                        c.get("text", "") for c in items if isinstance(c, dict) and c.get("type") == "text"
+                        c.get("text", "")
+                        for c in items
+                        if isinstance(c, dict) and c.get("type") == "text"
                     )
                     success = "Err" not in result
                 else:
                     text = str(result)
                     success = True
-                contents.append(MessageContent(
-                    content_type="tool_response",
-                    result_preview=text[:500],
-                    success=success,
-                ))
+                contents.append(
+                    MessageContent(
+                        content_type="tool_response",
+                        result_preview=text[:500],
+                        success=success,
+                    )
+                )
         return MessageEvent(event_type=etype, role=role, contents=contents)
 
     return MessageEvent(event_type=etype)
@@ -185,7 +200,9 @@ class GoosedClient:
                 else:
                     logger.warning(
                         "agent/resume failed for %s: %s %s",
-                        session_id, r_resume.status_code, r_resume.text[:200],
+                        session_id,
+                        r_resume.status_code,
+                        r_resume.text[:200],
                     )
                 return session_id
 
@@ -218,6 +235,7 @@ class GoosedClient:
     ) -> AsyncIterator[MessageEvent]:
         """POST /reply and yield MessageEvent objects from the SSE stream."""
         import time
+
         payload = {
             "session_id": session_id,
             "user_message": {

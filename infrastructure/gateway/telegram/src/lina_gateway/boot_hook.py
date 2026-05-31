@@ -35,10 +35,12 @@ class _TelegramSender(Protocol):
 
 # ─── DB helpers ───────────────────────────────────────────────────────────────
 
+
 async def _record_event(db_url: str, event_type: str) -> None:
     """Insert a lifecycle event into gateway_events. Silently swallows errors."""
     try:
         import asyncpg  # optional dep; only imported when DB is configured
+
         conn = await asyncpg.connect(db_url)
         try:
             await conn.execute(
@@ -55,12 +57,11 @@ async def _last_event(db_url: str) -> tuple[str | None, datetime | None]:
     """Return (event_type, created_at) of the most recent gateway_events row."""
     try:
         import asyncpg
+
         conn = await asyncpg.connect(db_url)
         try:
             row = await conn.fetchrow(
-                "SELECT event_type, created_at "
-                "FROM gateway_events "
-                "ORDER BY id DESC LIMIT 1"
+                "SELECT event_type, created_at FROM gateway_events ORDER BY id DESC LIMIT 1"
             )
             if row:
                 return row["event_type"], row["created_at"]
@@ -72,6 +73,7 @@ async def _last_event(db_url: str) -> tuple[str | None, datetime | None]:
 
 
 # ─── Public API ───────────────────────────────────────────────────────────────
+
 
 async def on_boot(
     tg: _TelegramSender,
@@ -110,9 +112,7 @@ async def on_boot(
         try:
             await tg.send_message(chat_id, msg)
         except Exception as exc:
-            logger.warning(
-                "boot_hook: failed to notify chat %s on boot: %s", chat_id, exc
-            )
+            logger.warning("boot_hook: failed to notify chat %s on boot: %s", chat_id, exc)
 
 
 async def on_shutdown(
@@ -132,6 +132,4 @@ async def on_shutdown(
         try:
             await tg.send_message(chat_id, "⚠️ Reiniciándome. Vuelvo en ~30s.")
         except Exception as exc:
-            logger.warning(
-                "boot_hook: failed to notify chat %s on shutdown: %s", chat_id, exc
-            )
+            logger.warning("boot_hook: failed to notify chat %s on shutdown: %s", chat_id, exc)

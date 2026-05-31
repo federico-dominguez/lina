@@ -34,9 +34,7 @@ async def _run() -> None:
     bot_task = loop.create_task(bot.run())
     stop_task = loop.create_task(stop.wait())
 
-    done, pending = await asyncio.wait(
-        {bot_task, stop_task}, return_when=asyncio.FIRST_COMPLETED
-    )
+    done, pending = await asyncio.wait({bot_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
     for t in pending:
         t.cancel()
         with suppress(asyncio.CancelledError):
