@@ -11,6 +11,9 @@ dependencies = [
     "httpx[http2]>=0.27",
     "anyio>=4.4",
     "markdown-it-py>=3.0",
+    # Optional: used by boot_hook.py when LINA_DB_URL is set.
+    # Declared as a hard dependency so the image always has it available.
+    "asyncpg>=0.29",
 ]
 
 [project.scripts]

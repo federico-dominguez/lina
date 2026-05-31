@@ -47,6 +47,11 @@ class Bot:
         # chat_id → True if currently processing
         self._busy: dict[int, bool] = {}
 
+    @property
+    def tg(self) -> TelegramClient:
+        """Expose the Telegram client for use outside the bot loop (e.g. boot hook)."""
+        return self._tg
+
     def _session_id(self, chat_id: int) -> str:
         if chat_id not in self._sessions:
             self._sessions[chat_id] = f"telegram-{chat_id}"
@@ -344,9 +349,3 @@ class Bot:
                 logger.error("Poll error (retry in %.0fs): %s", retry_delay, exc)
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, 60.0)
-
-
-async def run() -> None:
-    cfg = Config()
-    bot = Bot(cfg)
-    await bot.run()
