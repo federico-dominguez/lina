@@ -1,0 +1,29 @@
+{
+  "timestamp": "2026-05-31T23:20:11.158965+00:00",
+  "total": 4,
+  "passed": 4,
+  "failed": 0,
+  "results": [
+    {
+      "id": "#60",
+      "name": "Smart Context Injection",
+      "status": "PASS",
+      "note": "Primer intento con timeout 60s falló; re-ejecución con 120s pasó"
+    },
+    {
+      "id": "#61",
+      "name": "Token Metering",
+      "status": "PASS"
+    },
+    {
+      "id": "#62",
+      "name": "Reasoning Trace Persistence",
+      "status": "PASS"
+    },
+    {
+      "id": "#63",
+      "name": "pgvector Semantic Memory",
+      "status": "PASS"
+    }
+  ]
+}
