@@ -40,7 +40,6 @@ import psycopg2
 import psycopg2.extras
 from mcp.server.fastmcp import FastMCP
 from pgvector.psycopg2 import register_vector
-REPLACE
 
 log = logging.getLogger("lina-db")
 
@@ -1080,7 +1079,7 @@ def search_semantic_memory(
     if rows:
         for r in rows:
             r["similarity"] = round(float(r["similarity"]), 4)
-    _audit("search_semantic_memory", {"query": query[:100], "threshold": t}, f"hits={len(rows or [])}")
+    _audit("search_semantic_memory", {"query": query[:100], "threshold": t}, f"hits={len(rows) if rows else 0}")
     return rows or []
 
 
