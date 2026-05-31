@@ -31,13 +31,18 @@ FROM python:3.13-slim-bookworm
 ARG MCP_CMD
 
 # Dependencias mínimas de sistema
+# sudo se requiere para lina-mcp-shell-policy (comandos privilegiados via allowlist).
+# uid 1000 hace coincidir con el usuario host (fede) para acceso a /home/user montado.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         curl \
+        sudo \
  && rm -rf /var/lib/apt/lists/* \
- && useradd --uid 1001 --create-home --shell /bin/false mcp \
+ && useradd --uid 1000 --create-home --shell /bin/sh mcp \
  && mkdir -p /run/secrets/lina \
- && chown mcp:mcp /run/secrets/lina
+ && chown mcp:mcp /run/secrets/lina \
+ && echo "mcp ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/mcp \
+ && chmod 0440 /etc/sudoers.d/mcp
 
 WORKDIR /app
 

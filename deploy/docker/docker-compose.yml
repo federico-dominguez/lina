@@ -179,6 +179,12 @@ services:
         MCP_DIR: mcps/shell-policy
         MCP_CMD: lina-shell-policy
     image: lina-mcp-shell-policy:latest
+    # shell-policy es el MCP privilegiado de LINA.
+    # Necesita setuid para sudo (no-new-privileges debe estar desactivado).
+    # Corre como uid 1000 para poder leer/escribir /home/user montado desde el host.
+    security_opt:
+      - no-new-privileges:false
+    user: "${UID:-1000}"
     depends_on:
       - lina-docker-proxy
     environment:
