@@ -7,27 +7,35 @@ description: |
 instructions: |
   Seguí estos pasos en orden:
 
-  1. **Generá el resumen** de la sesión actual en formato estructurado:
-     - Fecha/hora (usar timestamp del último mensaje)
+  1. **Determiná el session_id** de la sesión activa de Telegram. El formato es
+     `telegram-{chat_id}` (ej: `telegram-123456789`). Podés obtenerlo del contexto
+     actual o llamar `get_last_sessions(1)` para ver el más reciente.
+
+  2. **Generá el resumen** de la sesión en formato estructurado:
      - Temas tratados (lista de bullets concisos)
      - Tareas completadas
-     - Pendientes o bloqueos identificados
-     - Decisiones técnicas relevantes (si las hubo)
+     - Decisiones técnicas relevantes
      - Archivos/repos modificados (si aplica)
-
      El resumen debe caber en ~300 palabras. Priorizá lo accionable.
 
-  2. **Determiná el session_id** con formato `YYYYMMDD_N` donde N es un número
-     secuencial para el día (usá `get_last_sessions(1)` para ver el último y
-     calcular el siguiente). Si no hay sesiones previas del día, usá `_1`.
+  3. **Extraé metadatos** para el resumen estructurado:
+     - `topics`: lista de temas principales (máx 5, ej: ["deploy gateway", "Moodle M2-R7"])
+     - `facts`: datos puntuales a recordar en sesiones futuras (ej: ["número favorito = 42"])
+     - `pending`: tareas no completadas que deben retomarse (ej: ["revisar PR #60"])
 
-  3. **Persistí el resumen** llamando a `summarize_session(session_id, summary)`.
+  4. **Persistí el resumen estructurado** llamando a:
+     `summarize_session_smart(session_id, raw_summary, topics, facts, pending)`
 
-  4. **Confirmá** con un mensaje breve:
-     <b>✅ Sesión [session_id] guardada.</b>
-     [preview de 2 líneas del resumen]
+     Además, si el `session_id` tiene formato `telegram-...`, también llamá al
+     método legacy:
+     `summarize_session(session_id_legacy, raw_summary)` donde `session_id_legacy`
+     tiene formato `YYYYMMDD_N` (para compatibilidad con `get_last_sessions`).
+
+  5. **Confirmá** con un mensaje breve:
+     <b>✅ Sesión guardada.</b>
+     Topics: [lista]
+     Pendientes: [lista o "ninguno"]
 
   <b>Restricciones:</b>
-  - Si lina-db no está disponible, mostrá el resumen igual pero avisá que no
-    se pudo persistir: "⚠️ No se guardó en DB — lina-db no disponible."
+  - Si lina-db no está disponible, mostrá el resumen igual pero avisá: "⚠️ No se guardó en DB."
   - No incluyas secrets, tokens ni datos personales en el resumen.

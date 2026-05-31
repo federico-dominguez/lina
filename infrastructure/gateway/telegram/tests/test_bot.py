@@ -1,4 +1,5 @@
-"""Unit tests for lina_gateway.bot — hot-swap / goosed-restart handling (issue #57)."""
+"""Unit tests for lina_gateway.bot — hot-swap / goosed-restart handling (issue #57)
+and smart context injection (issue #60)."""
 
 from __future__ import annotations
 
@@ -8,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
+from lina_gateway.boot_hook import SmartContext
 from lina_gateway.bot import _GOOSED_TRANSPORT_ERRORS, Bot
 from lina_gateway.config import Config
 
@@ -260,3 +262,98 @@ class TestUnexpectedErrorHandling:
         assert "ValueError" in text
         # But NOT the raw message
         assert "sensitive internal detail" not in text
+
+
+# ─── Smart context injection (issue #60) ─────────────────────────────────────
+
+
+class TestSmartContextInjection:
+    """_maybe_inject_context uses get_smart_context (issue #60)."""
+
+    @pytest.mark.asyncio
+    async def test_skips_injection_when_no_data(self) -> None:
+        """If SmartContext.has_data is False, nothing is sent to Telegram."""
+        bot = _make_bot()
+        fake_tg = FakeTg()
+        bot._tg = fake_tg  # type: ignore[assignment]
+
+        empty_ctx = SmartContext(summary="", messages=[])
+        with patch(
+            "lina_gateway.bot.get_smart_context",
+            new=AsyncMock(return_value=empty_ctx),
+        ):
+            cancel = asyncio.Event()
+            await bot._maybe_inject_context(9999, "telegram-9999", cancel)
+
+        assert fake_tg.sent == []
+
+    @pytest.mark.asyncio
+    async def test_sends_status_message_when_context_exists(self) -> None:
+        """If SmartContext has data, gateway sends '📚 Recuperando...' message."""
+        bot = _make_bot()
+        fake_tg = FakeTg()
+        bot._tg = fake_tg  # type: ignore[assignment]
+        bot._cfg.lina_db_url = "postgresql://fake"  # ensure injection is not skipped
+
+        ctx = SmartContext(summary="Resumen previo.", messages=[])
+
+        async def _silent_stream(*_: object):
+            return
+            yield  # make it an async generator
+
+        bot._goosed.reply_stream = _silent_stream  # type: ignore[assignment]
+
+        with patch(
+            "lina_gateway.bot.get_smart_context",
+            new=AsyncMock(return_value=ctx),
+        ):
+            cancel = asyncio.Event()
+            await bot._maybe_inject_context(9999, "telegram-9999", cancel)
+
+        assert len(fake_tg.sent) == 1
+        _, text = fake_tg.sent[0]
+        assert "📚" in text
+        assert "contexto" in text.lower()
+
+    @pytest.mark.asyncio
+    async def test_edits_status_to_recovered_after_warmup(self) -> None:
+        """After warmup stream completes, the status message is edited."""
+        bot = _make_bot()
+        fake_tg = FakeTg()
+        bot._tg = fake_tg  # type: ignore[assignment]
+        bot._cfg.lina_db_url = "postgresql://fake"  # ensure injection is not skipped
+
+        ctx = SmartContext(summary="Algo.", messages=[])
+
+        async def _silent_stream(*_: object):
+            return
+            yield
+
+        bot._goosed.reply_stream = _silent_stream  # type: ignore[assignment]
+
+        with patch(
+            "lina_gateway.bot.get_smart_context",
+            new=AsyncMock(return_value=ctx),
+        ):
+            cancel = asyncio.Event()
+            await bot._maybe_inject_context(9999, "telegram-9999", cancel)
+
+        assert len(fake_tg.edited) == 1
+        _, _, edited_text = fake_tg.edited[0]
+        assert "recuperado" in edited_text.lower()
+
+    @pytest.mark.asyncio
+    async def test_no_db_url_skips_entirely(self) -> None:
+        """Without lina_db_url, injection is skipped with no DB call."""
+        bot = _make_bot()
+        fake_tg = FakeTg()
+        bot._tg = fake_tg  # type: ignore[assignment]
+        bot._cfg = MagicMock()
+        bot._cfg.lina_db_url = None
+
+        with patch("lina_gateway.bot.get_smart_context") as mock_gsc:
+            cancel = asyncio.Event()
+            await bot._maybe_inject_context(9999, "telegram-9999", cancel)
+
+        mock_gsc.assert_not_called()
+        assert fake_tg.sent == []

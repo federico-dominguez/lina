@@ -352,6 +352,124 @@ def get_daily_summary(days: int = 7) -> list[dict]:
     )
 
 
+@mcp.tool()
+def summarize_session_smart(
+    session_id: str,
+    raw_summary: str,
+    topics: list[str] | None = None,
+    facts: list[str] | None = None,
+    pending: list[str] | None = None,
+    tokens_in: int | None = None,
+    tokens_out: int | None = None,
+) -> str:
+    """Guarda un resumen estructurado de la sesión actual para uso en futuras sesiones.
+
+    Este resumen es usado por el gateway al iniciar una sesión nueva para inyectar
+    contexto compacto (~200 tokens) en lugar de mensajes crudos (~4000 tokens).
+    Llamar al final de cada sesión (o via recipe session-end.yaml).
+
+    Args:
+        session_id:  ID de la sesión (ej: "telegram-123456789").
+        raw_summary: Resumen en prosa de la sesión (qué se hizo, decisiones, estado).
+        topics:      Lista de temas principales (ej: ["Moodle M2-R7", "deploy gateway"]).
+        facts:       Datos puntuales para recordar (ej: ["número favorito = 42"]).
+        pending:     Tareas no completadas (ej: ["revisar PR #60 mañana"]).
+        tokens_in:   Tokens de entrada consumidos en la sesión (opcional).
+        tokens_out:  Tokens de salida generados en la sesión (opcional).
+
+    Returns:
+        "created" si es la primera vez, "updated" si ya existía un resumen para esa sesión.
+    """
+    if not session_id.strip():
+        raise ValueError("session_id no puede estar vacío")
+    if not raw_summary.strip():
+        raise ValueError("raw_summary no puede estar vacío")
+
+    topics_val = topics or []
+    facts_val = facts or []
+    pending_val = pending or []
+
+    existing = _execute(
+        "SELECT id FROM session_summaries WHERE session_id = %s",
+        (session_id,),
+        fetch="one",
+    )
+
+    if existing:
+        _execute(
+            """
+            UPDATE session_summaries
+            SET raw_summary = %s,
+                topics      = %s,
+                facts       = %s,
+                pending     = %s,
+                tokens_in   = %s,
+                tokens_out  = %s,
+                updated_at  = NOW()
+            WHERE session_id = %s
+            """,
+            (
+                raw_summary,
+                topics_val,
+                facts_val,
+                pending_val,
+                tokens_in,
+                tokens_out,
+                session_id,
+            ),
+        )
+        result = "updated"
+    else:
+        _execute(
+            """
+            INSERT INTO session_summaries
+                (session_id, raw_summary, topics, facts, pending, tokens_in, tokens_out)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                session_id,
+                raw_summary,
+                topics_val,
+                facts_val,
+                pending_val,
+                tokens_in,
+                tokens_out,
+            ),
+        )
+        result = "created"
+
+    _audit(
+        "summarize_session_smart",
+        {"session_id": session_id, "topics": topics_val, "facts_count": len(facts_val)},
+        result,
+    )
+    return result
+
+
+@mcp.tool()
+def get_session_summary(session_id: str) -> dict | None:
+    """Recupera el resumen estructurado más reciente de una sesión.
+
+    Args:
+        session_id: ID de la sesión (ej: "telegram-123456789").
+
+    Returns:
+        Dict con raw_summary, topics, facts, pending, updated_at — o None si no existe.
+    """
+    row = _execute(
+        """
+        SELECT raw_summary, topics, facts, pending, tokens_in, tokens_out, updated_at
+        FROM session_summaries
+        WHERE session_id = %s
+        ORDER BY updated_at DESC
+        LIMIT 1
+        """,
+        (session_id,),
+        fetch="one",
+    )
+    return dict(row) if row else None
+
+
 # ─── entrypoint ───────────────────────────────────────────────────────────────
 
 
