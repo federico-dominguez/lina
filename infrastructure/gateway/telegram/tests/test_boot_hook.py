@@ -10,11 +10,14 @@ import pytest
 from lina_gateway.boot_hook import (
     _INTERRUPTION_WINDOW,
     SmartContext,
+    _calculate_cost,
+    _estimate_tokens,
     get_last_messages,
     get_smart_context,
     on_boot,
     on_shutdown,
     save_message,
+    save_token_usage,
 )
 
 # ─── Test doubles ─────────────────────────────────────────────────────────────
@@ -400,3 +403,98 @@ class TestGetSmartContext:
             ctx = await get_smart_context("postgresql://fake", "telegram-1")
 
         assert ctx.has_data is False
+
+
+# ─── Token / cost metering (issue #61) ────────────────────────────────────────
+
+
+class TestEstimateTokens:
+    """_estimate_tokens: character-based estimation."""
+
+    def test_empty_string_returns_zero(self) -> None:
+        assert _estimate_tokens("") == 0
+
+    def test_three_chars_is_one_token(self) -> None:
+        assert _estimate_tokens("abc") == 1
+
+    def test_ceiling_division(self) -> None:
+        # 4 chars → ceil(4/3) = 2
+        assert _estimate_tokens("abcd") == 2
+
+    def test_long_text(self) -> None:
+        text = "hello world " * 100  # 1200 chars → 400 tokens
+        assert _estimate_tokens(text) == 400
+
+    def test_returns_at_least_one_for_nonempty(self) -> None:
+        assert _estimate_tokens("x") == 1
+
+
+class TestCalculateCost:
+    """_calculate_cost: price dict lookup and arithmetic."""
+
+    def test_flash_model(self) -> None:
+        # 1M input @ $0.14 + 1M output @ $0.28 = $0.42
+        cost = _calculate_cost("deepseek-v4-flash", 1_000_000, 1_000_000)
+        assert abs(cost - 0.42) < 1e-6
+
+    def test_pro_model(self) -> None:
+        # 1M input @ $1.74 + 1M output @ $3.48 = $5.22
+        cost = _calculate_cost("deepseek-v4-pro", 1_000_000, 1_000_000)
+        assert abs(cost - 5.22) < 1e-6
+
+    def test_legacy_alias_chat(self) -> None:
+        cost_chat = _calculate_cost("deepseek-chat", 100_000, 100_000)
+        cost_flash = _calculate_cost("deepseek-v4-flash", 100_000, 100_000)
+        assert cost_chat == cost_flash
+
+    def test_unknown_model_falls_back_to_flash(self) -> None:
+        cost_unknown = _calculate_cost("unknown-model-xyz", 100_000, 100_000)
+        cost_flash = _calculate_cost("deepseek-v4-flash", 100_000, 100_000)
+        assert cost_unknown == cost_flash
+
+    def test_zero_tokens_is_zero_cost(self) -> None:
+        assert _calculate_cost("deepseek-v4-flash", 0, 0) == 0.0
+
+
+class TestSaveTokenUsage:
+    """save_token_usage: DB write + error handling."""
+
+    @pytest.mark.asyncio
+    async def test_swallows_connection_error(self) -> None:
+        """DB unreachable → no exception raised."""
+        import asyncpg
+
+        with patch.object(asyncpg, "connect", new=AsyncMock(side_effect=OSError("no db"))):
+            # Must not raise
+            await save_token_usage("postgresql://fake", "telegram-1", "hola", "buenas")
+
+    @pytest.mark.asyncio
+    async def test_inserts_row_with_correct_values(self) -> None:
+        """Correct values are computed and passed to the INSERT query."""
+        import asyncpg
+
+        fake_conn = AsyncMock()
+        fake_conn.execute = AsyncMock()
+        fake_conn.close = AsyncMock()
+
+        with patch.object(asyncpg, "connect", new=AsyncMock(return_value=fake_conn)):
+            await save_token_usage(
+                "postgresql://fake",
+                "telegram-99",
+                "abc",  # 3 chars → 1 token
+                "abcdefghi",  # 9 chars → 3 tokens
+                model="deepseek-v4-flash",
+            )
+
+        assert fake_conn.execute.called
+        call_args = fake_conn.execute.call_args[0]
+        # positional args after the SQL: session_id, model, prompt_chars,
+        # completion_chars, prompt_tokens_est, completion_tokens_est, cost_usd_est
+        params = call_args[1:]
+        assert params[0] == "telegram-99"  # session_id
+        assert params[1] == "deepseek-v4-flash"  # model
+        assert params[2] == 3  # prompt_chars
+        assert params[3] == 9  # completion_chars
+        assert params[4] == 1  # prompt_tokens_est (3/3=1)
+        assert params[5] == 3  # completion_tokens_est (9/3=3)
+        assert params[6] > 0  # cost_usd_est > 0

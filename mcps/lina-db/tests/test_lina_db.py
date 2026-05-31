@@ -6,10 +6,9 @@ por lo que no se requiere una instancia PostgreSQL real.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-
 
 # ─── fixture base ─────────────────────────────────────────────────────────────
 
@@ -221,7 +220,9 @@ class TestGetAuditLogs:
     def test_returns_list(self, mock_execute):
         from lina_db.server import get_audit_logs
 
-        mock_execute.return_value = [{"tool": "store_memory", "args_json": {}, "result_summary": "ok", "created_at": "now"}]
+        mock_execute.return_value = [
+            {"tool": "store_memory", "args_json": {}, "result_summary": "ok", "created_at": "now"}
+        ]
         result = get_audit_logs(10)
         assert len(result) == 1
         assert result[0]["tool"] == "store_memory"
@@ -248,6 +249,7 @@ class TestConn:
     def test_uses_env_url(self, monkeypatch):
         monkeypatch.setenv("LINA_DB_URL", "postgresql://test:test@localhost:5432/test")
         import importlib
+
         import lina_db.server as m
 
         importlib.reload(m)
@@ -262,3 +264,91 @@ class TestConn:
 
         _conn()
         mock_connect.assert_called_once()
+
+
+# ─── Token / cost metering (issue #61) ────────────────────────────────────────
+
+
+class TestGetSessionCost:
+    def test_returns_totals(self, mock_execute):
+        from lina_db.server import get_session_cost
+
+        mock_execute.return_value = {
+            "turns": 3,
+            "prompt_tokens_est": 150,
+            "completion_tokens_est": 300,
+            "total_tokens_est": 450,
+            "cost_usd_est": 0.000126,
+        }
+        result = get_session_cost("telegram-123")
+        assert result["session_id"] == "telegram-123"
+        assert result["turns"] == 3
+        assert result["cost_usd_est"] == 0.000126
+
+    def test_no_data_returns_zeros(self, mock_execute):
+        from lina_db.server import get_session_cost
+
+        mock_execute.return_value = None
+        result = get_session_cost("telegram-456")
+        assert result["session_id"] == "telegram-456"
+        # result dict is empty except session_id when no rows
+        assert "turns" not in result or result["turns"] == 0
+
+
+class TestGetDailyCost:
+    def test_returns_list(self, mock_execute):
+        from lina_db.server import get_daily_cost
+
+        mock_execute.return_value = [
+            {
+                "day": "2026-05-31",
+                "turns": 10,
+                "prompt_tokens_est": 1000,
+                "completion_tokens_est": 2000,
+                "total_tokens_est": 3000,
+                "cost_usd_est": 0.00084,
+            }
+        ]
+        result = get_daily_cost(days=1)
+        assert len(result) == 1
+        assert result[0]["cost_usd_est"] == 0.00084
+
+    def test_empty_returns_empty_list(self, mock_execute):
+        from lina_db.server import get_daily_cost
+
+        mock_execute.return_value = []
+        assert get_daily_cost() == []
+
+    def test_days_clamped_to_90(self, mock_execute):
+        from lina_db.server import get_daily_cost
+
+        mock_execute.return_value = []
+        get_daily_cost(days=9999)  # Should not raise
+        # Verify the SQL was called with n=90
+        call_args = mock_execute.call_args[0]
+        # Second positional arg is (n,)
+        assert call_args[1] == (90,)
+
+
+class TestGetDeepseekBalance:
+    def test_no_api_key_returns_error(self, monkeypatch):
+        from lina_db.server import get_deepseek_balance
+
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+        result = get_deepseek_balance()
+        assert "error" in result
+        assert "DEEPSEEK_API_KEY" in result["error"]
+
+    def test_api_error_returns_error_dict(self, monkeypatch):
+        import urllib.request
+
+        from lina_db.server import get_deepseek_balance
+
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+
+        def _fail(*args, **kwargs):
+            raise OSError("network error")
+
+        monkeypatch.setattr(urllib.request, "urlopen", _fail)
+        result = get_deepseek_balance()
+        assert "error" in result

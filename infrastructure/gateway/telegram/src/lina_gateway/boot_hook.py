@@ -223,6 +223,92 @@ async def get_last_messages(
     return []
 
 
+# ─── Token / cost metering (issue #61) ───────────────────────────────────────
+
+# Pricing table (USD per 1 million tokens), as of 2026-05-31.
+# Keys are model identifiers returned by goosed / DeepSeek API.
+# deepseek-chat → deepseek-v4-flash (non-thinking)
+# deepseek-reasoner → deepseek-v4-flash (thinking mode)  [deprecated alias]
+# deepseek-v4-flash → non-thinking / flash
+# deepseek-v4-pro → thinking / pro
+_PRICING: dict[str, dict[str, float]] = {
+    "deepseek-v4-flash": {"input": 0.14, "output": 0.28},
+    "deepseek-v4-pro": {"input": 1.74, "output": 3.48},
+    # legacy aliases (deprecated 2026-07-24, kept for historical records)
+    "deepseek-chat": {"input": 0.14, "output": 0.28},
+    "deepseek-reasoner": {"input": 1.74, "output": 3.48},
+}
+_DEFAULT_MODEL = "deepseek-v4-flash"
+
+
+def _estimate_tokens(text: str) -> int:
+    """Estimate token count from character count (chars / 3, rounded up).
+
+    Empirical ratio for mixed Spanish/English text with DeepSeek tokenizer.
+    Error is roughly ±15%.  Returns at least 1 for non-empty text.
+    """
+    if not text:
+        return 0
+    return max(1, -(-len(text) // 3))  # ceiling division
+
+
+def _calculate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    """Return estimated cost in USD given model and token counts."""
+    prices = _PRICING.get(model, _PRICING[_DEFAULT_MODEL])
+    cost = (prompt_tokens * prices["input"] + completion_tokens * prices["output"]) / 1_000_000
+    return round(cost, 8)
+
+
+async def save_token_usage(
+    db_url: str,
+    session_id: str,
+    prompt_text: str,
+    completion_text: str,
+    model: str = _DEFAULT_MODEL,
+) -> None:
+    """Persist estimated token usage for one turn. Best-effort, never raises.
+
+    Args:
+        db_url:          PostgreSQL connection URL.
+        session_id:      Gateway deterministic session ID (e.g. ``telegram-123``).
+        prompt_text:     The user-side text sent to the model (input).
+        completion_text: The assistant response accumulated text (output).
+        model:           DeepSeek model identifier (default: deepseek-v4-flash).
+    """
+    prompt_chars = len(prompt_text)
+    completion_chars = len(completion_text)
+    prompt_tokens = _estimate_tokens(prompt_text)
+    completion_tokens = _estimate_tokens(completion_text)
+    cost = _calculate_cost(model, prompt_tokens, completion_tokens)
+
+    try:
+        import asyncpg
+
+        conn = await asyncpg.connect(db_url, timeout=5)
+        try:
+            await conn.execute(
+                """
+                INSERT INTO token_usage
+                    (session_id, model,
+                     prompt_chars, completion_chars,
+                     prompt_tokens_est, completion_tokens_est,
+                     cost_usd_est)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """,
+                session_id,
+                model,
+                prompt_chars,
+                completion_chars,
+                prompt_tokens,
+                completion_tokens,
+                cost,
+            )
+        finally:
+            await conn.close()
+    except Exception as exc:
+        logger.debug("boot_hook: save_token_usage failed (session=%s): %s", session_id, exc)
+
+
 # ─── Smart context (issue #60) ────────────────────────────────────────────────
 
 # How many raw recent messages to include alongside the summary.

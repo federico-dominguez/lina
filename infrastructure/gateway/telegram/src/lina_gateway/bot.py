@@ -19,7 +19,7 @@ from collections import defaultdict
 
 import httpx
 
-from .boot_hook import get_smart_context, save_message
+from .boot_hook import get_smart_context, save_message, save_token_usage
 from .config import Config
 from .formatter import (
     format_tool_status,
@@ -422,6 +422,7 @@ class Bot:
         try:
             await save_message(db_url, session_id, "user", user_text)
             await save_message(db_url, session_id, "assistant", assistant_text)
+            await save_token_usage(db_url, session_id, user_text, assistant_text)
         except Exception as exc:
             logger.debug("_persist_turn failed for session %s: %s", session_id, exc)
 
