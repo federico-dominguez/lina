@@ -18,7 +18,12 @@ import time
 from collections import defaultdict
 
 from .config import Config
-from .formatter import format_tool_status, format_with_thinking, markdown_to_telegram_html, split_message
+from .formatter import (
+    format_tool_status,
+    format_with_thinking,
+    markdown_to_telegram_html,
+    split_message,
+)
 from .goose_client import EventType, GoosedClient
 from .pacer import StreamingBubble
 from .telegram_client import MAX_VOICE_FILE_SIZE, TelegramClient, TelegramMessage, voice_prompt
@@ -46,6 +51,11 @@ class Bot:
         self._cancels: dict[int, asyncio.Event] = defaultdict(asyncio.Event)
         # chat_id → True if currently processing
         self._busy: dict[int, bool] = {}
+
+    @property
+    def tg(self) -> TelegramClient:
+        """Expose the Telegram client for use outside the bot loop (e.g. boot hook)."""
+        return self._tg
 
     def _session_id(self, chat_id: int) -> str:
         if chat_id not in self._sessions:
@@ -315,7 +325,9 @@ class Bot:
         ttft_s = (first_send_ts - reply_start) if first_send_ts else total_s
         logger.info(
             "reply: chat=%s ttft=%.2fs total=%.2fs",
-            chat_id, ttft_s, total_s,
+            chat_id,
+            ttft_s,
+            total_s,
         )
 
         # Belt-and-suspenders: body arrived but no bubble was created somehow
@@ -344,9 +356,3 @@ class Bot:
                 logger.error("Poll error (retry in %.0fs): %s", retry_delay, exc)
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, 60.0)
-
-
-async def run() -> None:
-    cfg = Config()
-    bot = Bot(cfg)
-    await bot.run()

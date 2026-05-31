@@ -11,6 +11,9 @@ dependencies = [
     "httpx[http2]>=0.27",
     "anyio>=4.4",
     "markdown-it-py>=3.0",
+    # Optional: used by boot_hook.py when LINA_DB_URL is set.
+    # Declared as a hard dependency so the image always has it available.
+    "asyncpg>=0.29",
 ]
 
 [project.scripts]
@@ -24,6 +27,7 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+ignore = ["E501"]  # line length enforced by ruff format, not lint
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -34,6 +38,7 @@ dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
     "pytest-httpx>=0.30",
+    "pytest-cov>=5",
     "ruff>=0.4",
     "coverage>=7",
 ]

@@ -133,3 +133,33 @@ jobs:
       - name: E2E integration tests
         run: |
           pytest tests/integration/mcps/ -v --tb=short -m integration
+
+  lint-and-test-gateway:
+    name: Lint & Test gateway
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Sync dependencies
+        run: cd infrastructure/gateway/telegram && uv sync --dev
+
+      - name: Ruff lint
+        run: cd infrastructure/gateway/telegram && uv run ruff check src/
+
+      - name: Ruff format check
+        run: cd infrastructure/gateway/telegram && uv run ruff format --check src/
+
+      - name: Pytest + coverage
+        run: |
+          cd infrastructure/gateway/telegram
+          uv run pytest tests/ -v --tb=short \
+            --cov=src --cov-report=xml --cov-report=term-missing \
+            --cov-fail-under=40

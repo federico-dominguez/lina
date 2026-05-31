@@ -1,0 +1,37 @@
+[Unit]
+Description=LINA — Watchdog: monitorea goosed y reinicia si cae
+Documentation=https://github.com/federico-dominguez/lina
+# user-level systemd can't depend on system units like docker.service.
+# The watchdog is resilient: if Docker is not ready yet, 'docker inspect'
+# will return error and the failure counter will reset on the first success.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Carga TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, GOOSE_SERVER__SECRET_KEY, etc.
+EnvironmentFile=%h/.config/goose/secrets.env
+
+Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="COMPOSE_FILE=%h/lina/deploy/docker/docker-compose.yml"
+Environment="CONTAINER_NAME=lina-goosed-1"
+Environment="HEALTHCHECK_INTERVAL=30"
+Environment="MAX_FAILURES=3"
+
+WorkingDirectory=%h/lina
+
+ExecStart=/bin/bash %h/lina/deploy/systemd/lina-watchdog.sh
+
+# Reinicia siempre — el watchdog debe estar siempre activo.
+Restart=always
+RestartSec=10s
+TimeoutStopSec=10s
+
+# Stdout/stderr van al journal.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lina-watchdog
+
+[Install]
+WantedBy=default.target
