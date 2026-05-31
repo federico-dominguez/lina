@@ -223,14 +223,10 @@ async def get_last_messages(
     return []
 
 
-# ─── Token / cost metering (issue #61) ───────────────────────────────────────
+# ─── Token / cost metering (issue #61, fix #72) ──────────────────────────────
 
-# Pricing table (USD per 1 million tokens), as of 2026-05-31.
-# Keys are model identifiers returned by goosed / DeepSeek API.
-# deepseek-chat → deepseek-v4-flash (non-thinking)
-# deepseek-reasoner → deepseek-v4-pro (thinking mode)  [deprecated alias]
-# deepseek-v4-flash → non-thinking / flash
-# deepseek-v4-pro → thinking / pro
+# Pricing table kept as fallback for tests and edge cases where token_state
+# is unavailable. Real costs come from goosed's token_state.accumulatedCost.
 _PRICING: dict[str, dict[str, float]] = {
     "deepseek-v4-flash": {"input": 0.14, "output": 0.28},
     "deepseek-v4-pro": {"input": 1.74, "output": 3.48},
@@ -262,46 +258,54 @@ def _calculate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> f
 async def save_token_usage(
     db_url: str,
     session_id: str,
-    prompt_text: str,
-    completion_text: str,
+    input_tokens: int,
+    output_tokens: int,
+    accumulated_cost_usd: float,
+    *,
     model: str = _DEFAULT_MODEL,
 ) -> None:
-    """Persist estimated token usage for one turn. Best-effort, never raises.
+    """Persist real token usage for one turn from goosed token_state. Best-effort, never raises.
 
     Args:
-        db_url:          PostgreSQL connection URL.
-        session_id:      Gateway deterministic session ID (e.g. ``telegram-123``).
-        prompt_text:     The user-side text sent to the model (input).
-        completion_text: The assistant response accumulated text (output).
-        model:           DeepSeek model identifier (default: deepseek-v4-flash).
+        db_url:               PostgreSQL connection URL.
+        session_id:           Gateway deterministic session ID (e.g. ``telegram-123``).
+        input_tokens:         Real prompt tokens from goosed token_state.inputTokens.
+        output_tokens:        Real completion tokens from goosed token_state.outputTokens.
+        accumulated_cost_usd: Monotonic accumulated USD cost for this session from goosed.
+                              Per-turn delta is calculated by comparing with the previous row.
+        model:                DeepSeek model identifier (default: deepseek-v4-flash).
     """
-    prompt_chars = len(prompt_text)
-    completion_chars = len(completion_text)
-    prompt_tokens = _estimate_tokens(prompt_text)
-    completion_tokens = _estimate_tokens(completion_text)
-    cost = _calculate_cost(model, prompt_tokens, completion_tokens)
-
     try:
         import asyncpg
 
         conn = await asyncpg.connect(db_url, timeout=5)
         try:
+            # Calculate per-turn cost delta vs last recorded accumulation for this session
+            last_acc = await conn.fetchval(
+                "SELECT accumulated_cost_usd FROM token_usage "
+                "WHERE session_id = $1 ORDER BY created_at DESC LIMIT 1",
+                session_id,
+            )
+            last_acc_float = float(last_acc) if last_acc is not None else 0.0
+            turn_cost = max(0.0, round(accumulated_cost_usd - last_acc_float, 8))
+
             await conn.execute(
                 """
                 INSERT INTO token_usage
                     (session_id, model,
                      prompt_chars, completion_chars,
                      prompt_tokens_est, completion_tokens_est,
-                     cost_usd_est)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                     cost_usd_est, accumulated_cost_usd)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 """,
                 session_id,
                 model,
-                prompt_chars,
-                completion_chars,
-                prompt_tokens,
-                completion_tokens,
-                cost,
+                0,  # chars no longer tracked (real tokens available)
+                0,
+                input_tokens,
+                output_tokens,
+                turn_cost,
+                accumulated_cost_usd,
             )
         finally:
             await conn.close()

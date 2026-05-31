@@ -27,7 +27,7 @@ from .formatter import (
     markdown_to_telegram_html,
     split_message,
 )
-from .goose_client import EventType, GoosedClient
+from .goose_client import EventType, GoosedClient, TokenState
 from .pacer import StreamingBubble
 from .telegram_client import MAX_VOICE_FILE_SIZE, TelegramClient, TelegramMessage, voice_prompt
 
@@ -181,6 +181,7 @@ class Bot:
         # Accumulators for the current turn
         thinking_acc = ""
         body_acc = ""
+        finish_token_state = None  # populated from Finish event token_state
 
         # Two SEPARATE Telegram messages:
         #   thinking_bubble → shows only the 💭 reasoning block, live-updated
@@ -270,6 +271,7 @@ class Bot:
                     return
 
                 if event.event_type == EventType.FINISH:
+                    finish_token_state = event.token_state
                     break
 
                 if event.event_type != EventType.MESSAGE:
@@ -408,13 +410,19 @@ class Bot:
         # Persist this turn for session recovery across restarts (best-effort)
         if self._cfg.lina_db_url and text.strip() and body_acc.strip():
             asyncio.create_task(
-                self._persist_turn(session_id, text, body_acc),
+                self._persist_turn(session_id, text, body_acc, finish_token_state),
                 name=f"persist-turn-{chat_id}",
             )
 
     # ─── Session persistence helpers ─────────────────────────────────────────
 
-    async def _persist_turn(self, session_id: str, user_text: str, assistant_text: str) -> None:
+    async def _persist_turn(
+        self,
+        session_id: str,
+        user_text: str,
+        assistant_text: str,
+        token_state: TokenState | None = None,
+    ) -> None:
         """Save a user+assistant turn to PostgreSQL. Silently swallows errors."""
         db_url = self._cfg.lina_db_url
         if not db_url:
@@ -422,7 +430,14 @@ class Bot:
         try:
             await save_message(db_url, session_id, "user", user_text)
             await save_message(db_url, session_id, "assistant", assistant_text)
-            await save_token_usage(db_url, session_id, user_text, assistant_text)
+            if token_state is not None:
+                await save_token_usage(
+                    db_url,
+                    session_id,
+                    input_tokens=token_state.input_tokens,
+                    output_tokens=token_state.output_tokens,
+                    accumulated_cost_usd=token_state.accumulated_cost,
+                )
         except Exception as exc:
             logger.debug("_persist_turn failed for session %s: %s", session_id, exc)
 
