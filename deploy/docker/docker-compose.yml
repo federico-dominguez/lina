@@ -185,6 +185,14 @@ services:
     # Corre como uid 1000 para poder leer/escribir /home/user montado desde el host.
     security_opt:
       - no-new-privileges:false
+    # cap_drop:ALL heredado de mcp-defaults elimina todas las capabilities.
+    # Agregamos de vuelta solo las necesarias para sudo:
+    #   SETUID / SETGID  — sudo cambia uid/gid a root
+    #   AUDIT_WRITE      — libaudit (requerida por el plugin sudoers_audit en Debian)
+    cap_add:
+      - SETUID
+      - SETGID
+      - AUDIT_WRITE
     user: "${UID:-1000}"
     depends_on:
       - lina-docker-proxy

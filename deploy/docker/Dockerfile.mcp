@@ -49,7 +49,8 @@ RUN if [ "${MCP_SUDO_ENABLED}" = "1" ]; then \
    && apt-get install -y --no-install-recommends sudo \
    && rm -rf /var/lib/apt/lists/* \
    && echo "mcp ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/mcp \
-   && chmod 0440 /etc/sudoers.d/mcp; \
+   && chmod 0440 /etc/sudoers.d/mcp \
+   && printf 'Plugin sudoers_policy sudoers.so\nPlugin sudoers_io sudoers.so\n' > /etc/sudo.conf; \
     fi
 
 WORKDIR /app
