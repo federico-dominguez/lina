@@ -520,3 +520,107 @@ class TestGetDeepseekMonthlyCost:
         expected_total = round(0.086884928 + 1.602944985 + 0.354382320, 8)
         assert pro["total_usd"] == expected_total
         assert result["total_usd"] == expected_total
+
+
+# ─── reasoning trace tools (issue #62) ───────────────────────────────────────
+
+
+def _make_fake_conn(rows, col_names):
+    """Return a fake psycopg2 context-manager connection with a preset cursor."""
+    fake_cur = MagicMock()
+    fake_cur.__enter__ = MagicMock(return_value=fake_cur)
+    fake_cur.__exit__ = MagicMock(return_value=False)
+    fake_cur.fetchall = MagicMock(return_value=rows)
+    fake_cur.description = [(name,) for name in col_names]
+
+    fake_conn = MagicMock()
+    fake_conn.__enter__ = MagicMock(return_value=fake_conn)
+    fake_conn.__exit__ = MagicMock(return_value=False)
+    fake_conn.cursor = MagicMock(return_value=fake_cur)
+    return fake_conn, fake_cur
+
+
+class TestGetLastTraces:
+    def test_returns_traces_for_session(self, monkeypatch):
+        from lina_db.server import get_last_traces
+
+        col_names = [
+            "id", "session_id", "turn_number", "thinking_text",
+            "prompt_hash", "model", "created_at",
+        ]
+        rows = [
+            (1, "telegram-1", 2, "pensé en el problema", "abc123", "deepseek-v4-flash", "2026-05-31 10:00:00"),
+            (2, "telegram-1", 1, "analicé las opciones", None, "deepseek-v4-flash", "2026-05-31 09:00:00"),
+        ]
+        fake_conn, _ = _make_fake_conn(rows, col_names)
+        monkeypatch.setattr("lina_db.server._conn", lambda: fake_conn)
+
+        result = get_last_traces("telegram-1", limit=5)
+        assert len(result) == 2
+        assert result[0]["session_id"] == "telegram-1"
+        assert result[0]["thinking_text"] == "pensé en el problema"
+
+    def test_clamps_limit_to_20(self, monkeypatch):
+        from lina_db.server import get_last_traces
+
+        col_names = ["id", "session_id", "turn_number", "thinking_text",
+                     "prompt_hash", "model", "created_at"]
+        fake_conn, fake_cur = _make_fake_conn([], col_names)
+        monkeypatch.setattr("lina_db.server._conn", lambda: fake_conn)
+
+        get_last_traces("telegram-1", limit=999)
+        # The cursor.execute call should have used limit=20
+        sql_call = fake_cur.execute.call_args[0]
+        assert sql_call[1][1] == 20
+
+    def test_truncates_long_thinking_text(self, monkeypatch):
+        from lina_db.server import get_last_traces
+
+        long_text = "x" * 2000
+        col_names = ["id", "session_id", "turn_number", "thinking_text",
+                     "prompt_hash", "model", "created_at"]
+        rows = [(1, "telegram-1", 0, long_text, None, "deepseek-v4-flash", "2026-05-31")]
+        fake_conn, _ = _make_fake_conn(rows, col_names)
+        monkeypatch.setattr("lina_db.server._conn", lambda: fake_conn)
+
+        result = get_last_traces("telegram-1")
+        assert len(result[0]["thinking_text"]) <= 1015  # 1000 chars + "…[truncado]" suffix
+
+    def test_db_error_returns_error_list(self, monkeypatch):
+        from lina_db.server import get_last_traces
+
+        monkeypatch.setattr("lina_db.server._conn", MagicMock(side_effect=Exception("no db")))
+        result = get_last_traces("telegram-1")
+        assert isinstance(result, list)
+        assert "error" in result[0]
+
+
+class TestSearchTraces:
+    def test_returns_search_results(self, monkeypatch):
+        from lina_db.server import search_traces
+
+        col_names = ["id", "session_id", "turn_number", "thinking_text",
+                     "model", "created_at", "rank"]
+        rows = [(1, "telegram-1", 0, "Moodle attempt_id", "deepseek-v4-flash", "2026-05-31", 0.5)]
+        fake_conn, _ = _make_fake_conn(rows, col_names)
+        monkeypatch.setattr("lina_db.server._conn", lambda: fake_conn)
+
+        result = search_traces("Moodle")
+        assert len(result) == 1
+        assert result[0]["rank"] == 0.5
+        assert "Moodle" in result[0]["thinking_text"]
+
+    def test_empty_query_returns_error(self, monkeypatch):
+        from lina_db.server import search_traces
+
+        result = search_traces("   ")
+        assert isinstance(result, list)
+        assert "error" in result[0]
+
+    def test_db_error_returns_error_list(self, monkeypatch):
+        from lina_db.server import search_traces
+
+        monkeypatch.setattr("lina_db.server._conn", MagicMock(side_effect=Exception("no db")))
+        result = search_traces("algo")
+        assert isinstance(result, list)
+        assert "error" in result[0]

@@ -347,6 +347,57 @@ async def save_token_usage(
         logger.debug("boot_hook: save_token_usage failed (session=%s): %s", session_id, exc)
 
 
+# ─── Reasoning trace persistence (issue #62) ─────────────────────────────────
+
+
+async def save_trace(
+    db_url: str,
+    session_id: str,
+    thinking_text: str,
+    prompt_hash: str | None = None,
+    *,
+    model: str = _DEFAULT_MODEL,
+) -> None:
+    """Persist the DeepSeek <think>…</think> block for one LINA turn. Best-effort, never raises.
+
+    Args:
+        db_url:        PostgreSQL connection URL.
+        session_id:    Gateway deterministic session ID (e.g. ``telegram-123456789``).
+        thinking_text: Raw text of the accumulated <think> block(s) for this turn.
+        prompt_hash:   Optional SHA-256 hex digest of the user prompt for deduplication.
+        model:         DeepSeek model identifier (default: deepseek-v4-flash).
+    """
+    if not thinking_text.strip():
+        return
+    try:
+        import asyncpg
+
+        conn = await asyncpg.connect(db_url, timeout=5)
+        try:
+            # turn_number = next value after the current max for this session
+            turn_number = await conn.fetchval(
+                "SELECT COALESCE(MAX(turn_number) + 1, 0) "
+                "FROM reasoning_traces WHERE session_id = $1",
+                session_id,
+            )
+            await conn.execute(
+                """
+                INSERT INTO reasoning_traces
+                    (session_id, turn_number, thinking_text, prompt_hash, model)
+                VALUES ($1, $2, $3, $4, $5)
+                """,
+                session_id,
+                turn_number,
+                thinking_text,
+                prompt_hash,
+                model,
+            )
+        finally:
+            await conn.close()
+    except Exception as exc:
+        logger.debug("boot_hook: save_trace failed (session=%s): %s", session_id, exc)
+
+
 # ─── Balance snapshot tracking (issue #61 real cost) ─────────────────────────
 
 

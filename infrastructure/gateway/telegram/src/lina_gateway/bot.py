@@ -19,7 +19,7 @@ from collections import defaultdict
 
 import httpx
 
-from .boot_hook import get_smart_context, save_message, save_token_usage
+from .boot_hook import get_smart_context, save_message, save_token_usage, save_trace
 from .config import Config
 from .formatter import (
     format_tool_status,
@@ -181,6 +181,9 @@ class Bot:
         # Accumulators for the current turn
         thinking_acc = ""
         body_acc = ""
+        # Cumulative thinking across all tool-call cycles in this turn (never reset).
+        # Used for reasoning trace persistence (issue #62).
+        total_thinking_acc = ""
         finish_token_state = None  # populated from Finish event token_state
 
         # Two SEPARATE Telegram messages:
@@ -281,6 +284,7 @@ class Bot:
                 for item in event.contents:
                     if item.content_type == "thinking":
                         thinking_acc += item.thinking
+                        total_thinking_acc += item.thinking
                         if thinking_bubble_msg_id is None:
                             # Open the thinking bubble (its own Telegram message)
                             html = format_with_thinking(thinking_acc, "", False)
@@ -416,6 +420,15 @@ class Bot:
                 self._persist_turn(session_id, text, body_acc, finish_token_state),
                 name=f"persist-turn-{chat_id}",
             )
+        # Persist reasoning trace if thinking content was produced (best-effort, issue #62)
+        if self._cfg.lina_db_url and total_thinking_acc.strip():
+            import hashlib
+
+            prompt_hash = hashlib.sha256(text.encode()).hexdigest()
+            asyncio.create_task(
+                self._persist_trace(session_id, total_thinking_acc, prompt_hash),
+                name=f"persist-trace-{chat_id}",
+            )
 
     # ─── Session persistence helpers ─────────────────────────────────────────
 
@@ -443,6 +456,21 @@ class Bot:
                 )
         except Exception as exc:
             logger.debug("_persist_turn failed for session %s: %s", session_id, exc)
+
+    async def _persist_trace(
+        self,
+        session_id: str,
+        thinking_text: str,
+        prompt_hash: str | None = None,
+    ) -> None:
+        """Persist the <think> block for this turn. Silently swallows errors (issue #62)."""
+        db_url = self._cfg.lina_db_url
+        if not db_url:
+            return
+        try:
+            await save_trace(db_url, session_id, thinking_text, prompt_hash)
+        except Exception as exc:
+            logger.debug("_persist_trace failed for session %s: %s", session_id, exc)
 
     async def _maybe_inject_context(
         self,

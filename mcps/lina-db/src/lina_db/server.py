@@ -18,6 +18,8 @@ Herramientas expuestas:
     get_deepseek_user_summary     — balance + gasto mensual exacto desde platform.deepseek.com
     get_deepseek_monthly_usage    — tokens por modelo y tipo desde platform.deepseek.com
     get_deepseek_monthly_cost     — costo USD por modelo desde platform.deepseek.com (= dashboard)
+    get_last_traces          — últimos N bloques <think> de LINA (issue #62)
+    search_traces            — búsqueda full-text en reasoning traces de LINA (issue #62)
 
 Variables de entorno:
     LINA_DB_URL              URL de conexión (default: postgresql://lina:lina_dev@localhost:5432/lina)
@@ -785,6 +787,121 @@ def get_deepseek_monthly_cost(year: int, month: int) -> dict:
         }
     except Exception as exc:
         return {"error": str(exc)}
+
+
+# ─── Reasoning trace tools (issue #62) ────────────────────────────────────────
+
+
+@mcp.tool()
+def get_last_traces(session_id: str = "", limit: int = 5) -> list[dict]:
+    """Recupera los últimos N bloques <think> de LINA para auto-análisis.
+
+    Permite a LINA introspeccionar su propio razonamiento pasado. Si se proporciona
+    ``session_id``, filtra por esa sesión; si está vacío devuelve las más recientes
+    sin importar la sesión.
+
+    Args:
+        session_id: ID de sesión (e.g. 'telegram-123456789'). Vacío = todas las sesiones.
+        limit:      Máximo de trazas a devolver (default 5, máximo 20).
+
+    Returns:
+        Lista de dicts con: id, session_id, turn_number, thinking_text,
+        prompt_hash, model, created_at.
+    """
+    limit = min(max(1, limit), 20)
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            if session_id:
+                cur.execute(
+                    """
+                    SELECT id, session_id, turn_number, thinking_text,
+                           prompt_hash, model,
+                           created_at AT TIME ZONE 'UTC' AS created_at
+                    FROM reasoning_traces
+                    WHERE session_id = %s
+                    ORDER BY turn_number DESC
+                    LIMIT %s
+                    """,
+                    (session_id, limit),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT id, session_id, turn_number, thinking_text,
+                           prompt_hash, model,
+                           created_at AT TIME ZONE 'UTC' AS created_at
+                    FROM reasoning_traces
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+            rows = cur.fetchall()
+            cols = [d[0] for d in cur.description]
+            result = []
+            for row in rows:
+                item = dict(zip(cols, row))
+                item["created_at"] = str(item["created_at"])
+                # Truncate very long traces for readability (first 1000 chars)
+                if item.get("thinking_text") and len(item["thinking_text"]) > 1000:
+                    item["thinking_text"] = item["thinking_text"][:1000] + "…[truncado]"
+                result.append(item)
+        _audit("get_last_traces", {"session_id": session_id, "limit": limit}, f"rows={len(result)}")
+        return result
+    except Exception as exc:
+        return [{"error": str(exc)}]
+
+
+@mcp.tool()
+def search_traces(query: str, limit: int = 10) -> list[dict]:
+    """Búsqueda full-text en el historial de razonamiento de LINA.
+
+    Permite a LINA buscar en todos sus trazos de razonamiento por palabras clave,
+    para responder preguntas como '¿cuándo pensé en el problema X?' o
+    '¿qué razoné sobre Moodle?'.
+
+    Args:
+        query: Texto a buscar (palabras clave, frases). Se usa pg tsvector en español.
+        limit: Máximo de resultados (default 10, máximo 20).
+
+    Returns:
+        Lista de dicts con id, session_id, turn_number, thinking_text (truncado a 500 chars),
+        model, created_at y rank (relevancia).
+    """
+    limit = min(max(1, limit), 20)
+    if not query.strip():
+        return [{"error": "query no puede estar vacío"}]
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, session_id, turn_number,
+                       left(thinking_text, 500) AS thinking_text,
+                       model,
+                       created_at AT TIME ZONE 'UTC' AS created_at,
+                       ts_rank(
+                           to_tsvector('spanish', thinking_text),
+                           plainto_tsquery('spanish', %s)
+                       ) AS rank
+                FROM reasoning_traces
+                WHERE to_tsvector('spanish', thinking_text) @@ plainto_tsquery('spanish', %s)
+                ORDER BY rank DESC, created_at DESC
+                LIMIT %s
+                """,
+                (query, query, limit),
+            )
+            rows = cur.fetchall()
+            cols = [d[0] for d in cur.description]
+            result = []
+            for row in rows:
+                item = dict(zip(cols, row))
+                item["created_at"] = str(item["created_at"])
+                item["rank"] = round(float(item["rank"]), 4)
+                result.append(item)
+        _audit("search_traces", {"query": query[:50], "limit": limit}, f"hits={len(result)}")
+        return result
+    except Exception as exc:
+        return [{"error": str(exc)}]
 
 
 # ─── entrypoint ───────────────────────────────────────────────────────────────
