@@ -392,7 +392,10 @@ class Bot:
             return
 
         # Final seal of whichever bubble is still active
-        await _seal_all()
+        try:
+            await _seal_all()
+        except Exception as exc:
+            logger.warning("_seal_all failed (Telegram error, non-fatal): %s", exc)
 
         total_s = time.monotonic() - reply_start
         ttft_s = (first_send_ts - reply_start) if first_send_ts else total_s
