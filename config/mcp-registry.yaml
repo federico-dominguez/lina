@@ -36,6 +36,11 @@ waves:
       container_port: 8106
 
   ola_2_autoextension:
+    - name: lina-orchestrator
+      path: mcps/orchestrator
+      status: implemented
+      container_url: http://localhost:8111/sse
+      container_port: 8111
     - {name: lina-git-ops,     path: mcps/git-ops,     status: planned}
     - {name: lina-self-modify, path: mcps/self-modify, status: planned}
     - {name: lina-cost-meter,  path: mcps/cost-meter,  status: planned}
