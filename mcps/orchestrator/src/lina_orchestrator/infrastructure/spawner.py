@@ -58,9 +58,7 @@ def _db_update_status(
 ) -> None:
     started_sql = ", started_at = NOW()" if status == "running" else ""
     ended_sql = (
-        ", ended_at = NOW()"
-        if status in {"completed", "failed", "killed", "timeout"}
-        else ""
+        ", ended_at = NOW()" if status in {"completed", "failed", "killed", "timeout"} else ""
     )
     conn = _db_conn()
     try:
