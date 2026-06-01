@@ -300,7 +300,8 @@ class SpawnerService:
             "run",
             "--config",
             str(config_path),
-            "--text", goal,
+            "--text",
+            goal,
         ]
 
         log.info("spawning agent %s (role=%s) cmd=%s", session_id, role, cmd)
