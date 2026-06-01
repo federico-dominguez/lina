@@ -335,3 +335,144 @@ class TestSendAgentCommand:
         result = send_agent_command(self._VALID_ID, "pause")
         assert result["id"] is None
         assert result["sent_at"] is None
+
+
+# ─── list_agent_events ────────────────────────────────────────────────────────
+
+
+class TestListAgentEvents:
+    _SID = "e" * 32
+
+    def _make_event(self, kind: str = "heartbeat"):
+        return {
+            "id": 1,
+            "kind": kind,
+            "payload_json": {"msg": "alive"},
+            "ts": datetime.now(tz=timezone.utc),
+        }
+
+    def test_returns_events_list(self, mock_execute):
+        from lina_db.server import list_agent_events
+
+        mock_execute.return_value = [self._make_event("tool_called")]
+        result = list_agent_events(self._SID)
+        assert len(result) == 1
+        assert result[0]["kind"] == "tool_called"
+        assert isinstance(result[0]["ts"], str)
+
+    def test_empty_returns_empty_list(self, mock_execute):
+        from lina_db.server import list_agent_events
+
+        mock_execute.return_value = []
+        result = list_agent_events(self._SID)
+        assert result == []
+
+    def test_none_returns_empty_list(self, mock_execute):
+        from lina_db.server import list_agent_events
+
+        mock_execute.return_value = None
+        result = list_agent_events(self._SID)
+        assert result == []
+
+    def test_limit_capped_at_200(self, mock_execute):
+        from lina_db.server import list_agent_events
+
+        mock_execute.return_value = []
+        list_agent_events(self._SID, limit=9999)
+        call_params = mock_execute.call_args[0][1]
+        assert 200 in call_params  # capped limit in SQL args tuple
+
+    def test_limit_minimum_is_1(self, mock_execute):
+        from lina_db.server import list_agent_events
+
+        mock_execute.return_value = []
+        list_agent_events(self._SID, limit=-5)
+        call_params = mock_execute.call_args[0][1]
+        assert 1 in call_params
+
+    def test_empty_session_id_raises(self, mock_execute):
+        from lina_db.server import list_agent_events
+
+        with pytest.raises(ValueError, match="session_id"):
+            list_agent_events("  ")
+
+    def test_ts_none_becomes_none(self, mock_execute):
+        from lina_db.server import list_agent_events
+
+        event = self._make_event()
+        event["ts"] = None
+        mock_execute.return_value = [event]
+        result = list_agent_events(self._SID)
+        assert result[0]["ts"] is None
+
+
+# ─── get_pending_instructions ─────────────────────────────────────────────────
+
+
+class TestGetPendingInstructions:
+    _SID = "f" * 32
+
+    def _make_cmd(self, args: dict | None = None):
+        return {
+            "id": 5,
+            "kind": "send_instruction",
+            "args_json": args or {"text": "do something"},
+            "sent_at": datetime.now(tz=timezone.utc),
+        }
+
+    def test_returns_pending_and_acks(self, mock_execute):
+        from lina_db.server import get_pending_instructions
+
+        # first call = SELECT, second = UPDATE
+        mock_execute.side_effect = [[self._make_cmd()], None]
+        result = get_pending_instructions(self._SID)
+        assert len(result) == 1
+        assert result[0]["kind"] == "send_instruction"
+        assert isinstance(result[0]["sent_at"], str)
+        # UPDATE was called
+        assert mock_execute.call_count == 2
+
+    def test_no_pending_returns_empty_and_skips_update(self, mock_execute):
+        from lina_db.server import get_pending_instructions
+
+        mock_execute.return_value = []
+        result = get_pending_instructions(self._SID)
+        assert result == []
+        # only SELECT was called, no UPDATE
+        assert mock_execute.call_count == 1
+
+    def test_none_select_returns_empty_and_skips_update(self, mock_execute):
+        from lina_db.server import get_pending_instructions
+
+        mock_execute.return_value = None
+        result = get_pending_instructions(self._SID)
+        assert result == []
+        assert mock_execute.call_count == 1
+
+    def test_empty_session_id_raises(self, mock_execute):
+        from lina_db.server import get_pending_instructions
+
+        with pytest.raises(ValueError, match="session_id"):
+            get_pending_instructions("")
+
+    def test_sent_at_none_becomes_none(self, mock_execute):
+        from lina_db.server import get_pending_instructions
+
+        cmd = self._make_cmd()
+        cmd["sent_at"] = None
+        mock_execute.side_effect = [[cmd], None]
+        result = get_pending_instructions(self._SID)
+        assert result[0]["sent_at"] is None
+
+    def test_multiple_instructions_all_acked(self, mock_execute):
+        from lina_db.server import get_pending_instructions
+
+        cmds = [self._make_cmd({"text": f"task {i}"}) for i in range(3)]
+        for i, cmd in enumerate(cmds):
+            cmd["id"] = i + 1
+        mock_execute.side_effect = [cmds, None]
+        result = get_pending_instructions(self._SID)
+        assert len(result) == 3
+        # The UPDATE call should have received list of 3 IDs
+        update_params = mock_execute.call_args_list[1][0][1]
+        assert len(update_params[0]) == 3

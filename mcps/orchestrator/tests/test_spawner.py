@@ -105,7 +105,8 @@ class TestConfigGeneration:
         importlib.reload(spawner_mod)
 
         config_path = spawner_mod._generate_agent_config(
-            "test-session-001", "dev", ["lina-fs-safe", "lina-github"]
+            "test-session-001", "dev", ["lina-fs-safe", "lina-github"],
+            {"max_runtime_minutes": 30},
         )
 
         assert config_path.exists()
@@ -134,7 +135,8 @@ class TestConfigGeneration:
         importlib.reload(spawner_mod)
 
         config_path = spawner_mod._generate_agent_config(
-            "test-session-002", "research", ["lina-db"]
+            "test-session-002", "research", ["lina-db"],
+            {"max_runtime_minutes": 15},
         )
         generated = yaml.safe_load(config_path.read_text())
         extensions = generated["extensions"]
@@ -155,7 +157,7 @@ class TestConfigGeneration:
         importlib.reload(spawner_mod)
 
         with pytest.raises(FileNotFoundError, match="Config base de goosed"):
-            spawner_mod._generate_agent_config("test-003", "dev", [])
+            spawner_mod._generate_agent_config("test-003", "dev", [], {"max_runtime_minutes": 30})
 
 
 class TestSpawnerServiceSpawn:

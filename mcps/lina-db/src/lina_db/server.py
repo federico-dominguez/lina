@@ -27,6 +27,8 @@ Herramientas expuestas:
     list_running_agents      — lista sub-agentes activos o todos (issue #83)
     append_agent_event       — añade evento al log inmutable de un agente (issue #83)
     send_agent_command       — envía comando al buzón de un sub-agente (issue #83)
+    list_agent_events        — devuelve el log de eventos de un sub-agente (issue #88)
+    get_pending_instructions — lee y ackea instrucciones pendientes de un sub-agente (issue #90)
 
 Variables de entorno:
     LINA_DB_URL              URL de conexión (default: postgresql://lina:lina_dev@localhost:5432/lina)
@@ -1312,6 +1314,96 @@ def send_agent_command(session_id: str, kind: str, args: dict | None = None) -> 
 
 
 # ─── entrypoint ───────────────────────────────────────────────────────────────
+
+
+@mcp.tool()
+def list_agent_events(session_id: str, limit: int = 50) -> list[dict]:
+    """Devuelve el log de eventos de un sub-agente (más recientes primero).
+
+    Permite a LINA ver qué hizo un sub-agente: herramientas llamadas,
+    errores, hitos y resultado final. Es la forma principal de obtener
+    feedback de un sub-agente después de que terminó su tarea.
+
+    Args:
+        session_id: UUID hexadecimal de la sesión del sub-agente.
+        limit:      máximo de eventos a devolver (default 50, max 200).
+
+    Returns:
+        Lista de dicts {id, kind, payload, ts}, más recientes primero.
+    """
+    if not session_id or not session_id.strip():
+        raise ValueError("session_id no puede estar vacío")
+    limit = max(1, min(limit, 200))
+
+    rows = _execute(
+        """SELECT id, kind, payload_json, ts
+           FROM agent_events
+           WHERE session_id = %s
+           ORDER BY ts DESC
+           LIMIT %s""",
+        (session_id, limit),
+        fetch="all",
+    )
+    _audit("list_agent_events", {"session_id": session_id, "limit": limit}, "ok")
+    return [
+        {
+            "id": row["id"],
+            "kind": row["kind"],
+            "payload": row["payload_json"],
+            "ts": row["ts"].isoformat() if row.get("ts") else None,
+        }
+        for row in (rows or [])
+    ]
+
+
+@mcp.tool()
+def get_pending_instructions(session_id: str) -> list[dict]:
+    """Lee las instrucciones pendientes para un sub-agente y las marca como leídas.
+
+    El sub-agente llama esto al inicio de cada turno para recibir comandos
+    enviados por LINA vía send_agent_command(kind='send_instruction').
+    Cada instrucción se marca con ack_at = NOW() para evitar re-entregas.
+
+    Args:
+        session_id: UUID hexadecimal de la sesión activa del sub-agente.
+
+    Returns:
+        Lista de dicts {id, kind, args, sent_at}, más antiguas primero.
+        Lista vacía si no hay instrucciones pendientes.
+    """
+    if not session_id or not session_id.strip():
+        raise ValueError("session_id no puede estar vacío")
+
+    rows = _execute(
+        """SELECT id, kind, args_json, sent_at
+           FROM agent_commands
+           WHERE session_id = %s AND ack_at IS NULL AND kind = 'send_instruction'
+           ORDER BY sent_at ASC""",
+        (session_id,),
+        fetch="all",
+    )
+    if not rows:
+        return []
+
+    ids = [row["id"] for row in rows]
+    _execute(
+        "UPDATE agent_commands SET ack_at = NOW() WHERE id = ANY(%s)",
+        (ids,),
+    )
+    _audit(
+        "get_pending_instructions",
+        {"session_id": session_id, "count": len(ids)},
+        "ok",
+    )
+    return [
+        {
+            "id": row["id"],
+            "kind": row["kind"],
+            "args": row["args_json"],
+            "sent_at": row["sent_at"].isoformat() if row.get("sent_at") else None,
+        }
+        for row in rows
+    ]
 
 
 def main() -> None:

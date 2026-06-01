@@ -28,9 +28,9 @@ roles:
       - lina-gitlab
       - lina-db
     sudo_allowed: false
-    max_runtime_minutes: 30
-    max_tokens_per_run: 50000
-    max_usd_per_day: 2.0
+    max_runtime_minutes: 120
+    max_tokens_per_run: 200000
+    max_usd_per_day: 10.0
     needs_approval_for:
       - git_push_to_main
       - pr_merge
@@ -87,4 +87,50 @@ roles:
     max_runtime_minutes: 15
     max_tokens_per_run: 40000
     max_usd_per_day: 1.5
+    needs_approval_for: []
+
+  reviewer:
+    description: >
+      Subagente de code review: lee código, analiza PRs y deja comentarios.
+      Solo lectura de filesystem y GitHub. Sin shell, sin push.
+    allowed_mcps:
+      - lina-fs-safe
+      - lina-github
+      - lina-db
+    sudo_allowed: false
+    max_runtime_minutes: 30
+    max_tokens_per_run: 80000
+    max_usd_per_day: 3.0
+    needs_approval_for:
+      - pr_approve
+      - pr_merge
+
+  tester:
+    description: >
+      Subagente de testing: corre la suite de tests, reporta cobertura y fallas.
+      Puede escribir archivos de test pero no hace commits ni push.
+    allowed_mcps:
+      - lina-fs-safe
+      - lina-shell-policy
+      - lina-db
+    sudo_allowed: false
+    max_runtime_minutes: 45
+    max_tokens_per_run: 60000
+    max_usd_per_day: 2.0
+    needs_approval_for:
+      - file_delete
+
+  analyst:
+    description: >
+      Subagente de análisis: examina logs, métricas y código para generar reportes.
+      Solo lectura. Sin shell ni escritura de archivos.
+    allowed_mcps:
+      - lina-fs-safe
+      - lina-github
+      - lina-gitlab
+      - lina-db
+    sudo_allowed: false
+    max_runtime_minutes: 20
+    max_tokens_per_run: 60000
+    max_usd_per_day: 2.0
     needs_approval_for: []

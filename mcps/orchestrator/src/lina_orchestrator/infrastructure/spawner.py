@@ -155,11 +155,36 @@ def _db_append_event(session_id: str, kind: str, payload: dict | None = None) ->
 # ─── Config generation ────────────────────────────────────────────────────────
 
 
-def _generate_agent_config(session_id: str, role: str, allowed_mcps: list[str]) -> Path:
+def _build_system_prompt(role: str, goal: str, session_id: str) -> str:
+    """Genera el system prompt del sub-agente con contexto de rol y objetivo."""
+    return (
+        f"Sos un sub-agente de LINA con rol '{role}'.\n"
+        f"Tu session_id de agente es: {session_id}\n\n"
+        f"OBJETIVO DE ESTA SESIÓN:\n{goal}\n\n"
+        "INSTRUCCIONES OPERACIONALES:\n"
+        "- Al completar el objetivo, llamá update_agent_status() del MCP lina-db "
+        "con result_summary describiendo qué hiciste.\n"
+        "- Usá append_agent_event() para loguear hitos importantes "
+        "(ej: 'tests_passed', 'pr_created').\n"
+        "- Consultá get_pending_instructions() al inicio de cada turno para "
+        "recibir instrucciones adicionales de LINA.\n"
+        "- No pedís confirmación humana salvo para acciones en needs_approval_for.\n"
+        "- Si encontrás un bloqueante insalvable, llamá update_agent_status() con "
+        "status='failed' y describí el problema en result_summary."
+    )
+
+
+def _generate_agent_config(
+    session_id: str,
+    role: str,
+    allowed_mcps: list[str],
+    role_policy: dict,
+) -> Path:
     """Genera una config temporal de goosed con solo los MCPs permitidos para el rol.
 
     Lee la config base del container y filtra las extensiones según allowed_mcps.
-    Los built-ins siempre se incluyen.
+    Los built-ins siempre se incluyen. Sobrescribe GOOSE_MAX_TURNS con el límite
+    del rol para evitar que el sub-agente corra indefinidamente.
 
     Returns:
         Path al archivo YAML temporal creado.
@@ -186,17 +211,20 @@ def _generate_agent_config(session_id: str, role: str, allowed_mcps: list[str]) 
     }
     base["extensions"] = filtered_extensions
 
-    # Añadir metadatos del sub-agente como comentario en YAML es complejo;
-    # se usan env vars que goosed expone al agente.
+    # Limitar turns al máximo del rol (≈1 turn/40s; mínimo 20)
+    max_runtime: int = role_policy.get("max_runtime_minutes", 30)
+    base["GOOSE_MAX_TURNS"] = max(20, int(max_runtime * 1.5))
+
     config_path = _AGENT_CONFIG_DIR / f"agent-{session_id}.yaml"
     with config_path.open("w") as f:
         yaml.dump(base, f, default_flow_style=False, allow_unicode=True)
 
     log.info(
-        "config generada para %s (role=%s, mcps=%d, path=%s)",
+        "config generada para %s (role=%s, mcps=%d, max_turns=%d, path=%s)",
         session_id,
         role,
         len(allowed_mcps),
+        base["GOOSE_MAX_TURNS"],
         config_path,
     )
     return config_path
@@ -258,18 +286,21 @@ class SpawnerService:
         _db_append_event(session_id, "spawn_requested", {"role": role, "goal": goal[:200]})
 
         # 4. Generar config temporal
-        config_path = _generate_agent_config(session_id, role, allowed_mcps)
+        config_path = _generate_agent_config(session_id, role, allowed_mcps, role_policy)
 
         # 5. Lanzar proceso
         env = os.environ.copy()
         env["LINA_AGENT_SESSION_ID"] = session_id
         env["LINA_AGENT_ROLE"] = role
+        env["LINA_AGENT_GOAL"] = goal
+        env["GOOSE_SYSTEM_PROMPT"] = _build_system_prompt(role, goal, session_id)
 
         cmd = [
             _GOOSED_BIN,
             "run",
             "--config",
             str(config_path),
+            "--text", goal,
         ]
 
         log.info("spawning agent %s (role=%s) cmd=%s", session_id, role, cmd)
