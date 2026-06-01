@@ -303,7 +303,8 @@ class SpawnerService:
         if not row:
             return {"agent_id": agent_id, "killed": False, "message": "sesión no encontrada"}
         if row["status"] not in ("pending", "running"):
-            return {"agent_id": agent_id, "killed": False, "message": f"ya terminado ({row['status']})"}
+            msg = f"ya terminado ({row['status']})"
+            return {"agent_id": agent_id, "killed": False, "message": msg}
 
         _db_update_status(agent_id, "killed")
         _db_append_event(agent_id, "kill_requested", {"by": "orchestrator"})
