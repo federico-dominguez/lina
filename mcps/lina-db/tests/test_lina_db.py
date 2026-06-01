@@ -260,6 +260,9 @@ class TestConn:
 
         mock_connect = MagicMock()
         monkeypatch.setattr(psycopg2, "connect", mock_connect)
+        # register_vector necesita una conexión real con pgvector instalado;
+        # en CI no hay PostgreSQL, así que lo mocking.
+        monkeypatch.setattr("lina_db.server.register_vector", MagicMock())
         from lina_db.server import _conn
 
         _conn()
