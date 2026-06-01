@@ -42,7 +42,15 @@ COMMENT ON COLUMN agent_sessions.pid IS
 --       tool_called | error | instruction_received | instruction_ack
 CREATE TABLE IF NOT EXISTS agent_events (
     id              BIGSERIAL   PRIMARY KEY,
+<<<<<<< HEAD
     session_id      TEXT        NOT NULL REFERENCES agent_sessions(id) ON DELETE RESTRICT,
+=======
+    session_id      TEXT        NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    kind            TEXT        NOT NULL,
+    payload_json    JSONB,
+    ts              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+>>>>>>> d022f79 (feat(#83,#84,#85): agent control plane — schema, spawner, orchestrator tools)
 
 CREATE INDEX IF NOT EXISTS idx_aevt_session   ON agent_events (session_id, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_aevt_kind      ON agent_events (kind);
@@ -56,7 +64,13 @@ COMMENT ON TABLE agent_events IS
 -- kind: pause | resume | kill | send_instruction | set_budget
 CREATE TABLE IF NOT EXISTS agent_commands (
     id              BIGSERIAL   PRIMARY KEY,
+<<<<<<< HEAD
     session_id      TEXT        NOT NULL REFERENCES agent_sessions(id) ON DELETE RESTRICT,
+=======
+    session_id      TEXT        NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    kind            TEXT        NOT NULL,
+    args_json       JSONB,
+>>>>>>> d022f79 (feat(#83,#84,#85): agent control plane — schema, spawner, orchestrator tools)
     sent_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     ack_at          TIMESTAMPTZ             -- NULL = pendiente de ACK
 );
@@ -102,6 +116,7 @@ ORDER BY created_at DESC;
 
 COMMENT ON VIEW agent_sessions_active IS
     'Agentes en estado pending o running — para /agents dashboard de Telegram.';
+<<<<<<< HEAD
 
 -- ─── Corregir ON DELETE CASCADE → RESTRICT en tablas ya aplicadas ─────────────
 -- Las FKs originales usaban CASCADE; las reemplazamos por RESTRICT para preservar
@@ -117,3 +132,5 @@ ALTER TABLE agent_commands
 ALTER TABLE agent_commands
     ADD CONSTRAINT agent_commands_session_id_fkey
         FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE RESTRICT;
+=======
+>>>>>>> d022f79 (feat(#83,#84,#85): agent control plane — schema, spawner, orchestrator tools)
