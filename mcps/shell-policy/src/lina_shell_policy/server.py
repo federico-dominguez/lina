@@ -13,6 +13,7 @@ Política:
 Tools:
     - sh_run(command, cwd=None, timeout=None, allow_sudo=False)
     - sh_explain(command) → devuelve qué haría la policy sin ejecutar.
+    - reload_mcp(name) → restart container MCP sin reiniciar goosed.
 """
 
 from __future__ import annotations
@@ -25,6 +26,9 @@ import re
 import shlex
 import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -220,6 +224,124 @@ def sh_which(binary: str) -> str | None:
 def sh_quote(args: list[str]) -> str:
     """Devuelve un string shell-safe a partir de una lista de argumentos."""
     return shlex.join(args)
+
+
+# ─── reload_mcp ───────────────────────────────────────────────────────────────
+# Mapping estático: nombre-mcp → (servicio-docker, url-health)
+# Fuente de verdad: config/mcp-registry.yaml + deploy/lina-deploy.sh ALLOWED_SERVICES
+_RELOADABLE_MCPS: dict[str, tuple[str, str]] = {
+    "lina-secrets": ("lina-mcp-secrets", "http://localhost:8101/"),
+    "lina-fs-safe": ("lina-mcp-fs-safe", "http://localhost:8102/"),
+    "lina-shell-policy": ("lina-mcp-shell-policy", "http://localhost:8103/"),
+    "lina-systemd-user": ("lina-mcp-systemd-user", "http://localhost:8104/"),
+    "lina-moodle": ("lina-mcp-moodle", "http://localhost:8105/"),
+    "lina-db": ("lina-mcp-db", "http://localhost:8106/"),
+    "lina-gitlab": ("lina-mcp-gitlab", "http://localhost:8107/"),
+    "lina-github": ("lina-mcp-github", "http://localhost:8108/"),
+    "lina-gcalendar": ("lina-mcp-gcalendar", "http://localhost:8109/"),
+}
+
+_LINA_DEPLOY = os.environ.get("LINA_DEPLOY_BIN", "/usr/local/bin/lina-deploy")
+_RELOAD_HEALTH_TIMEOUT = int(os.environ.get("LINA_RELOAD_HEALTH_TIMEOUT", "30"))
+
+
+def _wait_for_health(url: str, timeout_s: int = _RELOAD_HEALTH_TIMEOUT) -> bool:
+    """Sondea url hasta que responde (cualquier código HTTP) o expira timeout."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            urllib.request.urlopen(url, timeout=2)  # noqa: S310 — URL local controlada
+            return True
+        except urllib.error.HTTPError:
+            # HTTPError = servidor responde (aunque sea 4xx/5xx) → está up
+            return True
+        except (urllib.error.URLError, OSError):
+            time.sleep(1)
+    return False
+
+
+@mcp.tool()
+def reload_mcp(name: str, health_timeout: int = _RELOAD_HEALTH_TIMEOUT) -> dict:
+    """Recarga un MCP container sin reiniciar goosed.
+
+    Funciona porque los MCPs usan transporte streamable-http (por-request):
+    goosed no mantiene conexión persistente → restart del container es
+    transparente para la próxima tool call.
+
+    Argumentos:
+        name:           nombre del MCP (ej: "lina-fs-safe", "lina-db")
+        health_timeout: segundos máximos esperando que el container levante (default 30)
+
+    Retorna:
+        {success, name, service, health_url, duration_seconds, error?}
+
+    Prerrequisitos:
+        - LINA_SHELL_ALLOW_SUDO=1 en el entorno del proceso
+        - lina-deploy instalado en /usr/local/bin/lina-deploy
+    """
+    if name not in _RELOADABLE_MCPS:
+        known = ", ".join(sorted(_RELOADABLE_MCPS))
+        return {
+            "success": False,
+            "name": name,
+            "error": f"MCP desconocido: '{name}'. Conocidos: {known}",
+        }
+
+    if not ALLOW_SUDO_ENV:
+        return {
+            "success": False,
+            "name": name,
+            "error": "LINA_SHELL_ALLOW_SUDO=1 requerido para reload_mcp",
+        }
+
+    service, health_url = _RELOADABLE_MCPS[name]
+    t0 = time.monotonic()
+    log.info("reload_mcp: restart %s via lina-deploy", service)
+
+    try:
+        proc = subprocess.run(  # noqa: S603 — lista explícita, sin shell=True
+            ["sudo", _LINA_DEPLOY, "restart", service],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "name": name,
+            "service": service,
+            "error": "lina-deploy restart timeout (60s)",
+        }
+    except FileNotFoundError:
+        return {
+            "success": False,
+            "name": name,
+            "service": service,
+            "error": f"lina-deploy no encontrado en {_LINA_DEPLOY}",
+        }
+
+    if proc.returncode != 0:
+        return {
+            "success": False,
+            "name": name,
+            "service": service,
+            "error": f"lina-deploy exit {proc.returncode}: {proc.stderr.strip()}",
+        }
+
+    # Esperar a que el container responda
+    eff_timeout = min(int(health_timeout), 120)
+    healthy = _wait_for_health(health_url, eff_timeout)
+    duration = round(time.monotonic() - t0, 2)
+
+    log.info("reload_mcp: %s %s en %.1fs", service, "OK" if healthy else "TIMEOUT", duration)
+    return {
+        "success": healthy,
+        "name": name,
+        "service": service,
+        "health_url": health_url,
+        "duration_seconds": duration,
+        **({"error": f"health check timeout tras {eff_timeout}s"} if not healthy else {}),
+    }
 
 
 def main() -> None:
