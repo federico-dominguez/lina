@@ -1,0 +1,33 @@
+version: "1.0.0"
+title: "Delegar análisis de código a sub-agente analyst"
+description: |
+  Spawna un sub-agente con rol 'analyst' para analizar código, coverage,
+  issues o métricas y reportar hallazgos. Solo lectura — no modifica nada.
+
+  Uso: Revisar cobertura de tests, analizar deuda técnica, auditar issues
+  abiertos, comparar implementaciones.
+
+parameters:
+  goal:
+    description: "Qué analizar y qué preguntas responder. Ser específico."
+    required: true
+
+instructions: |
+  ## Proceso de análisis delegado
+
+  1. **Spawneá el agente** llamando a `spawn_agent` del MCP lina-orchestrator:
+     - role: "analyst"
+     - goal: el goal con contexto completo. El analista debe saber:
+       - Qué revisar (archivos, módulos, issues)
+       - Qué preguntas responder
+       - Cómo reportar: "Guardá el reporte en lina-db con store_memory(key='analysis-<topic>', value=<reporte>)"
+
+  2. **Reportá el inicio** a Federico:
+     ```
+     🔍 Sub-agente analyst spawneado
+     ID: <agent_id>
+     Análisis: <resumen de 1 línea>
+     ```
+
+  3. **Al completar**, leer el resultado con `get_memory(key='analysis-<topic>')`
+     y presentarlo a Federico de forma estructurada.
