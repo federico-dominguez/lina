@@ -28,6 +28,9 @@ instructions: |
        - Contexto del repo (rama main, estructura relevante)
        - Criterios de éxito (tests que deben pasar, cobertura mínima, etc.)
        - Si hay issue_ref: "Al completar, creá o actualizá PR que cierre {{issue_ref}}"
+       - El system prompt del spawner ya incluye la instrucción de polling. El
+         sub-agente llamará `get_pending_instructions()` al inicio de cada turno
+         para recibir instrucciones adicionales (ver recipe `subagent-poll.yaml`).
 
   3. **Reportá el inicio** a Federico:
      ```
