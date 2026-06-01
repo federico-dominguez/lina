@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any
 
 import psycopg2
@@ -1115,6 +1116,12 @@ def create_agent_session(session_id: str, role: str, goal: str) -> dict:
     """
     if not session_id.strip():
         raise ValueError("session_id no puede estar vacío")
+    # Validar formato: UUID hex de 32 chars lowercase (sin guiones).
+    # session_id forma parte del canal NOTIFY/LISTEN: agent_cmd_<session_id>
+    if not re.fullmatch(r"[0-9a-f]{32}", session_id):
+        raise ValueError(
+            f"session_id debe ser un UUID hex de 32 chars lowercase sin guiones: {session_id!r}"
+        )
     if not role.strip():
         raise ValueError("role no puede estar vacío")
     if not goal.strip():

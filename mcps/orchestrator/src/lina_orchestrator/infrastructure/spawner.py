@@ -279,8 +279,9 @@ class SpawnerService:
                 cmd,
                 env=env,
                 stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
             )
         except FileNotFoundError as exc:
             _db_update_status(session_id, "failed", result_summary=f"goosed not found: {exc}")
@@ -348,11 +349,16 @@ class SpawnerService:
             pid = row["pid"]
             if pid:
                 try:
-                    os.kill(pid, signal.SIGTERM)
-                except ProcessLookupError:
+                    # pid == pgid cuando start_new_session=True
+                    os.killpg(pid, signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
                     pass  # proceso ya muerto
         else:
-            proc.terminate()
+            # proc.pid == pgid cuando start_new_session=True
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
 
         # Grace period
         try:
@@ -364,11 +370,14 @@ class SpawnerService:
                 time.sleep(min(_KILL_GRACE_SECONDS, 2))
         except subprocess.TimeoutExpired:
             if proc is not None:
-                proc.kill()
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
             elif pid := locals().get("pid"):
                 try:
-                    os.kill(pid, signal.SIGKILL)
-                except ProcessLookupError:
+                    os.killpg(pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
                     pass
 
         # Cleanup
@@ -424,7 +433,23 @@ class SpawnerService:
                 del self._processes[agent_id]
                 self._cleanup_config(agent_id)
         else:
-            process_alive = False
+            # proc no está en memoria — reconciliar con os.kill(pid, 0)
+            pid = result.get("pid")
+            if pid and result["status"] == "running":
+                try:
+                    os.kill(pid, 0)  # signal 0: solo verifica si el proceso existe
+                    process_alive = True
+                except ProcessLookupError:
+                    process_alive = False
+                    _db_update_status(
+                        agent_id, "failed", result_summary="process_not_found_on_reconcile"
+                    )
+                    _db_append_event(agent_id, "process_ended", {"reason": "not_found_by_os_kill"})
+                    result["status"] = "failed"
+                except PermissionError:
+                    process_alive = True
+            else:
+                process_alive = False
 
         result["process_alive"] = process_alive
         if result.get("started_at"):

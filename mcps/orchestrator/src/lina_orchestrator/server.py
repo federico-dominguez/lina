@@ -272,8 +272,6 @@ def send_instruction(agent_id: str, text: str) -> dict:
         {command_id, agent_id, kind, sent_at}
     """
     try:
-        import json as _json  # noqa: PLC0415
-
         import psycopg2.extras as _pge  # noqa: PLC0415
 
         from lina_orchestrator.infrastructure.spawner import (  # noqa: PLC0415
@@ -287,7 +285,7 @@ def send_instruction(agent_id: str, text: str) -> dict:
                 cur.execute(
                     "INSERT INTO agent_commands (session_id, kind, args_json)"
                     " VALUES (%s, %s, %s) RETURNING id, sent_at",
-                    (agent_id, "send_instruction", _json.dumps({"text": text})),
+                    (agent_id, "send_instruction", _pge.Json({"text": text})),
                 )
                 row = dict(cur.fetchone())
             conn.commit()

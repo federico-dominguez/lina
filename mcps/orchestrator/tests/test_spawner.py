@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib
 import textwrap
 import types
+from datetime import UTC
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -86,7 +87,11 @@ class TestConfigGeneration:
     """Tests para _generate_agent_config (no requiere DB ni proceso)."""
 
     def test_filters_mcps_by_role(
-        self, tmp_policies: Path, tmp_base_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """La config generada para 'dev' solo incluye MCPs permitidos por el rol."""
         import yaml
@@ -179,7 +184,11 @@ class TestSpawnerServiceSpawn:
         return spawner_mod.SpawnerService(service), spawner_mod
 
     def test_spawn_returns_agent_id_and_pid(
-        self, tmp_policies: Path, tmp_base_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """spawn() devuelve agent_id, pid y status=running."""
         spawner, spawner_mod = self._make_spawner(
@@ -204,18 +213,24 @@ class TestSpawnerServiceSpawn:
         assert result["role"] == "dev"
 
     def test_spawn_unknown_role_returns_error(
-        self, tmp_policies: Path, tmp_base_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """spawn() con rol desconocido devuelve error sin llamar a Popen."""
-        spawner, _ = self._make_spawner(
-            tmp_policies, tmp_base_config, tmp_path, monkeypatch
-        )
+        spawner, _ = self._make_spawner(tmp_policies, tmp_base_config, tmp_path, monkeypatch)
 
         with pytest.raises(ValueError, match="Rol desconocido"):
             spawner.spawn("nonexistent", "goal")
 
     def test_spawn_goosed_not_found(
-        self, tmp_policies: Path, tmp_base_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Si goosed no está en PATH, spawn() lanza RuntimeError."""
         spawner, spawner_mod = self._make_spawner(
@@ -236,7 +251,11 @@ class TestSpawnerServiceKill:
     """Tests para SpawnerService.kill()."""
 
     def test_kill_running_process(
-        self, tmp_policies: Path, tmp_base_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """kill() sobre un proceso en _processes devuelve killed=True."""
         monkeypatch.setenv("LINA_BASE_GOOSE_CONFIG", str(tmp_base_config))
@@ -269,11 +288,15 @@ class TestSpawnerServiceKill:
             result = spawner.kill(agent_id)
 
         assert result["killed"] is True
-        mock_proc.terminate.assert_called_once()
+        # proc.terminate() was replaced by os.killpg — verify kill() succeeded
         assert agent_id not in spawner._processes
 
     def test_kill_unknown_agent(
-        self, tmp_policies: Path, tmp_base_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """kill() de agente desconocido (sin proceso en memoria y sin DB) devuelve killed=False."""
         monkeypatch.setenv("LINA_BASE_GOOSE_CONFIG", str(tmp_base_config))
@@ -359,17 +382,13 @@ class TestServerSpawnTool:
         assert result.get("status") == "running"
         assert "agent_id" in result
 
-    def test_spawn_agent_unknown_role(
-        self, reloaded_server_with_spawner: types.ModuleType
-    ) -> None:
+    def test_spawn_agent_unknown_role(self, reloaded_server_with_spawner: types.ModuleType) -> None:
         """spawn_agent() con rol inválido devuelve {"error": ...}."""
         srv = reloaded_server_with_spawner
         result = srv.spawn_agent("superadmin", "goal")
         assert "error" in result
 
-    def test_kill_agent_not_found(
-        self, reloaded_server_with_spawner: types.ModuleType
-    ) -> None:
+    def test_kill_agent_not_found(self, reloaded_server_with_spawner: types.ModuleType) -> None:
         """kill_agent() de agente desconocido devuelve killed=False."""
         srv = reloaded_server_with_spawner
 
@@ -415,3 +434,382 @@ class TestServerSpawnTool:
             result = srv.send_instruction("agent-abc", "nueva instrucción")
 
         assert "error" in result
+
+
+# ─── DB helpers unit tests ────────────────────────────────────────────────────
+
+
+class TestDbHelpers:
+    """Tests directos de los helpers de DB (cobertura de líneas 93-152)."""
+
+    def test_db_conn_calls_psycopg2(
+        self, tmp_policies: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+
+        import lina_orchestrator.infrastructure.spawner as spawner_mod
+
+        importlib.reload(spawner_mod)
+
+        mock_conn = MagicMock()
+        with patch("psycopg2.connect", return_value=mock_conn) as mock_connect:
+            conn = spawner_mod._db_conn()
+        mock_connect.assert_called_once()
+        assert conn is mock_conn
+
+    def test_db_create_session(self, tmp_policies: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        import lina_orchestrator.infrastructure.spawner as spawner_mod
+
+        importlib.reload(spawner_mod)
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        mock_conn.cursor.return_value = mock_cursor
+
+        with patch("psycopg2.connect", return_value=mock_conn):
+            spawner_mod._db_create_session("testid123", "dev", "goal text")
+
+        mock_cursor.execute.assert_called_once()
+        sql = mock_cursor.execute.call_args[0][0]
+        assert "INSERT INTO agent_sessions" in sql
+
+    def test_db_update_status_running(
+        self, tmp_policies: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import lina_orchestrator.infrastructure.spawner as spawner_mod
+
+        importlib.reload(spawner_mod)
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        mock_conn.cursor.return_value = mock_cursor
+
+        with patch("psycopg2.connect", return_value=mock_conn):
+            spawner_mod._db_update_status("testid123", "running", pid=999)
+
+        sql = mock_cursor.execute.call_args[0][0]
+        assert "started_at" in sql
+
+    def test_db_update_status_terminal(
+        self, tmp_policies: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import lina_orchestrator.infrastructure.spawner as spawner_mod
+
+        importlib.reload(spawner_mod)
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        mock_conn.cursor.return_value = mock_cursor
+
+        with patch("psycopg2.connect", return_value=mock_conn):
+            spawner_mod._db_update_status("testid123", "completed", result_summary="done")
+
+        sql = mock_cursor.execute.call_args[0][0]
+        assert "ended_at" in sql
+
+    def test_db_append_event(self, tmp_policies: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        import lina_orchestrator.infrastructure.spawner as spawner_mod
+
+        importlib.reload(spawner_mod)
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        mock_conn.cursor.return_value = mock_cursor
+
+        with patch("psycopg2.connect", return_value=mock_conn):
+            spawner_mod._db_append_event("testid123", "heartbeat", {"ping": True})
+
+        sql = mock_cursor.execute.call_args[0][0]
+        assert "INSERT INTO agent_events" in sql
+
+
+# ─── SpawnerService.get_status tests ─────────────────────────────────────────
+
+
+def _make_spawner_for_status(
+    tmp_policies: Path,
+    tmp_base_config: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("LINA_BASE_GOOSE_CONFIG", str(tmp_base_config))
+    monkeypatch.setenv("LINA_AGENT_CONFIG_DIR", str(tmp_path / "agents"))
+
+    import lina_orchestrator.infrastructure.spawner as spawner_mod
+
+    importlib.reload(spawner_mod)
+
+    from lina_orchestrator.application.policy_service import PolicyService
+    from lina_orchestrator.domain.policy import PolicyStore
+
+    store = PolicyStore.from_yaml(tmp_policies)
+    service = PolicyService(store)
+    return spawner_mod.SpawnerService(service), spawner_mod
+
+
+class TestSpawnerGetStatus:
+    def _mock_conn(self, row):
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_cursor.fetchone.return_value = row
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        mock_conn.cursor.return_value = mock_cursor
+        return mock_conn
+
+    def test_session_not_found(
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        spawner, spawner_mod = _make_spawner_for_status(
+            tmp_policies, tmp_base_config, tmp_path, monkeypatch
+        )
+        mock_conn = self._mock_conn(None)
+        with patch.object(spawner_mod, "_db_conn", return_value=mock_conn):
+            result = spawner.get_status("nonexistent")
+        assert "error" in result
+
+    def test_status_running_process_alive(
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from datetime import datetime
+
+        spawner, spawner_mod = _make_spawner_for_status(
+            tmp_policies, tmp_base_config, tmp_path, monkeypatch
+        )
+        agent_id = "cafebabe" * 4
+
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None  # still running
+        spawner._processes[agent_id] = mock_proc
+
+        row = {
+            "id": agent_id,
+            "role": "dev",
+            "goal": "work",
+            "status": "running",
+            "pid": 12345,
+            "started_at": datetime.now(tz=UTC),
+            "elapsed_seconds": 100,
+        }
+        mock_conn = self._mock_conn(row)
+        with patch.object(spawner_mod, "_db_conn", return_value=mock_conn):
+            result = spawner.get_status(agent_id)
+
+        assert result["process_alive"] is True
+        assert result["status"] == "running"
+
+    def test_status_running_process_died(
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from datetime import datetime
+
+        spawner, spawner_mod = _make_spawner_for_status(
+            tmp_policies, tmp_base_config, tmp_path, monkeypatch
+        )
+        agent_id = "deadbeef" * 4
+
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = 0  # exited with code 0
+        spawner._processes[agent_id] = mock_proc
+
+        row = {
+            "id": agent_id,
+            "role": "dev",
+            "goal": "work",
+            "status": "running",
+            "pid": 99,
+            "started_at": datetime.now(tz=UTC),
+            "elapsed_seconds": 200,
+        }
+        mock_conn = self._mock_conn(row)
+        with (
+            patch.object(spawner_mod, "_db_conn", return_value=mock_conn),
+            patch.object(spawner_mod, "_db_update_status"),
+            patch.object(spawner_mod, "_db_append_event"),
+        ):
+            result = spawner.get_status(agent_id)
+
+        assert result["process_alive"] is False
+        assert result["status"] == "completed"
+        assert agent_id not in spawner._processes
+
+    def test_status_process_not_in_memory_alive_via_os_kill(
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Si el proc no está en memoria pero os.kill(pid, 0) no lanza, está vivo."""
+        import os as _os
+        from datetime import datetime
+
+        spawner, spawner_mod = _make_spawner_for_status(
+            tmp_policies, tmp_base_config, tmp_path, monkeypatch
+        )
+        agent_id = "aabbccdd" * 4
+
+        row = {
+            "id": agent_id,
+            "role": "dev",
+            "goal": "work",
+            "status": "running",
+            "pid": 77777,
+            "started_at": datetime.now(tz=UTC),
+            "elapsed_seconds": 50,
+        }
+        mock_conn = self._mock_conn(row)
+        # Parchar os.kill en el namespace del módulo spawner (no globalmente)
+        mock_os = MagicMock(spec=_os)
+        mock_os.kill.return_value = None  # no lanza → proceso vivo
+        monkeypatch.setattr(spawner_mod, "os", mock_os)
+        with patch.object(spawner_mod, "_db_conn", return_value=mock_conn):
+            result = spawner.get_status(agent_id)
+
+        assert result["process_alive"] is True
+        assert result["status"] == "running"
+
+    def test_status_process_not_in_memory_dead_via_os_kill(
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Si el proc no está en memoria y os.kill(pid, 0) lanza, está muerto."""
+        import os as _os
+        from datetime import datetime
+
+        spawner, spawner_mod = _make_spawner_for_status(
+            tmp_policies, tmp_base_config, tmp_path, monkeypatch
+        )
+        agent_id = "11223344" * 4
+
+        row = {
+            "id": agent_id,
+            "role": "dev",
+            "goal": "work",
+            "status": "running",
+            "pid": 88888,
+            "started_at": datetime.now(tz=UTC),
+            "elapsed_seconds": 10,
+        }
+        mock_conn = self._mock_conn(row)
+        mock_os = MagicMock(spec=_os)
+        mock_os.kill.side_effect = ProcessLookupError  # proceso muerto
+        monkeypatch.setattr(spawner_mod, "os", mock_os)
+        with (
+            patch.object(spawner_mod, "_db_conn", return_value=mock_conn),
+            patch.object(spawner_mod, "_db_update_status"),
+            patch.object(spawner_mod, "_db_append_event"),
+        ):
+            result = spawner.get_status(agent_id)
+
+        assert result["process_alive"] is False
+        assert result["status"] == "failed"
+
+
+# ─── SpawnerService.kill timeout test ────────────────────────────────────────
+
+
+class TestSpawnerKillTimeout:
+    def test_kill_sends_sigkill_on_timeout(
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Si el proceso no termina en el grace period, se envía SIGKILL al grupo."""
+        import os as _os
+        import subprocess
+
+        monkeypatch.setenv("LINA_BASE_GOOSE_CONFIG", str(tmp_base_config))
+        monkeypatch.setenv("LINA_AGENT_CONFIG_DIR", str(tmp_path / "agents"))
+
+        import lina_orchestrator.infrastructure.spawner as spawner_mod
+
+        importlib.reload(spawner_mod)
+
+        from lina_orchestrator.application.policy_service import PolicyService
+        from lina_orchestrator.domain.policy import PolicyStore
+
+        store = PolicyStore.from_yaml(tmp_policies)
+        service = PolicyService(store)
+        spawner = spawner_mod.SpawnerService(service)
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 55555
+        mock_proc.wait.side_effect = subprocess.TimeoutExpired(cmd="goosed", timeout=5)
+        agent_id = "ffffffff" * 4
+        spawner._processes[agent_id] = mock_proc
+
+        # Parchar os.killpg en el namespace del módulo spawner
+        mock_os = MagicMock(spec=_os)
+        mock_os.killpg.return_value = None
+        monkeypatch.setattr(spawner_mod, "os", mock_os)
+
+        with (
+            patch.object(spawner_mod, "_db_update_status"),
+            patch.object(spawner_mod, "_db_append_event"),
+        ):
+            result = spawner.kill(agent_id)
+
+        assert result["killed"] is True
+        # SIGKILL fue enviado al grupo del proceso
+        sigkill = spawner_mod.signal.SIGKILL
+        mock_os.killpg.assert_any_call(mock_proc.pid, sigkill)
+
+    def test_cleanup_config_removes_file(
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """_cleanup_config() borra el archivo de configuración temporal."""
+        monkeypatch.setenv("LINA_BASE_GOOSE_CONFIG", str(tmp_base_config))
+        monkeypatch.setenv("LINA_AGENT_CONFIG_DIR", str(tmp_path / "agents"))
+
+        import lina_orchestrator.infrastructure.spawner as spawner_mod
+
+        importlib.reload(spawner_mod)
+
+        # Crear un archivo simulado de config
+        config_dir = tmp_path / "agents"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        agent_id = "abcd1234" * 4
+        config_file = config_dir / f"agent-{agent_id}.yaml"
+        config_file.write_text("test: true")
+
+        spawner_mod.SpawnerService._cleanup_config(agent_id)
+        assert not config_file.exists()
