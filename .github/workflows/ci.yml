@@ -7,6 +7,81 @@ on:
     branches: [main]
 
 jobs:
+  docker-build:
+    name: Docker build — ${{ matrix.image }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: gateway
+            dockerfile: deploy/docker/Dockerfile.gateway
+            build_args: ""
+          - image: mcp-fs-safe
+            dockerfile: deploy/docker/Dockerfile.mcp
+            build_args: "MCP_DIR=mcps/fs-safe\nMCP_CMD=lina-fs-safe"
+          - image: mcp-lina-db
+            dockerfile: deploy/docker/Dockerfile.mcp
+            build_args: "MCP_DIR=mcps/lina-db\nMCP_CMD=lina-db"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          load: true
+          tags: lina-${{ matrix.image }}:ci
+          build-args: ${{ matrix.build_args }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,scope=${{ matrix.image }},mode=max
+
+      - name: Report image size
+        run: |
+          SIZE=$(docker image inspect lina-${{ matrix.image }}:ci \
+            --format '{{.Size}}' | awk '{printf "%.1f MB", $1/1048576}')
+          echo "### Docker image size: ${{ matrix.image }}" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| lina-${{ matrix.image }} | $SIZE |" >> $GITHUB_STEP_SUMMARY
+          echo "Image size: $SIZE"
+
+      - name: Size gate (hard cap 1 GB)
+        run: |
+          SIZE_BYTES=$(docker image inspect lina-${{ matrix.image }}:ci --format '{{.Size}}')
+          MAX_BYTES=1073741824
+          if [ "$SIZE_BYTES" -gt "$MAX_BYTES" ]; then
+            echo "❌ Image lina-${{ matrix.image }} exceeds 1 GB: ${SIZE_BYTES} bytes"
+            exit 1
+          fi
+          echo "✓ Size OK: ${SIZE_BYTES} bytes (< 1 GB)"
+
+  dockerfile-lint:
+    name: Dockerfile lint (hadolint)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: deploy/docker/Dockerfile.goosed
+          ignore: DL3008,DL3009,DL3003,SC2164
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: deploy/docker/Dockerfile.mcp
+          ignore: DL3008,DL3003,SC2164
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: deploy/docker/Dockerfile.gateway
+          ignore: DL3008,DL3003,SC2164
+
+
   lint-and-test:
     name: Lint & Test MCPs
     runs-on: ubuntu-24.04
