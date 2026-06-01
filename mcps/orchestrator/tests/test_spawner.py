@@ -105,7 +105,9 @@ class TestConfigGeneration:
         importlib.reload(spawner_mod)
 
         config_path = spawner_mod._generate_agent_config(
-            "test-session-001", "dev", ["lina-fs-safe", "lina-github"],
+            "test-session-001",
+            "dev",
+            ["lina-fs-safe", "lina-github"],
             {"max_runtime_minutes": 30},
         )
 
@@ -135,7 +137,9 @@ class TestConfigGeneration:
         importlib.reload(spawner_mod)
 
         config_path = spawner_mod._generate_agent_config(
-            "test-session-002", "research", ["lina-db"],
+            "test-session-002",
+            "research",
+            ["lina-db"],
             {"max_runtime_minutes": 15},
         )
         generated = yaml.safe_load(config_path.read_text())
@@ -436,6 +440,38 @@ class TestServerSpawnTool:
             result = srv.send_instruction("agent-abc", "nueva instrucción")
 
         assert "error" in result
+
+    def test_send_instruction_happy_path(
+        self, reloaded_server_with_spawner: types.ModuleType
+    ) -> None:
+        """send_instruction() persiste el comando en DB y retorna metadatos."""
+        from datetime import datetime
+
+        srv = reloaded_server_with_spawner
+
+        import lina_orchestrator.infrastructure.spawner as spawner_mod
+
+        fake_ts = datetime(2026, 1, 1, tzinfo=UTC)
+        fake_row = {"id": 42, "sent_at": fake_ts}
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_cursor.fetchone.return_value = fake_row
+        mock_conn.cursor.return_value = mock_cursor
+
+        with (
+            patch.object(spawner_mod, "_db_conn", return_value=mock_conn),
+            patch.object(spawner_mod, "_db_append_event"),
+        ):
+            result = srv.send_instruction("agent-abc", "nueva instrucción")
+
+        assert result["command_id"] == 42
+        assert result["agent_id"] == "agent-abc"
+        assert result["kind"] == "send_instruction"
+        assert "2026-01-01" in result["sent_at"]
+        mock_conn.commit.assert_called_once()
 
 
 # ─── DB helpers unit tests ────────────────────────────────────────────────────
