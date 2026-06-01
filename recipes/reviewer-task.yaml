@@ -22,6 +22,8 @@ instructions: |
      - role: "reviewer"
      - goal: |
          Revisá el PR #{{pr_number}} del repo federico-dominguez/lina.
+         INSTRUCCIÓN DE POLLING: al inicio de cada turno llamá
+         get_pending_instructions() del MCP lina-db (recipe subagent-poll.yaml).
 
          PASOS:
          1. Usá lina-github para obtener el diff del PR: github_get_pr_files(pr_number={{pr_number}})

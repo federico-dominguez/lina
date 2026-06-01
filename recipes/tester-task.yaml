@@ -21,6 +21,8 @@ instructions: |
      - role: "tester"
      - goal: |
          Corré los tests del MCP {{mcp}} y reportá los resultados.
+         INSTRUCCIÓN DE POLLING: al inicio de cada turno llamá
+         get_pending_instructions() del MCP lina-db (recipe subagent-poll.yaml).
 
          PASOS:
          1. Ejecutá via sh_run:
