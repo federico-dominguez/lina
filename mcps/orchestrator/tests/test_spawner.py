@@ -70,8 +70,7 @@ def _mock_db_conn(row=None):
     mock_cursor = MagicMock()
     mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
     mock_cursor.__exit__ = MagicMock(return_value=False)
-    if row is not None:
-        mock_cursor.fetchone.return_value = row
+    mock_cursor.fetchone.return_value = row  # None = not found
     mock_conn.__enter__ = MagicMock(return_value=mock_conn)
     mock_conn.__exit__ = MagicMock(return_value=False)
     mock_conn.cursor.return_value = mock_cursor
@@ -151,7 +150,7 @@ class TestSpawnerServiceSpawn:
             patch.object(spawner_mod, "_db_update_status"),
             patch.object(spawner_mod, "_db_append_event"),
             patch("requests.post", side_effect=requests.ConnectionError("no route")),
-            pytest.raises(RuntimeError, match="No se pudo crear sesion"),
+            pytest.raises(RuntimeError, match="No se pudo crear sesi[oó]n"),
         ):
             spawner.spawn("dev", "goal")
 
@@ -164,7 +163,7 @@ class TestSpawnerServiceSpawn:
             patch.object(spawner_mod, "_db_update_status"),
             patch.object(spawner_mod, "_db_append_event"),
             patch("requests.post", return_value=mock_resp),
-            pytest.raises(RuntimeError, match="No se pudo crear sesion"),
+            pytest.raises(RuntimeError, match="No se pudo crear sesi[oó]n"),
         ):
             spawner.spawn("dev", "goal")
 
@@ -196,7 +195,7 @@ class TestSpawnerGetStatus:
 
     def test_returns_fields(self, tmp_policies, monkeypatch):
         spawner, spawner_mod = _make_spawner(tmp_policies, monkeypatch)
-        row = {"id": "aabbccdd" * 4, "role": "dev", "goal": "x",
+        row = {"agent_id": "aabbccdd" * 4, "role": "dev", "goal": "x",
                "status": "running", "pid": None, "elapsed_seconds": 10}
         with patch.object(spawner_mod, "_db_conn", return_value=_mock_db_conn(row)):
             result = spawner.get_status("aabbccdd" * 4)
