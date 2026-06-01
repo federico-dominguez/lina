@@ -1,0 +1,41 @@
+version: "1.0.0"
+title: "Delegar code review de PR a sub-agente reviewer"
+description: |
+  Spawna un sub-agente con rol 'reviewer' para revisar un PR en GitHub:
+  analiza los cambios, verifica convenciones, detecta problemas y deja comentarios.
+
+  Uso: Cuando Federico quiere una segunda opinión sobre un PR o quiere
+  delegar el review inicial a LINA.
+
+parameters:
+  pr_number:
+    description: "Número del PR a revisar (ej: 105)"
+    required: true
+  focus:
+    description: "Aspecto en que focalizarse (ej: 'seguridad', 'tests', 'arquitectura'). Default: revisión general."
+    required: false
+
+instructions: |
+  ## Proceso de review delegado
+
+  1. **Spawneá el agente** con `spawn_agent` del MCP lina-orchestrator:
+     - role: "reviewer"
+     - goal: |
+         Revisá el PR #{{pr_number}} del repo federico-dominguez/lina.
+
+         PASOS:
+         1. Usá lina-github para obtener el diff del PR: github_get_pr_files(pr_number={{pr_number}})
+         2. Leé los archivos modificados con lina-fs-safe si necesitás más contexto.
+         3. Evaluá con foco en: {{focus|convenciones de código, tests, seguridad, arquitectura}}
+         4. Escribí un resumen del review en lina-db:
+            store_memory(key="review-pr-{{pr_number}}", value=<review estructurado>)
+         5. Si hay problemas graves: dejá un comentario en el PR via github_create_pr_comment()
+         6. Llamá update_agent_status() con "approved", "changes_requested" o "neutral"
+
+         CRITERIO DE ÉXITO: review completo guardado en lina-db.
+
+  2. **Al completar**, leer el review con `get_memory(key="review-pr-{{pr_number}}")`
+     y presentarlo a Federico.
+
+  3. **Si el reviewer marcó "changes_requested"**, preguntarle a Federico
+     si quiere que LINA deje el comentario en GitHub.

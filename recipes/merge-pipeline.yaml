@@ -1,0 +1,53 @@
+version: "1.0.0"
+title: "Pipeline completo: tests + review + PR"
+description: |
+  Orquesta el pipeline completo de una feature lista para merge:
+  1. Corre tests (sub-agente tester)
+  2. Hace code review (sub-agente reviewer)
+  3. Si ambos pasan, abre o actualiza el PR con el resumen
+
+  Uso: Cuando terminás una feature y querés el pipeline completo sin hacerlo
+  a mano desde Telegram.
+
+parameters:
+  branch:
+    description: "Branch con los cambios (ej: 'feat/105-something')"
+    required: true
+  mcp:
+    description: "MCP principal modificado (para los tests)"
+    required: true
+  issue:
+    description: "Número del issue que cierra este PR (opcional)"
+    required: false
+
+instructions: |
+  ## Pipeline de merge
+
+  ### Fase 1 — Tests
+  Ejecutá la recipe `tester-task` con mcp={{mcp}}.
+  Esperá resultado. Si falla: reportá a Federico y detenete.
+
+  ### Fase 2 — Review
+  Cuando los tests pasen, ejecutá la recipe `reviewer-task` con el PR
+  de la branch {{branch}} (si existe) o primero creá el PR.
+
+  ### Fase 3 — PR
+  Si no existe el PR, crealo:
+  ```
+  gh pr create \
+    --title "<título descriptivo>" \
+    --body "Closes #{{issue}}\n\n## Cambios\n..." \
+    --base main
+  ```
+
+  Reportá a Federico:
+  ```
+  ✅ Pipeline completo
+  Tests: X% coverage, N passed
+  Review: <resultado>
+  PR: https://github.com/federico-dominguez/lina/pull/<N>
+  ```
+
+  ### Si alguna fase falla
+  Reportar claramente qué falló y detenerse. No avanzar a la siguiente fase
+  si la anterior no pasó.
