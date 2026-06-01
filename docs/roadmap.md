@@ -2,7 +2,6 @@
 
 **Última actualización:** 2026-05-31  
 **Estado actual:** Fase 3 completada (hardening + session persistence). Fase 4 en curso (multi-agente). Fase 3.5 pospuesta.
->>>>>>> origin/main
 
 ---
 
@@ -62,13 +61,15 @@ Nueva sesión detectada (is_new=True)
 
 | Orden | # | Issue | Qué resuelve | Prerequisito |
 |---|---|---|---|---|
-| 0 | — | Saneamiento de repo + merge Fase 3 a `main` | Limpiar branches viejas, unificar código base | — |
-| 1 | [#15](https://github.com/federico-dominguez/lina/issues/15) | ADR 0010 — elegir framework multi-agente | Decisión arquitectónica para el orquestador | — |
-| 2 | [#48](https://github.com/federico-dominguez/lina/issues/48) | Hot-reload MCPs sin reiniciar goosed | Modificar MCP sin downtime ni rebuild | — |
-| 3 | [#51](https://github.com/federico-dominguez/lina/issues/51) | lina-self-modify — ciclo completo de automejora | LINA modifica su código, corre tests y deploya | #48 |
-| 4 | [#50](https://github.com/federico-dominguez/lina/issues/50) | lina-orchestrator — multi-agente dev/ops/assistant | 3 agentes especializados con delegación inteligente | #15 + #51 |
-| 5 | [#67](https://github.com/federico-dominguez/lina/issues/67) | Observability stack (Prometheus + Grafana) | Métricas, dashboards, alertas | — |
+| 0 | — | Saneamiento de repo + merge Fase 3 a `main` | Limpiar branches viejas, unificar código base | ✅ done |
+| 1 | [#15](https://github.com/federico-dominguez/lina/issues/15) | **ADR 0010 — mcp-agent + Orchestrator-Workers** | Decisión arquitectónica + prototipo | 🟡 en PR |
+| 2 | [#50](https://github.com/federico-dominguez/lina/issues/50) | lina-orchestrator (infra + UX Telegram) | Manager + subagentes con políticas + panel/comandos | #15 |
+| 3 | [#48](https://github.com/federico-dominguez/lina/issues/48) | Hot-reload MCPs sin reiniciar goosed | Modificar MCP sin downtime ni rebuild | #50 |
+| 4 | [#51](https://github.com/federico-dominguez/lina/issues/51) | lina-self-modify — ciclo completo de automejora | Subagente `dev` con aprobaciones + Temporal | #48 |
+| 5 | [#67](https://github.com/federico-dominguez/lina/issues/67) | Observability stack (Prometheus + Grafana) | Métricas por rol, latencia spawn, alertas | paralelo |
 | 6 | [#68](https://github.com/federico-dominguez/lina/issues/68) | lina-android-remote — control del celular | Control remoto del celular de Federico | opc. |
+
+**Framework elegido:** [`mcp-agent`](https://github.com/lastmile-ai/mcp-agent) (MCP-native, ~20MB, patrones Anthropic) sobre LangGraph. Ver [docs/architecture/0010-multi-agent-framework.md](architecture/0010-multi-agent-framework.md).
 
 ### Plan detallado Fase 4
 
@@ -104,7 +105,6 @@ Nueva sesión detectada (is_new=True)
 - Prometheus + Grafana en docker-compose
 - Métricas de gateway, orquestador, PostgreSQL
 - Dashboard de tokens, latencia, errores, sesiones activas
->>>>>>> origin/main
 
 ---
 
