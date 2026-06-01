@@ -316,14 +316,37 @@ Si `spawn_agent` falla:
 ### 10.5 Instrucciones para sub-agentes (cuando vos sos el sub-agente)
 
 Si estás corriendo como sub-agente (tu goal fue provisto por lina-orchestrator__spawn_agent),
-seguí estas reglas adicionales:
+seguí estas reglas adicionales. La receta `recipes/subagent-poll.yaml` contiene el
+protocolo completo — esta sección es el resumen ejecutivo.
 
-**Polling de instrucciones mid-run:**
-Durante tareas largas (más de 3 tool calls), llamá `lina-db__get_pending_instructions(session_id=<tu_agent_id>)` periódicamente para recibir instrucciones de LINA en tiempo real. Si recibís una instrucción, incorporala a tu trabajo y llamá `lina-db__append_agent_event(session_id=<tu_agent_id>, kind="instruction_ack", payload={"text": "<instrucción recibida>"})` para confirmar el ACK.
+**Polling de instrucciones mid-run (OBLIGATORIO):**
+Al **inicio de cada turno** durante tareas largas (>3 tool calls), llamá
+`lina-db__get_pending_instructions(session_id="<tu_session_id>")` para recibir
+instrucciones de LINA en tiempo real. Si recibís instrucciones, ejecutalas antes
+de continuar y llamá `append_agent_event()` con `kind="instruction_ack"`.
+
+```python
+# Al inicio de cada turno:
+instrucciones = lina_db.get_pending_instructions(session_id="<uuid>")
+for cmd in instrucciones:
+    # Ejecutar la instrucción
+    lina_db.append_agent_event(
+        session_id="<uuid>",
+        kind="instruction_ack",
+        payload={"text": cmd["args"]["text"]}
+    )
+```
+
+**Heartbeat obligatorio:**
+Si la tarea lleva más de 30s sin generar eventos, llamá:
+`append_agent_event(session_id, kind="heartbeat", payload={"phase": "working", "progress": "..."})`
 
 **Cómo saber tu agent_id:**
-Tu `agent_id` (UUID) fue incluido en tu goal por el orquestador. Buscá un patrón como "session_id=<uuid>" o "agent_id=<uuid>" en tu goal. Si no está, llamá `lina-orchestrator__list_running_agents()` y filtrá por el que coincide con tu goal.
+Tu `session_id` (UUID de 32 chars hex) fue incluido en tu `goal` por el orquestador.
+Buscá el patrón `session_id=<uuid>` en tu instrucción inicial.
+Si no está, llamá `lina-orchestrator__list_running_agents()` y filtrá por goal.
 
 **Al finalizar:**
-Llamá `lina-db__update_agent_status(session_id=<tu_agent_id>, status="completed", result_summary="<resumen de lo que hiciste>")` antes de terminar. Esto activa la notificación automática a Federico.
-
+Llamá `lina-db__append_agent_event(session_id="<uuid>", kind="process_ended", ...)` y
+luego `update_agent_status()` con `status="completed"` y un `result_summary` describiendo
+qué hiciste. Esto activa la notificación automática a Federico.
