@@ -1,0 +1,82 @@
+version: "1.0.0"
+title: "Sub-agente — Polling de instrucciones de LINA"
+description: |
+  Protocolo que todo sub-agente debe seguir para recibir instrucciones
+  adicionales de LINA durante su ejecución. Sin este polling, los comandos
+  enviados vía send_instruction() quedan en el buzón sin procesar.
+
+  Esta receta es cargada automáticamente por el system prompt del spawner.
+  El sub-agente debe ejecutar el paso de polling al INICIO DE CADA TURNO
+  durante tareas de más de 3 tool calls.
+
+instructions: |
+  ## Protocolo de polling
+
+  ### Cuándo hacer polling
+  - Al **inicio de cada turno** durante tareas largas (>3 tool calls esperadas).
+  - **Siempre** después de recibir un `send_instruction` y antes de continuar.
+  - Si la tarea es corta (<3 tool calls), al menos **una vez al inicio**.
+
+  ### Cómo hacer polling
+
+  1. Llamá `get_pending_instructions()` del MCP lina-db:
+     ```
+     lina-db__get_pending_instructions(session_id="<tu_session_id>")
+     ```
+
+  2. Si recibís instrucciones pendientes (lista no vacía):
+     - Ejecutalas **antes** de continuar con tu objetivo original.
+     - Logueá el ACK con `append_agent_event()`:
+       ```
+       lina-db__append_agent_event(
+           session_id="<tu_session_id>",
+           kind="instruction_ack",
+           payload={"text": "<texto de la instrucción>"}
+       )
+       ```
+
+  3. Si no hay instrucciones pendientes (lista vacía):
+     - Continuá normalmente con tu objetivo.
+
+  ### Cómo saber tu session_id
+  Tu `session_id` (UUID de 32 chars hex) fue incluido en tu `goal` por el
+  orquestador. Buscá el patrón `session_id=<uuid>` en tu instrucción inicial.
+  Si no lo encontrás, llamá:
+  ```
+  lina-orchestrator__list_running_agents(include_completed=False)
+  ```
+  y filtrá por el que coincide con tu `goal`.
+
+  ### Al recibir una instrucción
+  - **No** pedís confirmación humana — ejecutala directamente.
+  - Si la instrucción entra en conflicto con tu objetivo actual, priorizá la
+    instrucción y ajustá tu plan.
+  - Si la instrucción es `kill` o `pause`: detené la tarea inmediatamente y
+    llamá `update_agent_status()` con el estado correspondiente.
+
+  ### Heartbeat durante polling
+  Si el polling no devuelve instrucciones pero seguís trabajando, llamá
+  `append_agent_event()` con `kind="heartbeat"` cada ~30 segundos para que
+  LINA pueda ver que seguís activo:
+  ```
+  lina-db__append_agent_event(
+      session_id="<tu_session_id>",
+      kind="heartbeat",
+      payload={"phase": "working", "progress": "<qué estás haciendo>"}
+  )
+  ```
+
+  ## Ejemplo de ciclo completo
+
+  ```
+  Turno N:
+    1. get_pending_instructions("abc...") → [{id: 1, args: {text: "usá otro approach"}}]
+    2. append_agent_event("abc...", "instruction_ack", {text: "usá otro approach"})
+    3. Ejecutá la instrucción (cambiá de approach)
+    4. Continuá con el objetivo original
+    5. append_agent_event("abc...", "heartbeat", {phase: "working", progress: "refactoring modulo X"})
+
+  Turno N+1:
+    1. get_pending_instructions("abc...") → []
+    2. Continuá normalmente
+  ```
