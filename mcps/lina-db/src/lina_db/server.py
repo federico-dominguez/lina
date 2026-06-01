@@ -22,6 +22,13 @@ Herramientas expuestas:
     search_traces            — búsqueda full-text en reasoning traces de LINA (issue #62)
     store_semantic_memory    — guarda un recuerdo con embedding vectorial (issue #63)
     search_semantic_memory   — búsqueda semántica por similitud de coseno (issue #63)
+    create_agent_session     — registra nueva sesión de sub-agente en DB (issue #83)
+    update_agent_status      — actualiza estado/pid de un sub-agente (issue #83)
+    list_running_agents      — lista sub-agentes activos o todos (issue #83)
+    append_agent_event       — añade evento al log inmutable de un agente (issue #83)
+    send_agent_command       — envía comando al buzón de un sub-agente (issue #83)
+    list_agent_events        — devuelve el log de eventos de un sub-agente (issue #88)
+    get_pending_instructions — lee y ackea instrucciones pendientes de un sub-agente (issue #90)
 
 Variables de entorno:
     LINA_DB_URL              URL de conexión (default: postgresql://lina:lina_dev@localhost:5432/lina)
@@ -34,6 +41,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any
 
 import psycopg2
@@ -1090,7 +1098,312 @@ def search_semantic_memory(
     return rows or []
 
 
+# ─── agent lifecycle tools (issue #83) ───────────────────────────────────────
+
+
+@mcp.tool()
+def create_agent_session(session_id: str, role: str, goal: str) -> dict:
+    """Registra una nueva sesión de sub-agente en la DB.
+
+    El orquestador llama esto ANTES de hacer Popen() para que el session_id
+    exista en la DB y pueda recibir eventos/comandos inmediatamente.
+
+    Args:
+        session_id: UUID del agente (asignado por el spawner).
+        role:       rol del subagente (dev / ops / study / research).
+        goal:       instrucción original que se le pasa al sub-agente.
+
+    Returns:
+        {"session_id": str, "status": "pending", "created_at": str}
+    """
+    if not session_id.strip():
+        raise ValueError("session_id no puede estar vacío")
+    # Validar formato: UUID hex de 32 chars lowercase (sin guiones).
+    # session_id forma parte del canal NOTIFY/LISTEN: agent_cmd_<session_id>
+    if not re.fullmatch(r"[0-9a-f]{32}", session_id):
+        raise ValueError(
+            f"session_id debe ser un UUID hex de 32 chars lowercase sin guiones: {session_id!r}"
+        )
+    if not role.strip():
+        raise ValueError("role no puede estar vacío")
+    if not goal.strip():
+        raise ValueError("goal no puede estar vacío")
+
+    _execute(
+        "INSERT INTO agent_sessions (id, role, goal) VALUES (%s, %s, %s)",
+        (session_id, role, goal),
+    )
+    row = _execute(
+        "SELECT id, role, goal, status, created_at FROM agent_sessions WHERE id = %s",
+        (session_id,),
+        fetch="one",
+    )
+    _audit("create_agent_session", {"session_id": session_id, "role": role}, "ok")
+    if row:
+        row["created_at"] = row["created_at"].isoformat() if row.get("created_at") else None
+    return row or {}
+
+
+@mcp.tool()
+def update_agent_status(
+    session_id: str,
+    status: str,
+    pid: int | None = None,
+    config_path: str | None = None,
+    result_summary: str | None = None,
+) -> dict:
+    """Actualiza el estado y metadatos de una sesión de sub-agente.
+
+    Llamado por el spawner en transiciones:
+      pending → running  (cuando Popen() arranca, con pid)
+      running → completed / failed / killed / timeout
+
+    Args:
+        session_id:     UUID de la sesión.
+        status:         nuevo estado (running/completed/failed/killed/timeout).
+        pid:            PID del proceso (solo al pasar a running).
+        config_path:    ruta al config temporal del agente (solo al pasar a running).
+        result_summary: resumen del resultado (al completar/fallar).
+
+    Returns:
+        El registro actualizado con timestamps.
+    """
+    valid = {"pending", "running", "completed", "failed", "killed", "timeout"}
+    if status not in valid:
+        raise ValueError(f"status inválido: {status!r}. Válidos: {valid}")
+
+    started_sql = ", started_at = NOW()" if status == "running" else ""
+    ended_sql = (
+        ", ended_at = NOW()" if status in {"completed", "failed", "killed", "timeout"} else ""
+    )
+
+    _execute(
+        f"""UPDATE agent_sessions
+            SET status = %s,
+                pid = COALESCE(%s, pid),
+                config_path = COALESCE(%s, config_path),
+                result_summary = COALESCE(%s, result_summary),
+                updated_at = NOW()
+                {started_sql}{ended_sql}
+            WHERE id = %s""",  # noqa: S608
+        (status, pid, config_path, result_summary, session_id),
+    )
+    row = _execute(
+        """SELECT id, role, goal, status, pid, result_summary,
+                  started_at, ended_at, updated_at
+           FROM agent_sessions WHERE id = %s""",
+        (session_id,),
+        fetch="one",
+    )
+    _audit("update_agent_status", {"session_id": session_id, "status": status}, "ok")
+    if row:
+        for k in ("started_at", "ended_at", "updated_at"):
+            if row.get(k):
+                row[k] = row[k].isoformat()
+    return row or {}
+
+
+@mcp.tool()
+def list_running_agents(include_completed: bool = False) -> list[dict]:
+    """Lista sub-agentes en ejecución (o todos si include_completed=True).
+
+    Args:
+        include_completed: si True, incluye también completed/failed/killed.
+
+    Returns:
+        Lista de agentes con id, role, goal, status, pid, elapsed_seconds.
+    """
+    if include_completed:
+        sql = """
+            SELECT id, role, goal, status, pid,
+                   started_at,
+                   EXTRACT(EPOCH FROM (NOW() - started_at))::INT AS elapsed_seconds
+            FROM agent_sessions
+            ORDER BY created_at DESC
+            LIMIT 50
+        """
+        rows = _execute(sql, fetch="all")
+    else:
+        rows = _execute(
+            "SELECT id, role, goal, status, pid, started_at, elapsed_seconds "
+            "FROM agent_sessions_active",
+            fetch="all",
+        )
+    if rows:
+        for r in rows:
+            if r.get("started_at"):
+                r["started_at"] = r["started_at"].isoformat()
+    return rows or []
+
+
+@mcp.tool()
+def append_agent_event(session_id: str, kind: str, payload: dict | None = None) -> dict:
+    """Añade un evento al log inmutable de un sub-agente.
+
+    Args:
+        session_id: UUID de la sesión.
+        kind:       tipo de evento (spawn_requested / process_started /
+                    process_ended / heartbeat / tool_called / error /
+                    instruction_received / instruction_ack).
+        payload:    datos adicionales del evento (dict JSON-serializable).
+
+    Returns:
+        {"id": int, "session_id": str, "kind": str, "ts": str}
+    """
+    valid_kinds = {
+        "spawn_requested",
+        "process_started",
+        "process_ended",
+        "heartbeat",
+        "tool_called",
+        "error",
+        "instruction_received",
+        "instruction_ack",
+    }
+    if kind not in valid_kinds:
+        raise ValueError(f"kind inválido: {kind!r}. Válidos: {valid_kinds}")
+
+    row = _execute(
+        "INSERT INTO agent_events (session_id, kind, payload_json)"
+        " VALUES (%s, %s, %s) RETURNING id, ts",
+        (session_id, kind, json.dumps(payload or {})),
+        fetch="one",
+    )
+    result = {
+        "id": row["id"] if row else None,
+        "session_id": session_id,
+        "kind": kind,
+        "ts": row["ts"].isoformat() if row and row.get("ts") else None,
+    }
+    return result
+
+
+@mcp.tool()
+def send_agent_command(session_id: str, kind: str, args: dict | None = None) -> dict:
+    """Envía un comando al buzón de un sub-agente (LINA → sub-agente).
+
+    El sub-agente lee este buzón por polling. Un NOTIFY de PostgreSQL
+    despierta al sub-agente si está usando LISTEN.
+
+    Args:
+        session_id: UUID de la sesión destino.
+        kind:       tipo de comando (pause / resume / kill /
+                    send_instruction / set_budget).
+        args:       argumentos del comando (p.ej. {"text": "Nueva instrucción"}).
+
+    Returns:
+        {"id": int, "session_id": str, "kind": str, "sent_at": str}
+    """
+    valid_kinds = {"pause", "resume", "kill", "send_instruction", "set_budget"}
+    if kind not in valid_kinds:
+        raise ValueError(f"kind inválido: {kind!r}. Válidos: {valid_kinds}")
+
+    row = _execute(
+        "INSERT INTO agent_commands (session_id, kind, args_json)"
+        " VALUES (%s, %s, %s) RETURNING id, sent_at",
+        (session_id, kind, json.dumps(args or {})),
+        fetch="one",
+    )
+    _audit("send_agent_command", {"session_id": session_id, "kind": kind}, "ok")
+    return {
+        "id": row["id"] if row else None,
+        "session_id": session_id,
+        "kind": kind,
+        "sent_at": row["sent_at"].isoformat() if row and row.get("sent_at") else None,
+    }
+
+
 # ─── entrypoint ───────────────────────────────────────────────────────────────
+
+
+@mcp.tool()
+def list_agent_events(session_id: str, limit: int = 50) -> list[dict]:
+    """Devuelve el log de eventos de un sub-agente (más recientes primero).
+
+    Permite a LINA ver qué hizo un sub-agente: herramientas llamadas,
+    errores, hitos y resultado final. Es la forma principal de obtener
+    feedback de un sub-agente después de que terminó su tarea.
+
+    Args:
+        session_id: UUID hexadecimal de la sesión del sub-agente.
+        limit:      máximo de eventos a devolver (default 50, max 200).
+
+    Returns:
+        Lista de dicts {id, kind, payload, ts}, más recientes primero.
+    """
+    if not session_id or not session_id.strip():
+        raise ValueError("session_id no puede estar vacío")
+    limit = max(1, min(limit, 200))
+
+    rows = _execute(
+        """SELECT id, kind, payload_json, ts
+           FROM agent_events
+           WHERE session_id = %s
+           ORDER BY ts DESC
+           LIMIT %s""",
+        (session_id, limit),
+        fetch="all",
+    )
+    _audit("list_agent_events", {"session_id": session_id, "limit": limit}, "ok")
+    return [
+        {
+            "id": row["id"],
+            "kind": row["kind"],
+            "payload": row["payload_json"],
+            "ts": row["ts"].isoformat() if row.get("ts") else None,
+        }
+        for row in (rows or [])
+    ]
+
+
+@mcp.tool()
+def get_pending_instructions(session_id: str) -> list[dict]:
+    """Lee las instrucciones pendientes para un sub-agente y las marca como leídas.
+
+    El sub-agente llama esto al inicio de cada turno para recibir comandos
+    enviados por LINA vía send_agent_command(kind='send_instruction').
+    Cada instrucción se marca con ack_at = NOW() para evitar re-entregas.
+
+    Args:
+        session_id: UUID hexadecimal de la sesión activa del sub-agente.
+
+    Returns:
+        Lista de dicts {id, kind, args, sent_at}, más antiguas primero.
+        Lista vacía si no hay instrucciones pendientes.
+    """
+    if not session_id or not session_id.strip():
+        raise ValueError("session_id no puede estar vacío")
+
+    rows = _execute(
+        """SELECT id, kind, args_json, sent_at
+           FROM agent_commands
+           WHERE session_id = %s AND ack_at IS NULL AND kind = 'send_instruction'
+           ORDER BY sent_at ASC""",
+        (session_id,),
+        fetch="all",
+    )
+    if not rows:
+        return []
+
+    ids = [row["id"] for row in rows]
+    _execute(
+        "UPDATE agent_commands SET ack_at = NOW() WHERE id = ANY(%s)",
+        (ids,),
+    )
+    _audit(
+        "get_pending_instructions",
+        {"session_id": session_id, "count": len(ids)},
+        "ok",
+    )
+    return [
+        {
+            "id": row["id"],
+            "kind": row["kind"],
+            "args": row["args_json"],
+            "sent_at": row["sent_at"].isoformat() if row.get("sent_at") else None,
+        }
+        for row in rows
+    ]
 
 
 def main() -> None:
