@@ -110,9 +110,11 @@ async def manager_orchestrate(goal: str, plan: dict[str, str]) -> str:
     print(f"\n[manager] goal recibido: {goal}")
     print(f"[manager] plan: {list(plan.keys())} en paralelo\n")
 
-    tasks = [
-        run_worker(WORKERS[role], subtask) for role, subtask in plan.items() if role in WORKERS
-    ]
+    unknown = [r for r in plan if r not in WORKERS]
+    if unknown:
+        raise ValueError(f"roles desconocidos en el plan: {unknown}. Disponibles: {list(WORKERS)}")
+
+    tasks = [run_worker(WORKERS[role], subtask) for role, subtask in plan.items()]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     consolidated: list[str] = [f"Respuesta consolidada para: {goal}", ""]

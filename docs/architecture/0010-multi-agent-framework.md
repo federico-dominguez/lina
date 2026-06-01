@@ -167,7 +167,7 @@ Patrones complementarios disponibles vía mcp-agent (uso futuro):
 ## Política de acceso ("modelo empresa")
 
 Cada subagente recibe una **política** declarada en
-[`config/policies.yaml`](../../config/policies.yaml) (definida en Fase B):
+`config/policies.yaml` (archivo creado en Fase B — aún no existe en el repo):
 
 ```yaml
 roles:
@@ -235,7 +235,7 @@ Enforcement multi-capa:
 | E — Self-modify | #51 | Subagente `dev` con aprobaciones |
 | F — Observabilidad | #67 | Prometheus + Grafana |
 
-Plan completo en `/memories/session/plan.md` (sesión actual).
+Ver [docs/roadmap.md](../roadmap.md) para el orden de fases y dependencias.
 
 ---
 
