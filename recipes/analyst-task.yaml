@@ -17,7 +17,10 @@ instructions: |
 
   1. **Spawneá el agente** llamando a `spawn_agent` del MCP lina-orchestrator:
      - role: "analyst"
-     - goal: el goal con contexto completo. El analista debe saber:
+     - goal: |
+         INSTRUCCIÓN DE POLLING: al inicio de cada turno llamá
+         get_pending_instructions() del MCP lina-db (recipe subagent-poll.yaml).
+         {{goal}}
        - Qué revisar (archivos, módulos, issues)
        - Qué preguntas responder
        - Cómo reportar: "Guardá el reporte en lina-db con store_memory(key='analysis-<topic>', value=<reporte>)"
