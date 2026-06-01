@@ -1,22 +1,22 @@
-"""LINA Orchestrator MCP — expone políticas de subagentes al manager.
-
-Esta es la versión MVP (issue #85). Implementa solo las tools de consulta de
-políticas (read-side del PolicyStore). Las tools de gestión de subagentes
-(spawn_subagent, kill_agent, ...) se agregarán cuando #83 (schema SQL) y #84
-(spawner goosed-per-subagent) estén disponibles.
+"""LINA Orchestrator MCP — políticas de subagentes y gestión del ciclo de vida.
 
 Tools expuestas:
+    Consulta de políticas (read-side):
     - list_roles() → [str]
     - get_role(role) → dict
     - check_mcp_allowed(role, mcp_name) → bool
     - check_requires_approval(role, action) → bool
     - reload_policies() → {success, roles_count, roles}
 
+    Gestión de sub-agentes (issue #84+#85):
+    - spawn_agent(role, goal) → {agent_id, pid, status, config_path}
+    - kill_agent(agent_id) → {killed, message}
+    - get_agent_status(agent_id) → {status, pid, elapsed_seconds, process_alive}
+    - list_agents(include_completed?) → [{agent_id, role, goal, status, ...}]
+    - send_instruction(agent_id, text) → {command_id, sent_at}
+
 Cargado desde:
     - $LINA_POLICIES_FILE o /home/user/lina/config/policies.yaml por defecto.
-
-Reload:
-    - SIGHUP al proceso o tool reload_policies() recargan policies.yaml.
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ from mcp.server.fastmcp import FastMCP
 
 from lina_orchestrator.application.policy_service import PolicyService
 from lina_orchestrator.domain.policy import PolicyStore
+from lina_orchestrator.infrastructure.spawner import SpawnerService
 
 logging.basicConfig(
     level=os.environ.get("LINA_LOG_LEVEL", "INFO"),
@@ -62,6 +63,7 @@ def _build_service() -> PolicyService:
 
 mcp = FastMCP("lina-orchestrator", host="0.0.0.0", port=_MCP_HTTP_PORT)  # noqa: S104 — bind 0.0.0.0 intencional para contenedor
 _service: PolicyService | None = None
+_spawner: SpawnerService | None = None
 
 
 def _svc() -> PolicyService:
@@ -70,6 +72,14 @@ def _svc() -> PolicyService:
     if _service is None:
         _service = _build_service()
     return _service
+
+
+def _spw() -> SpawnerService:
+    """Lazy init del SpawnerService."""
+    global _spawner
+    if _spawner is None:
+        _spawner = SpawnerService(_svc())
+    return _spawner
 
 
 # ─── Tools ────────────────────────────────────────────────────────────────────
@@ -150,6 +160,150 @@ def reload_policies() -> dict:
         (archivo borrado, YAML inválido, schema roto).
     """
     return _svc().reload()
+
+
+# ─── Agent lifecycle tools (issues #84, #85) ─────────────────────────────────
+
+
+@mcp.tool()
+def spawn_agent(role: str, goal: str) -> dict:
+    """Lanza un sub-agente goosed con los MCPs del rol indicado.
+
+    El sub-agente recibe `goal` como instrucción inicial y trabaja de forma
+    autónoma. LINA principal puede monitorear su progreso con get_agent_status()
+    o enviarle instrucciones adicionales con send_instruction().
+
+    Argumentos:
+        role: rol del sub-agente — debe existir en policies.yaml
+              (ej. "dev", "ops", "study", "research").
+        goal: instrucción inicial para el sub-agente (texto libre).
+
+    Retorna:
+        {agent_id, role, goal, pid, status, config_path}
+        Errores: {"error": "..."} si el rol es inválido o goosed no está disponible.
+    """
+    try:
+        return _spw().spawn(role, goal)
+    except (ValueError, RuntimeError) as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+def kill_agent(agent_id: str) -> dict:
+    """Termina un sub-agente en ejecución (SIGTERM → SIGKILL).
+
+    Argumentos:
+        agent_id: UUID del agente (devuelto por spawn_agent).
+
+    Retorna:
+        {agent_id, killed: bool, message: str}
+    """
+    return _spw().kill(agent_id)
+
+
+@mcp.tool()
+def get_agent_status(agent_id: str) -> dict:
+    """Devuelve el estado actual de un sub-agente.
+
+    Combina el estado en lina-db con el estado real del proceso (poll).
+
+    Argumentos:
+        agent_id: UUID del agente.
+
+    Retorna:
+        {agent_id, role, goal, status, pid, elapsed_seconds, process_alive}
+        status: pending | running | completed | failed | killed | timeout
+    """
+    return _spw().get_status(agent_id)
+
+
+@mcp.tool()
+def list_agents(include_completed: bool = False) -> list[dict]:
+    """Lista los sub-agentes y su estado.
+
+    Argumentos:
+        include_completed: si True, incluye también los agentes que ya terminaron
+                           (completed / failed / killed / timeout). Default False.
+
+    Retorna:
+        Lista de {agent_id, role, goal, status, pid, elapsed_seconds}.
+    """
+    try:
+        import psycopg2
+        import psycopg2.extras
+
+        from lina_orchestrator.infrastructure.spawner import _db_conn  # noqa: PLC0415
+
+        conn = _db_conn()
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                if include_completed:
+                    cur.execute(
+                        """SELECT id AS agent_id, role, goal, status, pid,
+                                  EXTRACT(EPOCH FROM (NOW() - started_at))::INT AS elapsed_seconds
+                           FROM agent_sessions
+                           ORDER BY created_at DESC LIMIT 50"""
+                    )
+                else:
+                    cur.execute(
+                        """SELECT id AS agent_id, role, goal, status, pid, elapsed_seconds
+                           FROM agent_sessions_active"""
+                    )
+                rows = [dict(r) for r in cur.fetchall()]
+        finally:
+            conn.close()
+        return rows
+    except Exception as exc:  # noqa: BLE001
+        return [{"error": str(exc)}]
+
+
+@mcp.tool()
+def send_instruction(agent_id: str, text: str) -> dict:
+    """Envía una instrucción adicional a un sub-agente en ejecución.
+
+    La instrucción se escribe en la tabla agent_commands. El sub-agente
+    la leerá por polling o via LISTEN/NOTIFY de PostgreSQL.
+
+    Argumentos:
+        agent_id: UUID del agente destino.
+        text:     instrucción en texto libre.
+
+    Retorna:
+        {command_id, agent_id, kind, sent_at}
+    """
+    try:
+        import json as _json  # noqa: PLC0415
+
+        import psycopg2.extras as _pge  # noqa: PLC0415
+
+        from lina_orchestrator.infrastructure.spawner import (  # noqa: PLC0415
+            _db_append_event,
+            _db_conn,
+        )
+
+        conn = _db_conn()
+        try:
+            with conn.cursor(cursor_factory=_pge.RealDictCursor) as cur:
+                cur.execute(
+                    "INSERT INTO agent_commands (session_id, kind, args_json)"
+                    " VALUES (%s, %s, %s) RETURNING id, sent_at",
+                    (agent_id, "send_instruction", _json.dumps({"text": text})),
+                )
+                row = dict(cur.fetchone())
+            conn.commit()
+        finally:
+            conn.close()
+
+        _db_append_event(agent_id, "instruction_received", {"text": text[:100]})
+
+        return {
+            "command_id": row["id"],
+            "agent_id": agent_id,
+            "kind": "send_instruction",
+            "sent_at": row["sent_at"].isoformat() if row.get("sent_at") else None,
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
 
 
 def main() -> None:
