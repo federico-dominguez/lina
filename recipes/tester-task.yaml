@@ -1,0 +1,43 @@
+version: "1.0.0"
+title: "Delegar ejecución de tests a sub-agente tester"
+description: |
+  Spawna un sub-agente con rol 'tester' para correr la suite de tests de un MCP,
+  reportar coverage y fallos. No hace commits ni push.
+
+  Uso: Verificar que tests pasan antes de hacer PR, o para checkear regresiones.
+
+parameters:
+  mcp:
+    description: "Nombre del MCP a testear (ej: 'lina-db', 'orchestrator', 'gns3')"
+    required: true
+  threshold:
+    description: "Coverage mínimo requerido en % (default: el del CI)"
+    required: false
+
+instructions: |
+  ## Proceso de testing delegado
+
+  1. **Spawneá el agente** con `spawn_agent` del MCP lina-orchestrator:
+     - role: "tester"
+     - goal: |
+         Corré los tests del MCP {{mcp}} y reportá los resultados.
+
+         PASOS:
+         1. Ejecutá via sh_run:
+            cd /home/user/lina/mcps/{{mcp}} && uv run pytest tests/ --cov=src --cov-report=term-missing -v 2>&1
+         2. Si hay fallos, listá los nombres de los tests fallidos y el error.
+         3. Si todos pasan, reportá el % de coverage y las líneas no cubiertas.
+         4. Guardá el resumen en lina-db:
+            store_memory(key="test-result-{{mcp}}-<fecha>", value=<resumen>)
+         5. Llamá update_agent_status() con el resultado.
+
+         CRITERIO DE ÉXITO: todos los tests pasan y coverage ≥ {{threshold|60}}%.
+
+  2. **Reportá el inicio** a Federico:
+     ```
+     🧪 Tester spawneado para {{mcp}}
+     ID: <agent_id>
+     ```
+
+  3. **Al completar**, leer el resultado con
+     `get_memory(key="test-result-{{mcp}}-<fecha>")` y reportarlo.

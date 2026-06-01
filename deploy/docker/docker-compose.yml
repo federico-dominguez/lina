@@ -361,6 +361,9 @@ services:
       MCP_TRANSPORT: streamable-http
       MCP_PORT: "8000"
       LINA_POLICIES_FILE: /home/user/lina/config/policies.yaml
+      LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
+      LINA_GOOSED_URL: https://goosed:3000
+      LINA_GOOSED_SECRET: ${GOOSE_SERVER__SECRET_KEY:-}
     volumes:
       - ../../config/policies.yaml:/home/user/lina/config/policies.yaml:ro
 

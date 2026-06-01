@@ -37,6 +37,11 @@ class Config:
     # unless overridden via GATEWAY_NOTIFY_CHAT_IDS (comma-separated integers).
     notify_chat_ids: list[int]
 
+    # --- Agent notifier ---
+    # How often (seconds) the background poller checks lina-db for agent status
+    # transitions.  Set to 0 to disable the notifier entirely.
+    agent_poll_interval: float
+
     def __init__(self) -> None:
         self.bot_token = _require("TELEGRAM_BOT_TOKEN")
         raw_trusted = os.environ.get("GOOSE_GATEWAY_TRUSTED_USERS", "")
@@ -53,6 +58,7 @@ class Config:
 
         self.lina_db_url = os.environ.get("LINA_DB_URL") or None
         self.deepseek_api_key = os.environ.get("DEEPSEEK_API_KEY") or None
+        self.agent_poll_interval = float(os.environ.get("GATEWAY_AGENT_POLL_INTERVAL", "10"))
 
         # GATEWAY_NOTIFY_CHAT_IDS takes priority; falls back to extracting numeric
         # IDs from GOOSE_GATEWAY_TRUSTED_USERS ("telegram:<id>" entries).

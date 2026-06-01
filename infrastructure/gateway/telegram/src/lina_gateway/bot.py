@@ -90,6 +90,52 @@ class Bot:
                 await self._tg.send_message(chat_id, "ℹ️ No hay ninguna tarea en curso.")
             return
 
+        # ── /agents ───────────────────────────────────────────────
+        if text.strip() == "/agents":
+            await self._handle_agents(chat_id)
+            return
+
+        # ── /status <agent_id> ────────────────────────────────────────────
+        if text.strip().lower().startswith("/status"):
+            parts = text.strip().split(None, 1)
+            if len(parts) < 2:
+                await self._tg.send_message(
+                    chat_id,
+                    "⚠️ Uso: <code>/status &lt;agent_id&gt;</code>",
+                )
+            else:
+                await self._handle_agent_status(chat_id, parts[1].strip())
+            return
+
+        # ── /events <agent_id> ────────────────────────────────────────────
+        if text.strip().lower().startswith("/events"):
+            parts = text.strip().split(None, 1)
+            if len(parts) < 2:
+                await self._tg.send_message(
+                    chat_id,
+                    "⚠️ Uso: <code>/events &lt;agent_id&gt;</code>",
+                )
+            else:
+                await self._handle_agent_events(chat_id, parts[1].strip())
+            return
+
+        # ── /instruct <agent_id> <texto> ────────────────────────────────
+        # Expands to a precise LINA prompt so lina-orchestrator handles the tool call.
+        if text.strip().lower().startswith("/instruct"):
+            parts = text.strip().split(None, 2)
+            if len(parts) < 3:
+                await self._tg.send_message(
+                    chat_id,
+                    "⚠️ Uso: <code>/instruct &lt;agent_id&gt; &lt;instrucción&gt;</code>",
+                )
+                return
+            _, agent_id, instruction = parts
+            text = (
+                f"Enviá la siguiente instrucción al sub-agente con ID '{agent_id}' "
+                f"usando send_instruction() del MCP lina-orchestrator: {instruction}"
+            )
+            # falls through to normal goosed flow
+
         # ── voice note ─────────────────────────────────────────────────
         if msg.voice:
             if msg.voice.file_size and msg.voice.file_size > MAX_VOICE_FILE_SIZE:
@@ -140,6 +186,137 @@ class Bot:
             self._busy[chat_id] = False
             # Clear reaction on original message
             await self._tg.set_reaction(chat_id, msg.message_id, "")
+
+    async def _handle_agents(self, chat_id: int) -> None:
+        """Show active sub-agents from lina-db without going through goosed."""
+        db_url = self._cfg.lina_db_url
+        if not db_url:
+            await self._tg.send_message(chat_id, "⚠️ lina-db no disponible.")
+            return
+        try:
+            import asyncpg
+
+            conn = await asyncpg.connect(db_url, timeout=5)
+            try:
+                rows = await conn.fetch(
+                    "SELECT id, role, goal, status, elapsed_seconds"
+                    " FROM agent_sessions_active ORDER BY started_at DESC NULLS LAST LIMIT 10"
+                )
+            finally:
+                await conn.close()
+        except Exception as exc:  # noqa: BLE001
+            await self._tg.send_message(chat_id, f"⚠️ Error: <code>{exc}</code>")
+            return
+
+        if not rows:
+            await self._tg.send_message(chat_id, "ℹ️ No hay agentes activos.")
+            return
+
+        lines = ["<b>Agentes activos:</b>"]
+        for r in rows:
+            elapsed = int(r["elapsed_seconds"] or 0)
+            mins, secs = divmod(elapsed, 60)
+            goal_short = r["goal"][:60] + ("…" if len(r["goal"]) > 60 else "")
+            lines.append(
+                f"• <code>{r['id'][:8]}</code> [{r['role']}] {r['status']}"
+                f" ({mins}m{secs:02d}s) — {goal_short}"
+            )
+        await self._tg.send_message(chat_id, "\n".join(lines))
+
+    async def _handle_agent_status(self, chat_id: int, agent_id_prefix: str) -> None:
+        """Show detailed status for a single agent, matched by id prefix."""
+        db_url = self._cfg.lina_db_url
+        if not db_url:
+            await self._tg.send_message(chat_id, "⚠️ lina-db no disponible.")
+            return
+        try:
+            import asyncpg
+
+            conn = await asyncpg.connect(db_url, timeout=5)
+            try:
+                rows = await conn.fetch(
+                    "SELECT id, role, goal, status, pid, started_at, ended_at, "
+                    "result_summary, created_at, "
+                    "EXTRACT(EPOCH FROM (COALESCE(ended_at, NOW()) - started_at))::INT AS elapsed "
+                    "FROM agent_sessions "
+                    "WHERE id LIKE $1 || '%' ORDER BY created_at DESC LIMIT 1",
+                    agent_id_prefix,
+                )
+                events_count = 0
+                if rows:
+                    events_count = await conn.fetchval(
+                        "SELECT COUNT(*) FROM agent_events WHERE session_id = $1",
+                        rows[0]["id"],
+                    )
+            finally:
+                await conn.close()
+        except Exception as exc:  # noqa: BLE001
+            await self._tg.send_message(chat_id, f"⚠️ Error: <code>{exc}</code>")
+            return
+
+        if not rows:
+            await self._tg.send_message(chat_id, f"ℹ️ No encontré agente con id <code>{agent_id_prefix}</code>")
+            return
+
+        r = rows[0]
+        elapsed = int(r["elapsed"] or 0)
+        mins, secs = divmod(elapsed, 60)
+        status_icon = {"running": "🔄", "pending": "⏳", "completed": "✅", "failed": "❌", "killed": "🛑", "timeout": "⌛"}.get(r["status"], "❓")
+        summary = r["result_summary"] or "(sin resumen)"
+        lines = [
+            f"<b>Agente</b> <code>{r['id'][:12]}</code>",
+            f"<b>Rol:</b> {r['role']}",
+            f"<b>Estado:</b> {status_icon} {r['status']} ({mins}m{secs:02d}s)",
+            f"<b>Eventos:</b> {events_count}",
+            f"<b>Goal:</b> {r['goal'][:200]}",
+            f"<b>Resumen:</b> {summary[:300]}",
+        ]
+        await self._tg.send_message(chat_id, "\n".join(lines))
+
+    async def _handle_agent_events(self, chat_id: int, agent_id_prefix: str) -> None:
+        """Show last 10 events for an agent, matched by id prefix."""
+        db_url = self._cfg.lina_db_url
+        if not db_url:
+            await self._tg.send_message(chat_id, "⚠️ lina-db no disponible.")
+            return
+        try:
+            import asyncpg
+
+            conn = await asyncpg.connect(db_url, timeout=5)
+            try:
+                # Resolve full id from prefix
+                full_id = await conn.fetchval(
+                    "SELECT id FROM agent_sessions WHERE id LIKE $1 || '%' ORDER BY created_at DESC LIMIT 1",
+                    agent_id_prefix,
+                )
+                if not full_id:
+                    await self._tg.send_message(chat_id, f"ℹ️ No encontré agente con id <code>{agent_id_prefix}</code>")
+                    return
+                rows = await conn.fetch(
+                    "SELECT kind, ts, payload_json FROM agent_events "
+                    "WHERE session_id = $1 ORDER BY ts DESC LIMIT 15",
+                    full_id,
+                )
+            finally:
+                await conn.close()
+        except Exception as exc:  # noqa: BLE001
+            await self._tg.send_message(chat_id, f"⚠️ Error: <code>{exc}</code>")
+            return
+
+        if not rows:
+            await self._tg.send_message(chat_id, f"ℹ️ Sin eventos para agente <code>{agent_id_prefix}</code>")
+            return
+
+        lines = [f"<b>Últimos eventos — agente <code>{agent_id_prefix}</code>:</b>"]
+        for r in reversed(rows):  # oldest first
+            ts_str = r["ts"].strftime("%H:%M:%S") if r["ts"] else "?"
+            payload = r["payload_json"] or {}
+            detail = ""
+            if isinstance(payload, dict):
+                detail = payload.get("summary") or payload.get("text") or payload.get("error") or ""
+            detail_str = f" — {str(detail)[:60]}" if detail else ""
+            lines.append(f"  <code>{ts_str}</code> {r['kind']}{detail_str}")
+        await self._tg.send_message(chat_id, "\n".join(lines))
 
     async def _wait_for_goosed(self, *, timeout: float = _GOOSED_RESTART_TIMEOUT) -> bool:
         """Poll until goosed responds to /status or timeout expires. Returns True if recovered."""

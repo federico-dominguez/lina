@@ -1,0 +1,60 @@
+version: "1.0.0"
+title: "Delegar tarea de desarrollo a sub-agente"
+description: |
+  Spawna un sub-agente con rol 'dev' para ejecutar una tarea de desarrollo
+  autónomamente. El agente tiene acceso a lina-fs-safe, lina-shell-policy,
+  lina-github, lina-gitlab y lina-db.
+
+  Uso: Invocar cuando Federico pide implementar un issue, correr tests,
+  crear PRs, o cualquier tarea técnica que no requiera su supervisión directa.
+
+parameters:
+  goal:
+    description: "Descripción clara de la tarea. Incluir contexto, archivos relevantes y criterios de éxito."
+    required: true
+  issue_ref:
+    description: "Número de issue de GitHub a cerrar (opcional, ej: '#91')"
+    required: false
+
+instructions: |
+  ## Proceso de delegación
+
+  1. **Confirmá el goal** con Federico antes de spawnear si hay ambigüedad.
+     Si el goal es claro, procedé directo.
+
+  2. **Spawneá el agente** llamando a `spawn_agent` del MCP lina-orchestrator:
+     - role: "dev"
+     - goal: el goal con toda la información necesaria. Incluir:
+       - Contexto del repo (rama main, estructura relevante)
+       - Criterios de éxito (tests que deben pasar, cobertura mínima, etc.)
+       - Si hay issue_ref: "Al completar, creá o actualizá PR que cierre {{issue_ref}}"
+
+  3. **Reportá el inicio** a Federico:
+     ```
+     ⚙️ Sub-agente dev spawneado
+     ID: <agent_id>
+     Goal: <resumen de 1 línea>
+     Podés monitorear con: "¿cómo va el agente <agent_id>?"
+     ```
+
+  4. **No esperes activamente** — el agente trabaja en background.
+     Continuá con otras tareas de Federico normalmente.
+
+  5. **Si Federico pregunta por el estado**, llamá:
+     - `get_agent_status(agent_id)` para ver si está running/completed/failed
+     - `list_agent_events(agent_id, limit=10)` para ver los últimos hitos
+
+  6. **Al completar** (status=completed), reportá:
+     ```
+     ✅ Sub-agente <agent_id> completó la tarea
+     Resumen: <result_summary del agente>
+     ```
+     Si hay PR creado, linkialo.
+
+  ## Manejo de errores
+  - Si spawn falla con "goosed no encontrado": el binario no está en el path
+    del container. Reportalo y ofrecer ejecutar la tarea directamente vos.
+  - Si el agente falla (status=failed): mostrá el result_summary con el error
+    y ofrecer reintentar con goal más específico.
+  - Si el agente lleva más de 120 min sin completar: alertar a Federico y
+    ofrecer `kill_agent(agent_id)`.

@@ -1,0 +1,39 @@
+version: "1.0.0"
+title: "Primera tarea de auto-mejora: gns3 coverage issue #104"
+description: |
+  Spawn a dev sub-agent to improve gns3 MCP test coverage from 60% to 75%.
+  This is the first real self-improvement task for LINA's multi-agent system.
+
+instructions: |
+  Invocá `spawn_agent` del MCP lina-orchestrator con:
+
+  - role: "dev"
+  - goal: |
+      Tu tarea es aumentar la cobertura de tests del MCP lina-gns3 de 60% a ≥75%.
+
+      CONTEXTO:
+      - Repo: /home/user/lina (rama: feat/104-gns3-coverage o creá una nueva desde main)
+      - MCP a mejorar: mcps/gns3/
+      - Tests actuales: mcps/gns3/tests/
+      - Server: mcps/gns3/src/lina_gns3/server.py
+
+      PASOS:
+      1. Hacé checkout a una branch nueva: feat/104-gns3-coverage (desde main)
+      2. Ejecutá: cd mcps/gns3 && uv run pytest tests/ --cov=src --cov-report=term-missing
+         para ver qué líneas no están cubiertas.
+      3. Agregá tests en mcps/gns3/tests/ para cubrir las líneas faltantes.
+         NO modificues src/ — solo tests.
+      4. Verificá que pase: uv run pytest tests/ --cov=src --cov-fail-under=75
+      5. Hacé commit con mensaje: "test(#104): increase gns3 coverage to 75%+"
+      6. Creá un PR que cierre #104.
+      7. Llamá a update_agent_status() del MCP lina-db con result_summary describiendo
+         el resultado (PR número, cobertura lograda).
+
+      RESTRICCIONES:
+      - Solo modificás archivos en mcps/gns3/tests/
+      - No rompas tests existentes
+      - Usá lina-fs-safe para leer/escribir archivos
+      - Usá lina-shell-policy para ejecutar comandos (pytest, git)
+      - Usá lina-github para crear el PR
+
+  Después de spawnear, reportá el agent_id a Federico.
