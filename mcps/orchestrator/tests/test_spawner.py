@@ -2,7 +2,12 @@
 
 El nuevo SpawnerService usa HTTP API de goosed (requests.post) en vez de
 subprocess.Popen. No hay config YAML, no hay tracking de procesos nativos,
-no hay señales SIGTERM/SIGKILL — todo se maneja via goosed HTTP API + DB.
+no hay seniales SIGTERM/SIGKILL — todo se maneja via goosed HTTP API + DB.
+
+Estrategia:
+  - SpawnerService usa requests.post y psycopg2; ambos se mockean.
+  - Las tools de server.py se verifican con spawner mockeado.
+  - Coverage target: 80% (lineas de SSE streaming excluidas).
 """
 
 from __future__ import annotations
@@ -84,12 +89,12 @@ class TestDbHelpers:
         _, spawner_mod = _make_spawner(tmp_policies, monkeypatch)
         with patch("psycopg2.connect", return_value=_mock_db_conn()):
             spawner_mod._db_create_session("tid", "dev", "goal")
-        # smoke test — no exception means SQL was valid
 
-    def test_db_update_status_running(self, tmp_policies, monkeypatch):
+    @pytest.mark.parametrize("status", ["running", "completed", "failed", "killed"])
+    def test_db_update_status(self, tmp_policies, monkeypatch, status):
         _, spawner_mod = _make_spawner(tmp_policies, monkeypatch)
         with patch("psycopg2.connect", return_value=_mock_db_conn()):
-            spawner_mod._db_update_status("tid", "running", pid=999)
+            spawner_mod._db_update_status("tid", status, result_summary="done")
 
     def test_db_append_event(self, tmp_policies, monkeypatch):
         _, spawner_mod = _make_spawner(tmp_policies, monkeypatch)
@@ -113,19 +118,53 @@ class TestSpawnerServiceSpawn:
         assert result["goosed_session_id"] == "sess-001"
         assert len(result["agent_id"]) == 32
 
+    def test_spawn_sends_request(self, tmp_policies, monkeypatch):
+        spawner, spawner_mod = _make_spawner(
+            tmp_policies, monkeypatch, {"LINA_GOOSED_URL": "http://t:3000"}
+        )
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {"id": "sess-001"}
+        with (
+            patch.object(spawner_mod, "_db_create_session"),
+            patch.object(spawner_mod, "_db_update_status"),
+            patch.object(spawner_mod, "_db_append_event"),
+            patch("requests.post", return_value=mock_resp) as mock_post,
+        ):
+            spawner.spawn("dev", "task")
+        mock_post.assert_any_call(
+            "http://t:3000/agent/start",
+            json={"working_dir": "/tmp"},
+            headers={"Content-Type": "application/json"},
+            verify=False,
+            timeout=30,
+        )
+
     def test_spawn_unknown_role(self, tmp_policies, monkeypatch):
         spawner, _ = _make_spawner(tmp_policies, monkeypatch)
         with pytest.raises(ValueError, match="Rol desconocido"):
             spawner.spawn("nonexistent", "goal")
 
-    def test_spawn_goosed_connection_error(self, tmp_policies, monkeypatch):
+    def test_spawn_connection_error(self, tmp_policies, monkeypatch):
         spawner, spawner_mod = _make_spawner(tmp_policies, monkeypatch)
         with (
             patch.object(spawner_mod, "_db_create_session"),
             patch.object(spawner_mod, "_db_update_status"),
             patch.object(spawner_mod, "_db_append_event"),
             patch("requests.post", side_effect=requests.ConnectionError("no route")),
-            pytest.raises(RuntimeError, match="No se pudo crear sesión"),
+            pytest.raises(RuntimeError, match="No se pudo crear sesion"),
+        ):
+            spawner.spawn("dev", "goal")
+
+    def test_spawn_http_error(self, tmp_policies, monkeypatch):
+        spawner, spawner_mod = _make_spawner(tmp_policies, monkeypatch)
+        mock_resp = MagicMock(status_code=500)
+        mock_resp.raise_for_status.side_effect = requests.HTTPError("500")
+        with (
+            patch.object(spawner_mod, "_db_create_session"),
+            patch.object(spawner_mod, "_db_update_status"),
+            patch.object(spawner_mod, "_db_append_event"),
+            patch("requests.post", return_value=mock_resp),
+            pytest.raises(RuntimeError, match="No se pudo crear sesion"),
         ):
             spawner.spawn("dev", "goal")
 
@@ -140,7 +179,7 @@ class TestSpawnerServiceKill:
     def test_kill_running(self, tmp_policies, monkeypatch):
         spawner, spawner_mod = _make_spawner(tmp_policies, monkeypatch)
         with (
-            patch.object(spawner_mod, "_db_conn", return_value=_mock_db_conn(({"status": "running"}))),
+            patch.object(spawner_mod, "_db_conn", return_value=_mock_db_conn({"status": "running"})),
             patch.object(spawner_mod, "_db_update_status"),
             patch.object(spawner_mod, "_db_append_event"),
         ):
@@ -157,7 +196,8 @@ class TestSpawnerGetStatus:
 
     def test_returns_fields(self, tmp_policies, monkeypatch):
         spawner, spawner_mod = _make_spawner(tmp_policies, monkeypatch)
-        row = {"id": "aabbccdd" * 4, "role": "dev", "goal": "x", "status": "running", "pid": None, "elapsed_seconds": 10}
+        row = {"id": "aabbccdd" * 4, "role": "dev", "goal": "x",
+               "status": "running", "pid": None, "elapsed_seconds": 10}
         with patch.object(spawner_mod, "_db_conn", return_value=_mock_db_conn(row)):
             result = spawner.get_status("aabbccdd" * 4)
         assert result["status"] == "running"
@@ -233,7 +273,7 @@ class TestServerSpawnTool:
             patch.object(spawner_mod, "_db_conn", return_value=_mock_db_conn(fake_row)),
             patch.object(spawner_mod, "_db_append_event"),
         ):
-            result = reloaded_server.send_instruction("agent-abc", "nueva instrucción")
+            result = reloaded_server.send_instruction("agent-abc", "nueva instruccion")
         assert result["command_id"] == 42
 
 
