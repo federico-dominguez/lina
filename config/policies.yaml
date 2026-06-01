@@ -1,0 +1,90 @@
+# LINA — Políticas de seguridad por rol de subagente
+#
+# Fuente de verdad declarativa para qué puede hacer cada rol.
+# Cargado y validado con pydantic al arrancar el orquestador.
+# Reloadable con SIGHUP sin reiniciar el orquestador.
+#
+# Campos por rol:
+#   description:          texto legible del propósito del rol
+#   allowed_mcps:         lista de MCPs a los que puede conectarse (deny-all el resto)
+#   sudo_allowed:         si true, sudo_allowlist es obligatorio
+#   sudo_allowlist:       comandos sudo permitidos (solo si sudo_allowed=true)
+#   max_runtime_minutes:  tiempo máximo de vida del subagente (SIGTERM → SIGKILL)
+#   max_tokens_per_run:   tokens máximos por ejecución (aprox.)
+#   max_usd_per_day:      presupuesto diario en USD (0 = sin límite)
+#   needs_approval_for:   acciones que requieren confirmación humana antes de ejecutar
+
+version: "1"
+
+roles:
+  dev:
+    description: >
+      Subagente de desarrollo: modifica código, corre tests, crea PRs.
+      Solo puede escribir dentro del repo lina/ (lina-fs-safe allowlist).
+    allowed_mcps:
+      - lina-fs-safe
+      - lina-shell-policy
+      - lina-github
+      - lina-gitlab
+      - lina-db
+    sudo_allowed: false
+    max_runtime_minutes: 30
+    max_tokens_per_run: 50000
+    max_usd_per_day: 2.0
+    needs_approval_for:
+      - git_push_to_main
+      - pr_merge
+      - file_delete
+      - modify_policies_yaml
+      - modify_secrets_config
+
+  ops:
+    description: >
+      Subagente de operaciones: monitoreo, deploys, gestión de servicios.
+      Puede reiniciar servicios lina-* pero no modificar código.
+    allowed_mcps:
+      - lina-shell-policy
+      - lina-systemd-user
+      - lina-db
+      - lina-secrets
+    sudo_allowed: true
+    sudo_allowlist:
+      - "lina-deploy restart"
+      - "apt-get install"
+      - "docker compose"
+    max_runtime_minutes: 15
+    max_tokens_per_run: 20000
+    max_usd_per_day: 1.0
+    needs_approval_for:
+      - service_restart_goosed
+      - deploy_production
+      - database_migration
+
+  study:
+    description: >
+      Subagente académico: interactúa con Moodle, calendarios y material de estudio.
+      Sin acceso a shell ni código — solo lectura/escritura de datos académicos.
+    allowed_mcps:
+      - lina-moodle
+      - lina-db
+      - lina-gcalendar
+      - lina-fs-safe
+    sudo_allowed: false
+    max_runtime_minutes: 20
+    max_tokens_per_run: 30000
+    max_usd_per_day: 1.0
+    needs_approval_for:
+      - quiz_submit
+      - calendar_event_delete
+
+  research:
+    description: >
+      Subagente de investigación: búsqueda web, análisis de información.
+      Sin acceso a filesystem ni shell.
+    allowed_mcps:
+      - lina-db
+    sudo_allowed: false
+    max_runtime_minutes: 15
+    max_tokens_per_run: 40000
+    max_usd_per_day: 1.5
+    needs_approval_for: []
