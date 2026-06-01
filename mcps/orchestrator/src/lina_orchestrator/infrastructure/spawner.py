@@ -1,23 +1,7 @@
-"""SpawnerService — lanza sub-agentes goosed via HTTP API (issue #84).
-
-Variables de entorno:
-  LINA_GOOSED_URL          URL del goosed server (default: https://goosed:3000)
-  LINA_GOOSED_SECRET       x-secret-key del goosed server
-  LINA_DB_URL              PostgreSQL DSN para el control-plane
-  LINA_SPAWN_HTTP_TIMEOUT  timeout en segundos para /agent/start (default: 30)
-  LINA_RESUME_TIMEOUT      timeout en segundos para /agent/resume (default: 180)
-  LINA_POST_RESUME_DELAY   segundos de espera tras timeout de resume (default: 5)
-
-Diseño:
-  spawn() retorna inmediatamente tras /agent/start. Resume + stream corren en un
-  daemon thread para no bloquear el MCP transport (que tiene timeout corto).
-"""
-
-from __future__ import annotations
-
 import json
 import logging
 import os
+import tempfile
 import threading
 import time
 import uuid
@@ -45,9 +29,6 @@ def _goosed_headers() -> dict[str, str]:
     if _GOOSED_SECRET:
         headers["x-secret-key"] = _GOOSED_SECRET
     return headers
-
-
-# ─── DB helpers ───────────────────────────────────────────────────────────────
 
 
 def _db_conn() -> psycopg2.extensions.connection:
@@ -113,9 +94,6 @@ def _db_append_event(session_id: str, kind: str, payload: dict | None = None) ->
         conn.close()
 
 
-# ─── Agent config / prompt ────────────────────────────────────────────────────
-
-
 def _build_system_prompt(role: str, goal: str, session_id: str) -> str:
     return (
         f"Sos un sub-agente de LINA con rol '{role}'.\n"
@@ -132,9 +110,6 @@ def _build_system_prompt(role: str, goal: str, session_id: str) -> str:
         "- Si encontrás un bloqueante insalvable, llamá update_agent_status() con "
         "status='failed' y describí el problema en result_summary."
     )
-
-
-# ─── Background worker: resume + stream ──────────────────────────────────────
 
 
 def _resume_and_stream(
@@ -203,7 +178,12 @@ def _resume_and_stream(
             timeout=(10, 600),
         ) as resp:
             if not resp.ok:
-                log.error("sub-agent %s: /reply %d: %s", agent_id, resp.status_code, resp.text[:200])
+                log.error(
+                    "sub-agent %s: /reply %d: %s",
+                    agent_id,
+                    resp.status_code,
+                    resp.text[:200],
+                )
                 _db_update_status(agent_id, "failed", result_summary=f"goosed_{resp.status_code}")
                 return
 
@@ -216,7 +196,6 @@ def _resume_and_stream(
                         data = json.loads(raw_line[6:])
                     except json.JSONDecodeError:
                         continue
-                    # goosed sends "Finish" (capital F) — normalise to lowercase
                     etype = (data.get("type") or data.get("event_type", "")).lower()
                     if etype == "finish":
                         finish_reason = data.get("reason", "end_turn")
@@ -237,10 +216,12 @@ def _resume_and_stream(
         current_status = row[0] if row else "unknown"
         log.info("sub-agent %s: done (finish=%s db=%s)", agent_id, finish_reason, current_status)
         if current_status == "running":
-            # finish_reason can be goosed camelCase ("EndTurn", "MaxTokens") or None
             terminal = (
                 "failed"
-                if (finish_reason is None or str(finish_reason).lower() in ("max_tokens", "maxtokens", "error"))
+                if (
+                    finish_reason is None
+                    or str(finish_reason).lower() in ("max_tokens", "maxtokens", "error")
+                )
                 else "completed"
             )
             _db_update_status(agent_id, terminal, result_summary=f"stream_ended_{finish_reason}")
@@ -251,9 +232,6 @@ def _resume_and_stream(
         _db_update_status(agent_id, "failed", result_summary=f"request_error: {exc}")
 
 
-# ─── SpawnerService ───────────────────────────────────────────────────────────
-
-
 class SpawnerService:
     """Gestiona el ciclo de vida de sub-agentes via HTTP API de goosed."""
 
@@ -262,18 +240,6 @@ class SpawnerService:
         self._goosed_sessions: dict[str, str] = {}
 
     def spawn(self, role: str, goal: str) -> dict:
-        """Lanza un sub-agente goosed. Retorna inmediatamente tras /agent/start.
-
-        Resume y stream de SSE corren en background (daemon thread) para no
-        bloquear el MCP transport, que tiene un timeout corto (~30s).
-
-        Args:
-            role: rol del sub-agente (debe existir en policies.yaml).
-            goal: instrucción inicial para el sub-agente.
-
-        Returns:
-            {agent_id, role, goal, goosed_session_id, status="pending"}
-        """
         known = self._policy.list_roles()
         if role not in known:
             raise ValueError(f"Rol desconocido: {role!r}. Roles disponibles: {known}")
@@ -284,11 +250,10 @@ class SpawnerService:
 
         headers = _goosed_headers()
 
-        # 1. Create goosed session (fast — just allocates session ID)
         try:
             r_start = requests.post(
                 f"{_GOOSED_URL}/agent/start",
-                json={"working_dir": "/tmp"},
+                json={"working_dir": tempfile.gettempdir()},
                 headers=headers,
                 verify=False,  # noqa: S501
                 timeout=_HTTP_TIMEOUT,
@@ -306,7 +271,6 @@ class SpawnerService:
 
         log.info("sub-agent %s: goosed session = %s", agent_id, goosed_session_id)
 
-        # 2. Launch background thread: resume + stream (can take 60-180s)
         self._goosed_sessions[agent_id] = goosed_session_id
         t = threading.Thread(
             target=_resume_and_stream,
@@ -318,7 +282,6 @@ class SpawnerService:
 
         log.info("sub-agent %s: background thread started (%s)", agent_id, t.name)
 
-        # Return immediately — status is "pending" until background thread updates it
         return {
             "agent_id": agent_id,
             "role": role,
@@ -329,7 +292,6 @@ class SpawnerService:
         }
 
     def kill(self, agent_id: str) -> dict:
-        """Termina un sub-agente marcándolo killed en lina-db."""
         conn = _db_conn()
         try:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -348,7 +310,6 @@ class SpawnerService:
         return {"agent_id": agent_id, "killed": True, "message": "kill registrado en DB"}
 
     def get_status(self, agent_id: str) -> dict:
-        """Devuelve el estado actual de un sub-agente desde lina-db."""
         conn = _db_conn()
         try:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -366,5 +327,5 @@ class SpawnerService:
             return {"error": f"agente {agent_id!r} no encontrado"}
 
         result = dict(row)
-        result["process_alive"] = False  # no subprocess tracking in HTTP mode
+        result["process_alive"] = False
         return result
