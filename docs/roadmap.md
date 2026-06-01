@@ -1,7 +1,7 @@
 # LINA — Roadmap de desarrollo
 
-**Última actualización:** 2026-05-31  
-**Estado actual:** Fase 3 completada (hardening + session persistence). Fase 4 en curso (multi-agente). Fase 3.5 pospuesta.
+**Última actualización:** 2026-06-01  
+**Estado actual:** Fase 3 completada. ADR 0010 mergeado (PR #78). Roadmap reestructurado en milestones `v0.4` → `v0.7`.
 
 ---
 
@@ -53,58 +53,96 @@ Nueva sesión detectada (is_new=True)
 
 ---
 
-## Fase 4 — Autonomía Plena (Multi-Agente)
+## Milestones (orden lógico, sin fechas)
 
-> **Prioridad actual.** Empezamos sin esperar Fase 3.5 completa.  
-> Objetivo: LINA con agentes especializados (dev, ops, assistant) y capacidad de automejora.  
-> Orden estricto por dependencias:
+| Milestone | Contiene | Estado |
+|---|---|---|
+| **v0.4 — Multi-agent core** | #82, #83, #84, #85 + epic #50 | 🟢 next |
+| **v0.4.1 — Telegram UX subagentes** | #86, #87, #88, #89 | bloqueado por v0.4 |
+| **v0.5 — Self-modify + Hot-reload** | #48, #51 | #48 puede empezar en paralelo |
+| **v0.5.1 — Observabilidad + guardrails** | #67, #91, #92, #93 | paralelo a v0.5 |
+| **v0.6 — Multimodal + Proactivo** | #64, #65, #66, #68 | independiente |
+| **v0.7 — LINA as MCP server** | #90 | bloqueado por v0.4 + v0.4.1 + #67 |
 
-| Orden | # | Issue | Qué resuelve | Prerequisito |
-|---|---|---|---|---|
-| 0 | — | Saneamiento de repo + merge Fase 3 a `main` | Limpiar branches viejas, unificar código base | ✅ done |
-| 1 | [#15](https://github.com/federico-dominguez/lina/issues/15) | **ADR 0010 — mcp-agent + Orchestrator-Workers** | Decisión arquitectónica + prototipo | 🟡 en PR |
-| 2 | [#50](https://github.com/federico-dominguez/lina/issues/50) | lina-orchestrator (infra + UX Telegram) | Manager + subagentes con políticas + panel/comandos | #15 |
-| 3 | [#48](https://github.com/federico-dominguez/lina/issues/48) | Hot-reload MCPs sin reiniciar goosed | Modificar MCP sin downtime ni rebuild | #50 |
-| 4 | [#51](https://github.com/federico-dominguez/lina/issues/51) | lina-self-modify — ciclo completo de automejora | Subagente `dev` con aprobaciones + Temporal | #48 |
-| 5 | [#67](https://github.com/federico-dominguez/lina/issues/67) | Observability stack (Prometheus + Grafana) | Métricas por rol, latencia spawn, alertas | paralelo |
-| 6 | [#68](https://github.com/federico-dominguez/lina/issues/68) | lina-android-remote — control del celular | Control remoto del celular de Federico | opc. |
+**Transversal (sin milestone):** CI/CD hardening — #79, #80, #81. Sin dependencias, arranca ya.
 
-**Framework elegido:** [`mcp-agent`](https://github.com/lastmile-ai/mcp-agent) (MCP-native, ~20MB, patrones Anthropic) sobre LangGraph. Ver [docs/architecture/0010-multi-agent-framework.md](architecture/0010-multi-agent-framework.md).
+**Framework elegido:** [`mcp-agent`](https://github.com/lastmile-ai/mcp-agent) — ver [ADR 0010](architecture/0010-multi-agent-framework.md).
 
-### Plan detallado Fase 4
+---
 
-**Paso 0 — Saneamiento de repo** (este PR)
-- Mergear `feat/fase-3-hardening` → `main`
-- Borrar branches remotas ya mergeadas (~20)
-- Borrar branches locales equivalentes
+## v0.4 — Multi-agent core
 
-**Paso 1 — ADR 0010: Framework multi-agente**
-- Investigar Agno, CrewAI, LangGraph, AutoGen
-- Evaluar integración con MCPs, latencia, debuggability
-- Escribir ADR con recomendación
+Construye el orquestador con `mcp-agent` (Orchestrator-Workers de Anthropic):
 
-**Paso 2 — Hot-reload MCPs**
-- Endpoint en goosed o sidecar para reload de MCPs sin restart
-- Alternativa: file watcher automático
-- Tool `reload_mcp(name)` en lina-self-modify
+- [#82](https://github.com/federico-dominguez/lina/issues/82) `config/policies.yaml` + loader pydantic
+- [#83](https://github.com/federico-dominguez/lina/issues/83) migration `009-orchestrator.sql` + LISTEN/NOTIFY
+- [#84](https://github.com/federico-dominguez/lina/issues/84) spawner goosed-per-subagent con kill seguro
+- [#85](https://github.com/federico-dominguez/lina/issues/85) MCP `mcps/orchestrator/` con tools de gestión
+- [#50](https://github.com/federico-dominguez/lina/issues/50) — epic paraguas
 
-**Paso 3 — lina-self-modify**
-- Tools: modify_file, run_tests, run_lint, reload_mcp, rollback_mcp
-- Pipeline pre-deploy: modify → lint → test → reload
-- Rollback automático si falla
+**Criterio de cierre:** LINA recibe "investigá X" → spawn `research` → resultado vuelve. `/agents` lista al subagente activo.
 
-**Paso 4 — lina-orchestrator**
-- Sistema multi-agente con 3 agentes iniciales:
-  - `lina-dev` (código, PRs, refactors)
-  - `lina-ops` (infra, deploys, monitoreo)
-  - `lina-assistant` (Moodle, calendario, tareas generales)
-- Clasificación de intención → delegación → respuesta consolidada
-- Servicio nuevo en docker-compose + tests E2E
+## v0.4.1 — Telegram UX subagentes
 
-**Paso 5 — Observability stack**
-- Prometheus + Grafana en docker-compose
-- Métricas de gateway, orquestador, PostgreSQL
-- Dashboard de tokens, latencia, errores, sesiones activas
+- [#86](https://github.com/federico-dominguez/lina/issues/86) comando `/agents` (dashboard live editable)
+- [#87](https://github.com/federico-dominguez/lina/issues/87) comandos `/kill /pause /resume /replan`
+- [#88](https://github.com/federico-dominguez/lina/issues/88) HumanInputRequest → botones inline
+- [#89](https://github.com/federico-dominguez/lina/issues/89) failure modes (timeouts, DLQ, restart con backoff)
+
+## v0.5 — Self-modify + Hot-reload
+
+- [#48](https://github.com/federico-dominguez/lina/issues/48) hot-reload de MCPs sin reiniciar goosed
+- [#51](https://github.com/federico-dominguez/lina/issues/51) lina-self-modify — ciclo completo con Temporal
+
+## v0.5.1 — Observabilidad + guardrails
+
+- [#67](https://github.com/federico-dominguez/lina/issues/67) Prometheus + Grafana + alerts
+- [#91](https://github.com/federico-dominguez/lina/issues/91) rate-limiting + cost-guards por rol
+- [#92](https://github.com/federico-dominguez/lina/issues/92) backup automatizado + restore drill mensual
+- [#93](https://github.com/federico-dominguez/lina/issues/93) comando `/audit` en Telegram
+
+## v0.6 — Multimodal + Proactivo
+
+- [#64](https://github.com/federico-dominguez/lina/issues/64) image understanding (vision)
+- [#65](https://github.com/federico-dominguez/lina/issues/65) TTS voice responses (opt-in)
+- [#66](https://github.com/federico-dominguez/lina/issues/66) proactive scheduler
+- [#68](https://github.com/federico-dominguez/lina/issues/68) lina-android-remote (opcional)
+
+## v0.7 — LINA as MCP server
+
+- [#90](https://github.com/federico-dominguez/lina/issues/90) MCP `lina-bridge` — expone LINA a otros agentes
+
+## Transversal — CI/CD hardening
+
+- [#79](https://github.com/federico-dominguez/lina/issues/79) build de imágenes Docker en cada PR + size-gate
+- [#80](https://github.com/federico-dominguez/lina/issues/80) integration tests con MCP spawn real
+- [#81](https://github.com/federico-dominguez/lina/issues/81) coverage agregado + gate global 60%
+
+---
+
+## DAG de ejecución
+
+```
+CI/CD (#79, #80, #81) ───────── paralelo permanente, sin blockers
+
+v0.4 ──> v0.4.1 ──> v0.7
+   │       │
+   │       └──> v0.5 (#48 paralelo) ──┐
+   │                                   ├──> v1.0
+   └────── v0.5.1 (paralelo a v0.5) ──┤
+   └────── v0.6 (paralelo) ───────────┘
+```
+
+**Puede empezar ya en paralelo:**
+- CI/CD #79, #80, #81
+- Hot-reload #48 (sin dependencias)
+- ADRs de modelo vision (#64) y TTS (#65)
+
+**Requiere review estricto (no auto-merge):**
+- Todo v0.4 (arquitectura core)
+- #51 self-modify (es meta)
+- #91 cost-guards (toca billing)
+- #92 backup (toca data)
 
 ---
 
