@@ -124,17 +124,19 @@ def _embed(text: str) -> list[float]:
     Returns:
         Lista de floats (1536 dimensiones).
     """
-    import urllib.request as _ur
     import json as _json
+    import urllib.request as _ur
 
     api_key = os.environ.get("DEEPSEEK_API_KEY", "")
     if not api_key:
         raise RuntimeError("DEEPSEEK_API_KEY no configurada — no se puede generar embedding")
 
-    payload = _json.dumps({
-        "model": "text-embedding-3-small",
-        "input": text,
-    }).encode("utf-8")
+    payload = _json.dumps(
+        {
+            "model": "text-embedding-3-small",
+            "input": text,
+        }
+    ).encode("utf-8")
 
     req = _ur.Request(
         "https://api.deepseek.com/v1/embeddings",
@@ -1017,7 +1019,8 @@ def store_semantic_memory(
     else:
         if emb:
             _execute(
-                f"INSERT INTO memories (key, value, expires_at, embedding) VALUES (%s, %s, {expires_sql}, %s)",  # noqa: S608
+                f"INSERT INTO memories (key, value, expires_at, embedding)"  # noqa: S608
+                f" VALUES (%s, %s, {expires_sql}, %s)",
                 (key, value, *expires_param, emb),
             )
         else:
@@ -1079,7 +1082,11 @@ def search_semantic_memory(
     if rows:
         for r in rows:
             r["similarity"] = round(float(r["similarity"]), 4)
-    _audit("search_semantic_memory", {"query": query[:100], "threshold": t}, f"hits={len(rows) if rows else 0}")
+    _audit(
+        "search_semantic_memory",
+        {"query": query[:100], "threshold": t},
+        f"hits={len(rows) if rows else 0}",
+    )
     return rows or []
 
 
