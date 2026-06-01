@@ -90,6 +90,28 @@ class Bot:
                 await self._tg.send_message(chat_id, "ℹ️ No hay ninguna tarea en curso.")
             return
 
+        # ── /agents ───────────────────────────────────────────────
+        if text.strip() == "/agents":
+            await self._handle_agents(chat_id)
+            return
+
+        # ── /instruct <agent_id> <texto> ────────────────────────────────
+        # Expands to a precise LINA prompt so lina-orchestrator handles the tool call.
+        if text.strip().lower().startswith("/instruct"):
+            parts = text.strip().split(None, 2)
+            if len(parts) < 3:
+                await self._tg.send_message(
+                    chat_id,
+                    "⚠️ Uso: <code>/instruct &lt;agent_id&gt; &lt;instrucción&gt;</code>",
+                )
+                return
+            _, agent_id, instruction = parts
+            text = (
+                f"Enviá la siguiente instrucción al sub-agente con ID '{agent_id}' "
+                f"usando send_instruction() del MCP lina-orchestrator: {instruction}"
+            )
+            # falls through to normal goosed flow
+
         # ── voice note ─────────────────────────────────────────────────
         if msg.voice:
             if msg.voice.file_size and msg.voice.file_size > MAX_VOICE_FILE_SIZE:
@@ -140,6 +162,42 @@ class Bot:
             self._busy[chat_id] = False
             # Clear reaction on original message
             await self._tg.set_reaction(chat_id, msg.message_id, "")
+
+    async def _handle_agents(self, chat_id: int) -> None:
+        """Show active sub-agents from lina-db without going through goosed."""
+        db_url = self._cfg.lina_db_url
+        if not db_url:
+            await self._tg.send_message(chat_id, "⚠️ lina-db no disponible.")
+            return
+        try:
+            import asyncpg
+
+            conn = await asyncpg.connect(db_url, timeout=5)
+            try:
+                rows = await conn.fetch(
+                    "SELECT id, role, goal, status, elapsed_seconds"
+                    " FROM agent_sessions_active ORDER BY started_at DESC NULLS LAST LIMIT 10"
+                )
+            finally:
+                await conn.close()
+        except Exception as exc:  # noqa: BLE001
+            await self._tg.send_message(chat_id, f"⚠️ Error: <code>{exc}</code>")
+            return
+
+        if not rows:
+            await self._tg.send_message(chat_id, "ℹ️ No hay agentes activos.")
+            return
+
+        lines = ["<b>Agentes activos:</b>"]
+        for r in rows:
+            elapsed = int(r["elapsed_seconds"] or 0)
+            mins, secs = divmod(elapsed, 60)
+            goal_short = r["goal"][:60] + ("…" if len(r["goal"]) > 60 else "")
+            lines.append(
+                f"• <code>{r['id'][:8]}</code> [{r['role']}] {r['status']}"
+                f" ({mins}m{secs:02d}s) — {goal_short}"
+            )
+        await self._tg.send_message(chat_id, "\n".join(lines))
 
     async def _wait_for_goosed(self, *, timeout: float = _GOOSED_RESTART_TIMEOUT) -> bool:
         """Poll until goosed responds to /status or timeout expires. Returns True if recovered."""

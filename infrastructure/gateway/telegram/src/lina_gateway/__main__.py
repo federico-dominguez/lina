@@ -5,6 +5,7 @@ import logging
 import signal
 from contextlib import suppress
 
+from .agent_notifier import AgentNotifier
 from .boot_hook import on_boot, on_shutdown, record_balance_snapshot
 from .bot import Bot
 from .config import Config
@@ -37,10 +38,25 @@ async def _run() -> None:
     loop.add_signal_handler(signal.SIGTERM, stop.set)
     loop.add_signal_handler(signal.SIGINT, stop.set)
 
-    bot_task = loop.create_task(bot.run())
-    stop_task = loop.create_task(stop.wait())
+    bot_task = loop.create_task(bot.run(), name="bot")
+    stop_task = loop.create_task(stop.wait(), name="stop")
 
-    done, pending = await asyncio.wait({bot_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
+    # ── Agent notifier — proactive push of sub-agent status to Telegram ───────
+    notifier_task: asyncio.Task | None = None
+    if cfg.lina_db_url and cfg.notify_chat_ids and cfg.agent_poll_interval > 0:
+        notifier = AgentNotifier(
+            db_url=cfg.lina_db_url,
+            tg=bot.tg,
+            chat_ids=cfg.notify_chat_ids,
+            poll_interval=cfg.agent_poll_interval,
+        )
+        notifier_task = loop.create_task(notifier.run(), name="agent-notifier")
+
+    tasks_to_watch: set[asyncio.Task] = {bot_task, stop_task}
+    if notifier_task is not None:
+        tasks_to_watch.add(notifier_task)
+
+    done, pending = await asyncio.wait(tasks_to_watch, return_when=asyncio.FIRST_COMPLETED)
     for t in pending:
         t.cancel()
         with suppress(asyncio.CancelledError):
