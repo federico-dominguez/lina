@@ -110,6 +110,8 @@ jobs:
             cov_threshold: 60
           - mcp: gns3
             cov_threshold: 60
+          - mcp: orchestrator
+            cov_threshold: 80
 
     steps:
       - name: Checkout

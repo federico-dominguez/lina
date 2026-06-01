@@ -345,6 +345,25 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  # ─── MCP: lina-orchestrator ─────────────────────────────────────────────────
+  # Multi-agent orchestrator: expone políticas de subagentes (read-only MVP).
+  # Lee policies.yaml montado desde el repo del host (ro).
+  lina-mcp-orchestrator:
+    <<: *mcp-defaults
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.mcp
+      args:
+        MCP_DIR: mcps/orchestrator
+        MCP_CMD: lina-orchestrator
+    image: lina-mcp-orchestrator:latest
+    environment:
+      MCP_TRANSPORT: streamable-http
+      MCP_PORT: "8000"
+      LINA_POLICIES_FILE: /home/user/lina/config/policies.yaml
+    volumes:
+      - ../../config/policies.yaml:/home/user/lina/config/policies.yaml:ro
+
   # ─── MCP Gateway — nginx rate limiting (3.3) ────────────────────────────────
   # Proxy reverso para todos los MCPs. Expone 8101-8110 en localhost.
   # Los MCPs no tienen port mappings propios; sólo son accesibles via este gateway.
@@ -363,6 +382,7 @@ services:
       - lina-mcp-gitlab
       - lina-mcp-gcalendar
       - lina-mcp-gns3
+      - lina-mcp-orchestrator
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
@@ -376,6 +396,7 @@ services:
       - "127.0.0.1:8108:8108"
       - "127.0.0.1:8109:8109"
       - "127.0.0.1:8110:8110"
+      - "127.0.0.1:8111:8111"
     healthcheck:
       test: ["CMD", "nginx", "-t"]
       interval: 30s

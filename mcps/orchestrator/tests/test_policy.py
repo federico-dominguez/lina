@@ -10,7 +10,6 @@ from pydantic import ValidationError
 
 from lina_orchestrator.domain.policy import PolicyStore, RolePolicy
 
-
 # ─── helpers ─────────────────────────────────────────────────────────────────
 
 MINIMAL_YAML = textwrap.dedent("""\

@@ -109,6 +109,14 @@ extensions:
     enabled: true
     timeout: 60
 
+  lina-orchestrator:
+    name: lina-orchestrator
+    display_name: LINA Orchestrator
+    type: streamable_http
+    uri: http://lina-mcp-gateway:8111/mcp
+    enabled: true
+    timeout: 30
+
 providers:
   custom_deepseek:
     enabled: true
