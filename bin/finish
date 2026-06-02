@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+"""
+finish — Cierre automático de tarea.
+
+Uso:
+    finish "mensaje opcional"
+    
+Hace:
+  1. Sincroniza logs a PostgreSQL
+  2. Notifica a LINA por Telegram
+"""
+
+import sys
+import subprocess
+import os
+
+BIN = "/home/user/lina/bin"
+SYNC = f"{BIN}/cline-sync-logs.py"
+SEND = f"{BIN}/lina-send.py"
+
+message = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "Tarea finalizada ✅"
+
+# 1. Sync logs
+print("📤 Sincronizando logs...")
+r = subprocess.run([sys.executable, SYNC], capture_output=True, text=True)
+print(r.stdout.strip())
+
+# 2. Notify LINA
+print(f"📨 Notificando a LINA: {message}")
+r = subprocess.run([sys.executable, SEND, message], capture_output=True, text=True)
+if r.returncode == 0:
+    print("✅ LINA notificada")
+else:
+    print(f"❌ Error: {r.stderr}")
+
+print("🎯 Tarea cerrada.")

@@ -1,5 +1,3 @@
 #!/usr/bin/env bash
-# Wrapper CLI delgado sobre el justfile.
-set -euo pipefail
-cd "$HOME/lina"
-exec just "$@"
+# lina — atajo para mandar mensaje a LINA por Telegram
+python3 /home/user/lina/bin/lina-send.py "$@"

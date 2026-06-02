@@ -437,6 +437,85 @@ services:
         max-size: "5m"
         max-file: "2"
 
+  # ─── CLINE Desktop — goosed con acceso total a la PC ────────────────────────
+  # Contenedor privileged con host network para acceso total al sistema.
+  # Comparte los MCPs de LINA vía localhost (host network).
+  # Escucha en puerto 3001 para no colisionar con LINA (puerto 3000).
+  goosed-desktop:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.goosed
+    image: lina-goosed:latest
+    restart: unless-stopped
+    privileged: true               # acceso completo al host
+    network_mode: host             # red del host (localhost funciona directo)
+    pid: host                      # ver todos los procesos del host
+    depends_on:
+      lina-mcp-gateway:
+        condition: service_started
+    environment:
+      LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@localhost:5432/lina
+      GOOSE_SERVER__SECRET_KEY: ${GOOSE_SERVER__SECRET_KEY}
+      GOOSE_PORT: "3001"
+      GOOSE_HOST: "127.0.0.1"
+      GOOSE_MAX_TURNS: ${GOOSE_MAX_TURNS:-1000}
+      GOOSE_GATEWAY_MAX_TURNS: ${GOOSE_GATEWAY_MAX_TURNS:-50}
+      GOOSE_SUBAGENT_MAX_TURNS: ${GOOSE_SUBAGENT_MAX_TURNS:-200}
+      GOOSE_CONTEXT_STRATEGY: ${GOOSE_CONTEXT_STRATEGY:-summarize}
+      GOOSE_TELEMETRY_ENABLED: "false"
+      GOOSE_DISABLE_AUTO_SESSION_TITLES: "true"
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      LINA_ENV: docker
+    volumes:
+      # Config específica para desktop (MCPs via localhost, sin gateway nginx interno)
+      - ../../config/goose.config.desktop.yaml:/root/.config/goose/config.yaml:ro
+      # Sessions y memoria persistentes
+      - ${HOME}/.config/goose/memory:/root/.config/goose/memory:rw
+      - ${HOME}/.config/goose/gateway:/root/.config/goose/gateway:rw
+      - lina-logs:/app/logs
+      # Acceso total al home del usuario
+      - ${HOME}:/home/user:rw
+      # Docker socket para control de contenedores
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+    # Sin healthcheck — privileged + host network puede causar falsos negativos
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    profiles: ["desktop"]
+
+  # ─── CLINE Desktop — Telegram gateway para @s_cline_bot ─────────────────────
+  # Bot de Telegram independiente que se conecta a goosed-desktop.
+  # Usa host network para alcanzar localhost:3001.
+  # Requiere configurar DESKTOP_BOT_TOKEN y DESKTOP_TRUSTED_USERS en .env
+  lina-gateway-desktop:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.gateway
+    image: lina-gateway:latest
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      lina-db:
+        condition: service_healthy
+    environment:
+      TELEGRAM_BOT_TOKEN: ${DESKTOP_BOT_TOKEN:-}
+      GOOSED_URL: https://localhost:3001
+      GOOSE_SERVER_SECRET_KEY: ${GOOSE_SERVER__SECRET_KEY}
+      GOOSE_GATEWAY_TRUSTED_USERS: ${DESKTOP_TRUSTED_USERS:-}
+      GATEWAY_PACER_TICK: "1.5"
+      TELEGRAM_POLL_TIMEOUT: "30"
+      LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@localhost:5432/lina
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      GATEWAY_NOTIFY_CHAT_IDS: ${DESKTOP_NOTIFY_CHAT_IDS:-}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    profiles: ["desktop"]
+
   # ─── Docker socket proxy (Tecnativa) ────────────────────────────────────────
   # Expone un subconjunto restringido del Docker daemon para que LINA pueda
   # arrancar/parar/reiniciar sus contenedores SIN tener acceso al socket completo.
