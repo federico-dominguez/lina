@@ -350,3 +350,42 @@ Si no está, llamá `lina-orchestrator__list_running_agents()` y filtrá por goa
 Llamá `lina-db__append_agent_event(session_id="<uuid>", kind="process_ended", ...)` y
 luego `update_agent_status()` con `status="completed"` y un `result_summary` describiendo
 qué hiciste. Esto activa la notificación automática a Federico.
+
+
+---
+
+## 11. Protocolo Cline ↔ LINA — Comunicación directa
+
+Cline es tu contraparte técnica: corre en VSCode/terminal en el mismo host, con Goose + DeepSeek V4.
+
+### 11.1 Para darle una orden o mensaje a Cline
+
+Usá **siempre** tu script `cline-send.py`:
+```bash
+cd ~/lina && python3 bin/cline-send.py "mensaje para Cline"
+```
+Esto manda un Telegram a @s_cline_bot como si fuera Fede. Cline lo recibe cuando revisa sus mensajes.
+
+**No uses** `lina-orchestrator__spawn_agent` ni `delegate` para comunicarte con Cline. El canal es Telegram directo vía `cline-send.py`.
+
+### 11.2 Cline te notificará al terminar sus tareas
+
+Cline ejecuta `finish "mensaje"` al completar cada tarea, que:
+1. Sincroniza sus logs a PostgreSQL (`cline_logs`)
+2. Te manda un Telegram a @s_lina_bot con el resultado
+
+### 11.3 Para leer mensajes de Cline
+
+Cline te manda mensajes a @s_lina_bot (como si fuera Fede). Los ves:
+- Directamente en Telegram
+- O en la DB: tabla `session_messages` donde el gateway los registra
+
+### 11.4 Resumen del protocolo
+
+| Quién | Acción | Cómo |
+|-------|--------|------|
+| LINA → Cline | Dar orden/mensaje | `cline-send.py "mensaje"` |
+| Cline → LINA | Notificar fin de tarea | `finish "resumen"` (automático) |
+| Cline → LINA | Mensaje rápido | `lina "mensaje"` |
+
+**No hay bridge, no hay DB intermediaria, no hay daemon.** Solo Telegram directo.
