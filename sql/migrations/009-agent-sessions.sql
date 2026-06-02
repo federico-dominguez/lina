@@ -42,7 +42,11 @@ COMMENT ON COLUMN agent_sessions.pid IS
 --       tool_called | error | instruction_received | instruction_ack
 CREATE TABLE IF NOT EXISTS agent_events (
     id              BIGSERIAL   PRIMARY KEY,
-    session_id      TEXT        NOT NULL REFERENCES agent_sessions(id) ON DELETE RESTRICT,
+    session_id      TEXT        NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    kind            TEXT        NOT NULL,
+    payload_json    JSONB,
+    ts              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 CREATE INDEX IF NOT EXISTS idx_aevt_session   ON agent_events (session_id, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_aevt_kind      ON agent_events (kind);
@@ -56,7 +60,9 @@ COMMENT ON TABLE agent_events IS
 -- kind: pause | resume | kill | send_instruction | set_budget
 CREATE TABLE IF NOT EXISTS agent_commands (
     id              BIGSERIAL   PRIMARY KEY,
-    session_id      TEXT        NOT NULL REFERENCES agent_sessions(id) ON DELETE RESTRICT,
+    session_id      TEXT        NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    kind            TEXT        NOT NULL,
+    args_json       JSONB,
     sent_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     ack_at          TIMESTAMPTZ             -- NULL = pendiente de ACK
 );
@@ -102,18 +108,3 @@ ORDER BY created_at DESC;
 
 COMMENT ON VIEW agent_sessions_active IS
     'Agentes en estado pending o running — para /agents dashboard de Telegram.';
-
--- ─── Corregir ON DELETE CASCADE → RESTRICT en tablas ya aplicadas ─────────────
--- Las FKs originales usaban CASCADE; las reemplazamos por RESTRICT para preservar
--- el historial de auditoría. Idempotente: DROP IF EXISTS antes de ADD CONSTRAINT.
-ALTER TABLE agent_events
-    DROP CONSTRAINT IF EXISTS agent_events_session_id_fkey;
-ALTER TABLE agent_events
-    ADD CONSTRAINT agent_events_session_id_fkey
-        FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE RESTRICT;
-
-ALTER TABLE agent_commands
-    DROP CONSTRAINT IF EXISTS agent_commands_session_id_fkey;
-ALTER TABLE agent_commands
-    ADD CONSTRAINT agent_commands_session_id_fkey
-        FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE RESTRICT;
