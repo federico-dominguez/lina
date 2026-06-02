@@ -1,7 +1,7 @@
-# Configuración de goosed para entorno Docker.
-# Este archivo se monta en el contenedor como /root/.config/goose/config.yaml
-# y reemplaza la config del host.
-# Los MCPs se conectan via SSE a través del nginx MCP gateway (lina-mcp-gateway).
+# Configuración de goosed para el desktop agent (CLINE Desktop).
+# Corre con privileged + host network, acceso total a la PC.
+# Los MCPs se conectan via localhost (host network, sin resolver nombres Docker).
+# Escucha en puerto 3001 para no colisionar con LINA (puerto 3000).
 
 GOOSE_TELEMETRY_ENABLED: "false"
 GOOSE_MAX_TURNS: 1000
@@ -22,16 +22,15 @@ extensions:
   summon:             {enabled: false, type: platform, name: summon,            display_name: Summon,              bundled: true}
   summarize:          {enabled: true,  type: platform, name: summarize,           display_name: Summarize,           bundled: true}
 
-  # ─── MCPs de LINA — acceso vía streamable_http (lina-mcp-gateway:8101-8106) ──
-  # El gateway nginx expone cada MCP en un puerto distinto dentro del network.
-  # Dentro de Docker los nombres de servicio resuelven directamente.
-  # goosed >= 1.35 requiere streamable_http (SSE deprecated).
+  # ─── MCPs de LINA — acceso vía localhost (host network) ─────────────────────
+  # Los MCPs corren en contenedores con nginx gateway en 127.0.0.1:8101-8111.
+  # Como goosed-desktop usa host network, se conecta directo a localhost.
 
   lina-secrets:
     name: lina-secrets
     display_name: LINA Secrets
     type: streamable_http
-    uri: http://lina-mcp-gateway:8101/mcp
+    uri: http://127.0.0.1:8101/mcp
     enabled: true
     timeout: 30
 
@@ -39,7 +38,7 @@ extensions:
     name: lina-fs-safe
     display_name: LINA FS Safe
     type: streamable_http
-    uri: http://lina-mcp-gateway:8102/mcp
+    uri: http://127.0.0.1:8102/mcp
     enabled: true
     timeout: 60
 
@@ -47,7 +46,7 @@ extensions:
     name: lina-shell-policy
     display_name: LINA Shell Policy
     type: streamable_http
-    uri: http://lina-mcp-gateway:8103/mcp
+    uri: http://127.0.0.1:8103/mcp
     enabled: true
     timeout: 120
 
@@ -55,7 +54,7 @@ extensions:
     name: lina-systemd-user
     display_name: LINA Systemd User
     type: streamable_http
-    uri: http://lina-mcp-gateway:8104/mcp
+    uri: http://127.0.0.1:8104/mcp
     enabled: true
     timeout: 30
 
@@ -63,7 +62,7 @@ extensions:
     name: lina-moodle
     display_name: LINA Moodle
     type: streamable_http
-    uri: http://lina-mcp-gateway:8105/mcp
+    uri: http://127.0.0.1:8105/mcp
     enabled: true
     timeout: 120
 
@@ -71,17 +70,15 @@ extensions:
     name: lina-db
     display_name: LINA DB
     type: streamable_http
-    uri: http://lina-mcp-gateway:8106/mcp
+    uri: http://127.0.0.1:8106/mcp
     enabled: true
     timeout: 30
-
-  # ─── MCPs legacy (ports 8107-8110) ──────────────────────────────────────────
 
   lina-github:
     name: lina-github
     display_name: LINA GitHub
     type: streamable_http
-    uri: http://lina-mcp-gateway:8107/mcp
+    uri: http://127.0.0.1:8107/mcp
     enabled: true
     timeout: 60
 
@@ -89,7 +86,7 @@ extensions:
     name: lina-gitlab
     display_name: LINA GitLab
     type: streamable_http
-    uri: http://lina-mcp-gateway:8108/mcp
+    uri: http://127.0.0.1:8108/mcp
     enabled: true
     timeout: 60
 
@@ -97,7 +94,7 @@ extensions:
     name: lina-gcalendar
     display_name: LINA Google Calendar
     type: streamable_http
-    uri: http://lina-mcp-gateway:8109/mcp
+    uri: http://127.0.0.1:8109/mcp
     enabled: true
     timeout: 60
 
@@ -105,7 +102,7 @@ extensions:
     name: lina-gns3
     display_name: LINA GNS3
     type: streamable_http
-    uri: http://lina-mcp-gateway:8110/mcp
+    uri: http://127.0.0.1:8110/mcp
     enabled: true
     timeout: 60
 
@@ -113,19 +110,19 @@ extensions:
     name: lina-orchestrator
     display_name: LINA Orchestrator
     type: streamable_http
-    uri: http://lina-mcp-gateway:8111/mcp
+    uri: http://127.0.0.1:8111/mcp
     enabled: true
     timeout: 30
 
 providers:
   custom_deepseek:
     enabled: true
-    model: deepseek-v4-pro
+    model: deepseek-v4-flash
     configured: true
 active_provider: custom_deepseek
 GOOSE_THINKING_EFFORT: false
 
-# Sin gateway Telegram embebido — lo maneja lina-gateway (container separado)
+# Sin gateway Telegram embebido — lo maneja lina-gateway-desktop (container separado)
 gateway_configs: []
 gateway_pairings: []
 gateway_pending_codes: []
