@@ -105,7 +105,9 @@ class TelegramClient:
             raise RuntimeError(f"Telegram getUpdates error: {data.get('description')}")
         return [_parse_update(u) for u in data.get("result", [])]
 
-    async def send_message(self, chat_id: int, html: str, reply_markup: dict | None = None) -> int | None:
+    async def send_message(
+        self, chat_id: int, html: str, reply_markup: dict | None = None
+    ) -> int | None:
         """Send *html* to *chat_id*, splitting if necessary.  Returns last message_id.
         If *reply_markup* is given, it is only attached to the LAST chunk."""
         from .formatter import split_message, strip_html_tags
@@ -259,7 +261,9 @@ class TelegramClient:
         except Exception:
             logger.warning("answerCallbackQuery: error for %s", callback_query_id)
 
-    async def edit_message_reply_markup(self, chat_id: int, message_id: int, reply_markup: dict | None = None) -> None:
+    async def edit_message_reply_markup(
+        self, chat_id: int, message_id: int, reply_markup: dict | None = None
+    ) -> None:
         """Edit only the inline keyboard of an existing message."""
         payload: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id}
         if reply_markup:
@@ -267,7 +271,9 @@ class TelegramClient:
         try:
             await self._http.post(self._url("editMessageReplyMarkup"), json=payload)
         except Exception:
-            logger.warning("editMessageReplyMarkup: error for msg %s in chat %s", message_id, chat_id)
+            logger.warning(
+                "editMessageReplyMarkup: error for msg %s in chat %s", message_id, chat_id
+            )
 
     async def set_reaction(self, chat_id: int, message_id: int, emoji: str) -> None:
         reaction: list[Any] = [] if not emoji else [{"type": "emoji", "emoji": emoji}]
@@ -329,7 +335,9 @@ def _parse_update(raw: dict[str, Any]) -> TelegramUpdate:
                 first_name=from_raw.get("first_name", ""),
                 last_name=from_raw.get("last_name"),
                 username=from_raw.get("username"),
-            ) if from_raw else None,
+            )
+            if from_raw
+            else None,
         )
     return TelegramUpdate(
         update_id=raw["update_id"],
