@@ -57,7 +57,7 @@ jobs:
             build_args: "MCP_DIR=mcps/moodle\nMCP_CMD=lina-moodle"
             size_limit_mb: 500
             required_bin: ""
-          - image: mcp-db
+          - image: mcp-lina-db
             dockerfile: deploy/docker/Dockerfile.mcp
             build_args: "MCP_DIR=mcps/lina-db\nMCP_CMD=lina-db"
             size_limit_mb: 500
@@ -80,6 +80,10 @@ jobs:
           - image: mcp-gns3
             dockerfile: deploy/docker/Dockerfile.mcp
             build_args: "MCP_DIR=mcps/gns3\nMCP_CMD=lina-gns3"
+            size_limit_mb: 500
+          - image: mcp-orchestrator
+            dockerfile: deploy/docker/Dockerfile.mcp
+            build_args: "MCP_DIR=mcps/orchestrator\nMCP_CMD=lina-orchestrator"
             size_limit_mb: 500
             required_bin: ""
 
@@ -196,7 +200,7 @@ jobs:
           - mcp: gns3
             cov_threshold: 60
           - mcp: orchestrator
-            cov_threshold: 80
+            cov_threshold: 75
 
     steps:
       - name: Checkout

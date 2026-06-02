@@ -27,6 +27,8 @@ Herramientas expuestas:
     list_running_agents      — lista sub-agentes activos o todos (issue #83)
     append_agent_event       — añade evento al log inmutable de un agente (issue #83)
     send_agent_command       — envía comando al buzón de un sub-agente (issue #83)
+    list_agent_events        — devuelve el log de eventos de un sub-agente (issue #88)
+    get_pending_instructions — lee y ackea instrucciones pendientes (issue #90)
 
 Variables de entorno:
     LINA_DB_URL              URL de conexión (default: postgresql://lina:lina_dev@localhost:5432/lina)
@@ -39,6 +41,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any
 
 import psycopg2
@@ -1115,6 +1118,10 @@ def create_agent_session(session_id: str, role: str, goal: str) -> dict:
     """
     if not session_id.strip():
         raise ValueError("session_id no puede estar vacío")
+    if not re.fullmatch(r"[0-9a-f]{32}", session_id):
+        raise ValueError(
+            f"session_id debe ser un UUID hex de 32 chars lowercase sin guiones: {session_id!r}"
+        )
     if not role.strip():
         raise ValueError("role no puede estar vacío")
     if not goal.strip():
@@ -1303,6 +1310,89 @@ def send_agent_command(session_id: str, kind: str, args: dict | None = None) -> 
         "sent_at": row["sent_at"].isoformat() if row and row.get("sent_at") else None,
     }
 
+
+
+
+@mcp.tool()
+def list_agent_events(session_id: str, limit: int = 20) -> list[dict]:
+    """Devuelve el log de eventos de un sub-agente (issue #88).
+
+    Args:
+        session_id: UUID del agente.
+        limit:      máx. eventos a retornar (capped 1‑200).
+
+    Returns:
+        Lista de eventos con id, kind, payload_json, ts.
+    """
+    if not session_id.strip():
+        raise ValueError("session_id no puede estar vacío")
+
+    # Cap limit to [1, 200]
+    limit = max(1, min(limit, 200))
+
+    rows = _execute(
+        "SELECT id, kind, payload_json, ts FROM agent_events"
+        " WHERE session_id = %s ORDER BY id DESC LIMIT %s",
+        (session_id, limit),
+        fetch="all",
+    )
+    if not rows:
+        return []
+
+    result = []
+    for row in rows:
+        result.append({
+            "id": row["id"],
+            "kind": row["kind"],
+            "payload_json": row.get("payload_json"),
+            "ts": row["ts"].isoformat() if row.get("ts") else None,
+        })
+    return result
+
+
+@mcp.tool()
+def get_pending_instructions(session_id: str) -> list[dict]:
+    """Lee y ackea instrucciones pendientes de un sub-agente (issue #90).
+
+    SELECT + UPDATE (mark as read) en agent_commands.
+    Solo comandos kind='send_instruction' con sent_at IS NULL.
+
+    Args:
+        session_id: UUID del agente.
+
+    Returns:
+        Lista de comandos pendientes (con kind, args_json, sent_at).
+        Cada comando se marca como enviado (sent_at = NOW()).
+    """
+    if not session_id.strip():
+        raise ValueError("session_id no puede estar vacío")
+
+    # SELECT pending instructions
+    rows = _execute(
+        "SELECT id, kind, args_json, sent_at FROM agent_commands"
+        " WHERE session_id = %s AND kind = 'send_instruction' AND sent_at IS NULL"
+        " ORDER BY id ASC",
+        (session_id,),
+        fetch="all",
+    )
+    if not rows:
+        return []
+
+    # ACK (mark as sent)
+    cmd_ids = tuple(r["id"] for r in rows)
+    _execute(
+        "UPDATE agent_commands SET sent_at = NOW() WHERE id IN %s",
+        (cmd_ids,),
+    )
+
+    return [
+        {
+            "kind": r["kind"],
+            "args_json": r.get("args_json"),
+            "sent_at": r["sent_at"].isoformat() if r.get("sent_at") else None,
+        }
+        for r in rows
+    ]
 
 # ─── entrypoint ───────────────────────────────────────────────────────────────
 
