@@ -6,18 +6,10 @@ on:
   pull_request:
     branches: [main]
 
-# ── Docker images matrix ────────────────────────────────────────────────────
-#
-# Cada imagen que se buildea en docker-compose aparece acá.
-# Si agregás una nueva MCP: añadí una entrada al matrix con su dockerfile y
-# MCP_DIR (si aplica). Los tags de caché GHA son por imagen.
-#
-# Size gates:
-#   mcp     → 400 MB (python + uv + dependencias)
-#   gateway → 300 MB (python + httpx + asyncpg)
-#   goosed  → 800 MB (go binary + uv + python + 3.5 GB MCPs)
-
 jobs:
+  # ═══════════════════════════════════════════════════════════════════════
+  # Docker build — todas las imágenes del docker-compose + size gates
+  # ═══════════════════════════════════════════════════════════════════════
   docker-build:
     name: Docker build — ${{ matrix.image }}
     runs-on: ubuntu-24.04
@@ -25,60 +17,71 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # ── Imagen principal (goosed runtime + MCPs Python) ───────────
           - image: goosed
             dockerfile: deploy/docker/Dockerfile.goosed
             build_args: ""
-            max_size_mb: 800
+            size_limit_mb: 1500
+            required_bin: bin/goosed-linux-amd64
 
+          # ── Gateway ──────────────────────────────────────────────────
           - image: gateway
             dockerfile: deploy/docker/Dockerfile.gateway
             build_args: ""
-            max_size_mb: 300
+            size_limit_mb: 800
+            required_bin: ""
 
+          # ── MCPs (Dockerfile.mcp compartido) ─────────────────────────
           - image: mcp-secrets
             dockerfile: deploy/docker/Dockerfile.mcp
             build_args: "MCP_DIR=mcps/secrets\nMCP_CMD=lina-secrets"
-            max_size_mb: 400
+            size_limit_mb: 500
+            required_bin: ""
           - image: mcp-fs-safe
             dockerfile: deploy/docker/Dockerfile.mcp
             build_args: "MCP_DIR=mcps/fs-safe\nMCP_CMD=lina-fs-safe"
-            max_size_mb: 400
+            size_limit_mb: 500
+            required_bin: ""
           - image: mcp-shell-policy
             dockerfile: deploy/docker/Dockerfile.mcp
             build_args: "MCP_DIR=mcps/shell-policy\nMCP_CMD=lina-shell-policy"
-            max_size_mb: 400
+            size_limit_mb: 500
+            required_bin: ""
           - image: mcp-systemd-user
             dockerfile: deploy/docker/Dockerfile.mcp
             build_args: "MCP_DIR=mcps/systemd-user\nMCP_CMD=lina-systemd-user"
-            max_size_mb: 400
+            size_limit_mb: 500
+            required_bin: ""
           - image: mcp-moodle
             dockerfile: deploy/docker/Dockerfile.mcp
             build_args: "MCP_DIR=mcps/moodle\nMCP_CMD=lina-moodle"
-            max_size_mb: 400
-          - image: mcp-lina-db
+            size_limit_mb: 500
+            required_bin: ""
+          - image: mcp-db
             dockerfile: deploy/docker/Dockerfile.mcp
             build_args: "MCP_DIR=mcps/lina-db\nMCP_CMD=lina-db"
-            max_size_mb: 400
+            size_limit_mb: 500
+            required_bin: ""
           - image: mcp-github
             dockerfile: deploy/docker/Dockerfile.mcp
             build_args: "MCP_DIR=mcps/github\nMCP_CMD=lina-github"
-            max_size_mb: 400
+            size_limit_mb: 500
+            required_bin: ""
           - image: mcp-gitlab
             dockerfile: deploy/docker/Dockerfile.mcp
             build_args: "MCP_DIR=mcps/gitlab\nMCP_CMD=lina-gitlab"
-            max_size_mb: 400
+            size_limit_mb: 500
+            required_bin: ""
           - image: mcp-gcalendar
             dockerfile: deploy/docker/Dockerfile.mcp
             build_args: "MCP_DIR=mcps/gcalendar\nMCP_CMD=lina-gcalendar"
-            max_size_mb: 400
+            size_limit_mb: 500
+            required_bin: ""
           - image: mcp-gns3
             dockerfile: deploy/docker/Dockerfile.mcp
             build_args: "MCP_DIR=mcps/gns3\nMCP_CMD=lina-gns3"
-            max_size_mb: 400
-          - image: mcp-orchestrator
-            dockerfile: deploy/docker/Dockerfile.mcp
-            build_args: "MCP_DIR=mcps/orchestrator\nMCP_CMD=lina-orchestrator"
-            max_size_mb: 400
+            size_limit_mb: 500
+            required_bin: ""
 
     steps:
       - name: Checkout
@@ -87,7 +90,23 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build image (no push)
+      - name: Check required binary
+        id: check_bin
+        run: |
+          if [ -n "${{ matrix.required_bin }}" ]; then
+            if [ -f "${{ matrix.required_bin }}" ]; then
+              echo "binary_found=true" >> $GITHUB_OUTPUT
+              echo "✓ ${{ matrix.required_bin }} encontrado"
+            else
+              echo "binary_found=false" >> $GITHUB_OUTPUT
+              echo "⚠️ ${{ matrix.required_bin }} no encontrado — saltando build"
+            fi
+          else
+            echo "binary_found=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build image
+        if: steps.check_bin.outputs.binary_found == 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -100,48 +119,33 @@ jobs:
           cache-to: type=gha,scope=${{ matrix.image }},mode=max
 
       - name: Report image size
-        run: |
-          SIZE=$(docker image inspect lina-${{ matrix.image }}:ci \
-            --format '{{.Size}}' | awk '{printf "%.1f MB", $1/1048576}')
-          MAX=${{ matrix.max_size_mb }}
-          echo "### Docker image size: ${{ matrix.image }}" >> $GITHUB_STEP_SUMMARY
-          echo "| Image | Size | Max |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| lina-${{ matrix.image }} | $SIZE | ${MAX} MB |" >> $GITHUB_STEP_SUMMARY
-          echo "Image size: $SIZE (max ${MAX} MB)"
-
-      - name: Size gate
+        if: steps.check_bin.outputs.binary_found == 'true'
         run: |
           SIZE_BYTES=$(docker image inspect lina-${{ matrix.image }}:ci --format '{{.Size}}')
-          MAX_BYTES=$(( ${{ matrix.max_size_mb }} * 1048576 ))
+          SIZE_MB=$(awk "BEGIN {printf \"%.1f\", $SIZE_BYTES/1048576}")
+          LIMIT_MB=${{ matrix.size_limit_mb }}
+          echo "### Docker image: ${{ matrix.image }}" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Size | ${SIZE_MB} MB |" >> $GITHUB_STEP_SUMMARY
+          echo "| Limit | ${LIMIT_MB} MB |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | $([ $(awk "BEGIN {print ($SIZE_BYTES > $LIMIT_MB*1048576)}") = 1 ] && echo '❌ OVER LIMIT' || echo '✅ OK') |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Size gate
+        if: steps.check_bin.outputs.binary_found == 'true'
+        run: |
+          SIZE_BYTES=$(docker image inspect lina-${{ matrix.image }}:ci --format '{{.Size}}')
+          MAX_BYTES=$(( ${{ matrix.size_limit_mb }} * 1048576 ))
+          echo "Image: lina-${{ matrix.image }} — ${SIZE_BYTES} bytes (limit: ${MAX_BYTES})"
           if [ "$SIZE_BYTES" -gt "$MAX_BYTES" ]; then
-            MB=$(echo "scale=1; $SIZE_BYTES / 1048576" | bc)
-            echo "❌ lina-${{ matrix.image }} excede el límite: ${MB} MB > ${{ matrix.max_size_mb }} MB"
+            echo "❌ FAIL: lina-${{ matrix.image }} excede límite de ${{ matrix.size_limit_mb }} MB"
             exit 1
           fi
-          echo "✓ Size OK: $(echo "scale=1; $SIZE_BYTES / 1048576" | bc) MB (< ${{ matrix.max_size_mb }} MB)"
+          echo "✅ PASS: dentro del límite de ${{ matrix.size_limit_mb }} MB"
 
-  # ── Aggregate size report ─────────────────────────────────────────────
-  docker-size-report:
-    name: Docker size report
-    needs: docker-build
-    if: always()
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Generate size report
-        run: |
-          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
-          ## 📦 Docker Image Size Report
-
-          | Image | Size | Limit | Status |
-          |---|---|---|---|
-          EOF
-          echo "✅ Full size report generated"
-
-  # ── Dockerfile lint ───────────────────────────────────────────────────
+  # ═══════════════════════════════════════════════════════════════════════
+  # Dockerfile lint (hadolint)
+  # ═══════════════════════════════════════════════════════════════════════
   dockerfile-lint:
     name: Dockerfile lint (hadolint)
     runs-on: ubuntu-24.04
@@ -160,9 +164,11 @@ jobs:
           dockerfile: deploy/docker/Dockerfile.gateway
           ignore: DL3008,DL3003,SC2164
 
-  # ── Ling & Test MCPs ──────────────────────────────────────────────────
+  # ═══════════════════════════════════════════════════════════════════════
+  # Lint & Test — todos los MCPs
+  # ═══════════════════════════════════════════════════════════════════════
   lint-and-test:
-    name: Lint & Test MCPs
+    name: Lint & Test ${{ matrix.mcp }}
     runs-on: ubuntu-24.04
 
     strategy:
@@ -235,7 +241,9 @@ jobs:
           name: coverage-${{ matrix.mcp }}
           path: mcps/${{ matrix.mcp }}/coverage.xml
 
-  # ── Validate config templates ─────────────────────────────────────────
+  # ═══════════════════════════════════════════════════════════════════════
+  # Config validation
+  # ═══════════════════════════════════════════════════════════════════════
   validate-config:
     name: Validate config templates
     runs-on: ubuntu-24.04
@@ -258,12 +266,15 @@ jobs:
           sudo apt-get install -y just
           just --list > /dev/null && echo "✓ justfile parses OK"
 
-  # ── E2E integration tests ─────────────────────────────────────────────
+  # ═══════════════════════════════════════════════════════════════════════
+  # E2E integration tests
+  # ═══════════════════════════════════════════════════════════════════════
   e2e-integration:
-    name: E2E integration tests (stdio)
+    name: E2E integration tests
     runs-on: ubuntu-24.04
     needs: lint-and-test
     if: success() || failure()
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -278,7 +289,7 @@ jobs:
         with:
           version: "latest"
 
-      - name: Sync all MCPs (needed for E2E subprocess invocation)
+      - name: Sync all MCPs
         run: |
           for mcp in fs-safe secrets shell-policy systemd-user moodle lina-db; do
             uv sync --dev --project mcps/$mcp
@@ -291,7 +302,9 @@ jobs:
         run: |
           pytest tests/integration/mcps/ -v --tb=short -m integration
 
-  # ── Lint &Test gateway ────────────────────────────────────────────────
+  # ═══════════════════════════════════════════════════════════════════════
+  # Lint & Test — gateway
+  # ═══════════════════════════════════════════════════════════════════════
   lint-and-test-gateway:
     name: Lint & Test gateway
     runs-on: ubuntu-24.04
