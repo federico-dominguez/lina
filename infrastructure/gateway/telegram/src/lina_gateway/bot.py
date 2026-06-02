@@ -43,6 +43,7 @@ _STOP_COMMANDS = {"/stop", "stop", "/Stop", "Stop", "/STOP", "STOP"}
 _TG_CHAR_LIMIT = 4096
 _OVERFLOW_MARGIN = 200  # start splitting when content approaches the limit
 
+
 def _btn(label: str, action: str, agent_id: str) -> dict:
     """Build an inline keyboard button for agent actions."""
     callback_data = f"{action}:{agent_id}" if agent_id else f"{action}:"
@@ -253,6 +254,7 @@ class Bot:
         """Kill a running agent."""
         try:
             import asyncpg
+
             conn = await asyncpg.connect(self._cfg.lina_db_url, timeout=5)
             try:
                 await conn.execute(
@@ -270,6 +272,7 @@ class Bot:
         """Pause a running agent."""
         try:
             import asyncpg
+
             conn = await asyncpg.connect(self._cfg.lina_db_url, timeout=5)
             try:
                 await conn.execute(
@@ -287,6 +290,7 @@ class Bot:
         """Resume a paused agent."""
         try:
             import asyncpg
+
             conn = await asyncpg.connect(self._cfg.lina_db_url, timeout=5)
             try:
                 await conn.execute(
@@ -304,12 +308,14 @@ class Bot:
         """Replan: actualiza el goal de un agente en la DB y lo reanuda si está pausado."""
         try:
             import asyncpg
+
             conn = await asyncpg.connect(self._cfg.lina_db_url, timeout=5)
             try:
                 result = await conn.execute(
                     "UPDATE agent_sessions SET goal=$2, updated_at=NOW()"
                     " WHERE id=$1 AND status IN ('running','paused','pending')",
-                    agent_id, new_goal,
+                    agent_id,
+                    new_goal,
                 )
             finally:
                 await conn.close()
@@ -318,8 +324,7 @@ class Bot:
             if result and "1" in result:
                 await self._tg.send_message(
                     chat_id,
-                    f"🔄 Agente <code>{agent_id[:8]}</code> replanificado:\n"
-                    f"   <i>{goal_short}</i>",
+                    f"🔄 Agente <code>{agent_id[:8]}</code> replanificado:\n   <i>{goal_short}</i>",
                 )
             else:
                 await self._tg.send_message(
@@ -332,14 +337,25 @@ class Bot:
     # ── HumanInputRequest: detect approval needs & attach buttons ──────
 
     _APPROVAL_PATTERNS = (
-        "¿apruebas", "apruebas?", "¿confirmas", "confirmas?",
-        "¿procedo", "¿continúo", "¿te parece bien",
-        "necesito tu aprobación", "necesito aprobación",
-        "¿está bien", "¿estás de acuerdo",
-        "¿puedo", "¿quieres que",
-        "human_input_request", "approval_request",
-        "requiere aprobación", "requiere tu aprobación",
-        "¿sí o no", "¿procedemos",
+        "¿apruebas",
+        "apruebas?",
+        "¿confirmas",
+        "confirmas?",
+        "¿procedo",
+        "¿continúo",
+        "¿te parece bien",
+        "necesito tu aprobación",
+        "necesito aprobación",
+        "¿está bien",
+        "¿estás de acuerdo",
+        "¿puedo",
+        "¿quieres que",
+        "human_input_request",
+        "approval_request",
+        "requiere aprobación",
+        "requiere tu aprobación",
+        "¿sí o no",
+        "¿procedemos",
     )
 
     async def _maybe_attach_approval_buttons(
@@ -373,7 +389,9 @@ class Bot:
         await self._tg.edit_message_reply_markup(chat_id, msg_id, buttons)
         logger.info(
             "Approval buttons attached — chat=%s msg=%s session=%s",
-            chat_id, msg_id, session_id,
+            chat_id,
+            msg_id,
+            session_id,
         )
 
     async def _handle_agents(self, chat_id: int, edit_msg_id: int | None = None) -> None:
@@ -420,8 +438,14 @@ class Bot:
             elapsed = int(r["elapsed_seconds"] or 0)
             mins, secs = divmod(elapsed, 60)
             goal_short = r["goal"][:50] + ("…" if len(r["goal"]) > 50 else "")
-            status_icon = {"running": "🟢", "completed": "✅", "failed": "❌",
-                           "killed": "⛔", "timeout": "⏰", "pending": "🟡"}.get(r["status"], "⚪")
+            status_icon = {
+                "running": "🟢",
+                "completed": "✅",
+                "failed": "❌",
+                "killed": "⛔",
+                "timeout": "⏰",
+                "pending": "🟡",
+            }.get(r["status"], "⚪")
             lines.append(
                 f"\n{status_icon} <code>{aid_short}</code> <b>{r['role']}</b>"
                 f"  <i>{r['status']}</i>  {mins}m{secs:02d}s"
@@ -484,13 +508,22 @@ class Bot:
             return
 
         if not rows:
-            await self._tg.send_message(chat_id, f"ℹ️ No encontré agente con id <code>{agent_id_prefix}</code>")
+            await self._tg.send_message(
+                chat_id, f"ℹ️ No encontré agente con id <code>{agent_id_prefix}</code>"
+            )
             return
 
         r = rows[0]
         elapsed = int(r["elapsed"] or 0)
         mins, secs = divmod(elapsed, 60)
-        status_icon = {"running": "🔄", "pending": "⏳", "completed": "✅", "failed": "❌", "killed": "🛑", "timeout": "⌛"}.get(r["status"], "❓")
+        status_icon = {
+            "running": "🔄",
+            "pending": "⏳",
+            "completed": "✅",
+            "failed": "❌",
+            "killed": "🛑",
+            "timeout": "⌛",
+        }.get(r["status"], "❓")
         summary = r["result_summary"] or "(sin resumen)"
         lines = [
             f"<b>Agente</b> <code>{r['id'][:12]}</code>",
@@ -519,7 +552,9 @@ class Bot:
                     agent_id_prefix,
                 )
                 if not full_id:
-                    await self._tg.send_message(chat_id, f"ℹ️ No encontré agente con id <code>{agent_id_prefix}</code>")
+                    await self._tg.send_message(
+                        chat_id, f"ℹ️ No encontré agente con id <code>{agent_id_prefix}</code>"
+                    )
                     return
                 rows = await conn.fetch(
                     "SELECT kind, ts, payload_json FROM agent_events "
@@ -533,7 +568,9 @@ class Bot:
             return
 
         if not rows:
-            await self._tg.send_message(chat_id, f"ℹ️ Sin eventos para agente <code>{agent_id_prefix}</code>")
+            await self._tg.send_message(
+                chat_id, f"ℹ️ Sin eventos para agente <code>{agent_id_prefix}</code>"
+            )
             return
 
         lines = [f"<b>Últimos eventos — agente <code>{agent_id_prefix}</code>:</b>"]
@@ -976,7 +1013,6 @@ class Bot:
         elif action == "approve":
             # User approved a human input request — send approval as follow-up
             await self._tg.answer_callback_query(cq.id, "✅ Aprobado. Enviando respuesta...")
-            session_id = self._session_id(cq.chat_id)
             await self._tg.send_message(cq.chat_id, "✅ Aprobado — reenviando a LINA…")
             cancel = self._cancels.get(cq.chat_id) or asyncio.Event()
             # Send "Sí, aprobado" as a new user message to LINA
@@ -989,14 +1025,12 @@ class Bot:
             # User wants to type their own response
             await self._tg.answer_callback_query(cq.id, "✏️ Escribí tu respuesta...")
             await self._tg.send_message(
-                cq.chat_id,
-                "✏️ Escribí tu modificación o instrucción directamente como mensaje:"
+                cq.chat_id, "✏️ Escribí tu modificación o instrucción directamente como mensaje:"
             )
             return
         elif action == "reject":
             # User rejected — send rejection as follow-up
             await self._tg.answer_callback_query(cq.id, "❌ Rechazado.")
-            session_id = self._session_id(cq.chat_id)
             await self._tg.send_message(cq.chat_id, "❌ Rechazado — reenviando a LINA…")
             cancel = self._cancels.get(cq.chat_id) or asyncio.Event()
             asyncio.create_task(
