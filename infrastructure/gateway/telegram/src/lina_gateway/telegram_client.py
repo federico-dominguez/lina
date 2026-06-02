@@ -59,9 +59,19 @@ class TelegramMessage:
 
 
 @dataclass
+class TelegramCallbackQuery:
+    id: str
+    chat_id: int
+    message_id: int
+    data: str
+    from_user: TelegramUser | None
+
+
+@dataclass
 class TelegramUpdate:
     update_id: int
     message: TelegramMessage | None
+    callback_query: TelegramCallbackQuery | None = None
 
 
 class TelegramClient:
@@ -83,7 +93,7 @@ class TelegramClient:
     async def get_updates(self, offset: int | None) -> list[TelegramUpdate]:
         params: dict[str, Any] = {
             "timeout": self._poll_timeout,
-            "allowed_updates": ["message"],
+            "allowed_updates": ["message", "callback_query"],
         }
         if offset is not None:
             params["offset"] = offset
@@ -95,14 +105,17 @@ class TelegramClient:
             raise RuntimeError(f"Telegram getUpdates error: {data.get('description')}")
         return [_parse_update(u) for u in data.get("result", [])]
 
-    async def send_message(self, chat_id: int, html: str) -> int | None:
-        """Send *html* to *chat_id*, splitting if necessary.  Returns last message_id."""
+    async def send_message(self, chat_id: int, html: str, reply_markup: dict | None = None) -> int | None:
+        """Send *html* to *chat_id*, splitting if necessary.  Returns last message_id.
+        If *reply_markup* is given, it is only attached to the LAST chunk."""
         from .formatter import split_message, strip_html_tags
 
         last_id: int | None = None
         chunks = split_message(html)
-        for chunk in chunks:
-            payload = {"chat_id": chat_id, "text": chunk, "parse_mode": "HTML"}
+        for i, chunk in enumerate(chunks):
+            payload: dict = {"chat_id": chat_id, "text": chunk, "parse_mode": "HTML"}
+            if reply_markup and i == len(chunks) - 1:
+                payload["reply_markup"] = reply_markup
             resp: httpx.Response | None = None
             for attempt in range(_MAX_429_RETRIES):
                 resp = await self._http.post(self._url("sendMessage"), json=payload)
@@ -235,6 +248,27 @@ class TelegramClient:
         except Exception as exc:
             logger.debug("sendChatAction error: %s", exc)
 
+    async def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> None:
+        """Answer a callback query (required by Telegram to stop the loading indicator)."""
+        payload: dict[str, str] = {"callback_query_id": callback_query_id}
+        if text:
+            payload["text"] = text
+            payload["show_alert"] = "false"
+        try:
+            await self._http.post(self._url("answerCallbackQuery"), json=payload)
+        except Exception:
+            logger.warning("answerCallbackQuery: error for %s", callback_query_id)
+
+    async def edit_message_reply_markup(self, chat_id: int, message_id: int, reply_markup: dict | None = None) -> None:
+        """Edit only the inline keyboard of an existing message."""
+        payload: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        try:
+            await self._http.post(self._url("editMessageReplyMarkup"), json=payload)
+        except Exception:
+            logger.warning("editMessageReplyMarkup: error for msg %s in chat %s", message_id, chat_id)
+
     async def set_reaction(self, chat_id: int, message_id: int, emoji: str) -> None:
         reaction: list[Any] = [] if not emoji else [{"type": "emoji", "emoji": emoji}]
         try:
@@ -281,9 +315,26 @@ class TelegramClient:
 
 def _parse_update(raw: dict[str, Any]) -> TelegramUpdate:
     msg = raw.get("message")
+    cb = raw.get("callback_query")
+    cq = None
+    if cb:
+        msg_raw = cb.get("message", {})
+        from_raw = cb.get("from", {})
+        cq = TelegramCallbackQuery(
+            id=cb["id"],
+            chat_id=msg_raw.get("chat", {}).get("id", 0),
+            message_id=msg_raw.get("message_id", 0),
+            data=cb.get("data", ""),
+            from_user=TelegramUser(
+                first_name=from_raw.get("first_name", ""),
+                last_name=from_raw.get("last_name"),
+                username=from_raw.get("username"),
+            ) if from_raw else None,
+        )
     return TelegramUpdate(
         update_id=raw["update_id"],
         message=_parse_message(msg) if msg else None,
+        callback_query=cq,
     )
 
 
