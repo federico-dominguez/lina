@@ -100,7 +100,7 @@ class FakeTg:
     def __init__(self) -> None:
         self.sent: list[tuple[int, str]] = []
 
-    async def send_message(self, chat_id: int, html: str) -> int:
+    async def send_message(self, chat_id: int, html: str, **kwargs: object) -> int:
         self.sent.append((chat_id, html))
         return 1
 
@@ -224,7 +224,7 @@ class TestBotAgentsCommand:
 
         sent = []
 
-        async def fake_send(chat_id, html):
+        async def fake_send(chat_id, html, **kwargs):
             sent.append(html)
             return 1
 
@@ -256,7 +256,7 @@ class TestBotAgentsCommand:
 
         sent = []
 
-        async def fake_send(chat_id, html):
+        async def fake_send(chat_id, html, **kwargs):
             sent.append(html)
             return 1
 
@@ -293,7 +293,7 @@ class TestBotAgentsCommand:
 
         sent = []
 
-        async def fake_send(chat_id, html):
+        async def fake_send(chat_id, html, **kwargs):
             sent.append(html)
             return 1
 
@@ -331,7 +331,7 @@ class TestBotInstructExpansion:
         bot = Bot(cfg)
         sent = []
 
-        async def fake_send(chat_id, html):
+        async def fake_send(chat_id, html, **kwargs):
             sent.append(html)
             return 1
 
@@ -370,7 +370,7 @@ class TestBotInstructExpansion:
         bot = Bot(cfg)
         sent = []
 
-        async def fake_send(chat_id, html):
+        async def fake_send(chat_id, html, **kwargs):
             sent.append(html)
             return 1
 

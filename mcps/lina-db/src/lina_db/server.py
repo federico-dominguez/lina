@@ -1311,8 +1311,6 @@ def send_agent_command(session_id: str, kind: str, args: dict | None = None) -> 
     }
 
 
-
-
 @mcp.tool()
 def list_agent_events(session_id: str, limit: int = 20) -> list[dict]:
     """Devuelve el log de eventos de un sub-agente (issue #88).
@@ -1341,12 +1339,14 @@ def list_agent_events(session_id: str, limit: int = 20) -> list[dict]:
 
     result = []
     for row in rows:
-        result.append({
-            "id": row["id"],
-            "kind": row["kind"],
-            "payload_json": row.get("payload_json"),
-            "ts": row["ts"].isoformat() if row.get("ts") else None,
-        })
+        result.append(
+            {
+                "id": row["id"],
+                "kind": row["kind"],
+                "payload_json": row.get("payload_json"),
+                "ts": row["ts"].isoformat() if row.get("ts") else None,
+            }
+        )
     return result
 
 
@@ -1393,6 +1393,7 @@ def get_pending_instructions(session_id: str) -> list[dict]:
         }
         for r in rows
     ]
+
 
 # ─── entrypoint ───────────────────────────────────────────────────────────────
 
