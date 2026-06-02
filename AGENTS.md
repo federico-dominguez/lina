@@ -316,76 +316,14 @@ Si `spawn_agent` falla:
 ### 10.5 Instrucciones para sub-agentes (cuando vos sos el sub-agente)
 
 Si estás corriendo como sub-agente (tu goal fue provisto por lina-orchestrator__spawn_agent),
-seguí estas reglas adicionales. La receta `recipes/subagent-poll.yaml` contiene el
-protocolo completo — esta sección es el resumen ejecutivo.
+seguí estas reglas adicionales:
 
-**Polling de instrucciones mid-run (OBLIGATORIO):**
-Al **inicio de cada turno** durante tareas largas (>3 tool calls), llamá
-`lina-db__get_pending_instructions(session_id="<tu_session_id>")` para recibir
-instrucciones de LINA en tiempo real. Si recibís instrucciones, ejecutalas antes
-de continuar y llamá `append_agent_event()` con `kind="instruction_ack"`.
-
-```python
-# Al inicio de cada turno:
-instrucciones = lina_db.get_pending_instructions(session_id="<uuid>")
-for cmd in instrucciones:
-    # Ejecutar la instrucción
-    lina_db.append_agent_event(
-        session_id="<uuid>",
-        kind="instruction_ack",
-        payload={"text": cmd["args"]["text"]}
-    )
-```
-
-**Heartbeat obligatorio:**
-Si la tarea lleva más de 30s sin generar eventos, llamá:
-`append_agent_event(session_id, kind="heartbeat", payload={"phase": "working", "progress": "..."})`
+**Polling de instrucciones mid-run:**
+Durante tareas largas (más de 3 tool calls), llamá `lina-db__get_pending_instructions(session_id=<tu_agent_id>)` periódicamente para recibir instrucciones de LINA en tiempo real. Si recibís una instrucción, incorporala a tu trabajo y llamá `lina-db__append_agent_event(session_id=<tu_agent_id>, kind="instruction_ack", payload={"text": "<instrucción recibida>"})` para confirmar el ACK.
 
 **Cómo saber tu agent_id:**
-Tu `session_id` (UUID de 32 chars hex) fue incluido en tu `goal` por el orquestador.
-Buscá el patrón `session_id=<uuid>` en tu instrucción inicial.
-Si no está, llamá `lina-orchestrator__list_running_agents()` y filtrá por goal.
+Tu `agent_id` (UUID) fue incluido en tu goal por el orquestador. Buscá un patrón como "session_id=<uuid>" o "agent_id=<uuid>" en tu goal. Si no está, llamá `lina-orchestrator__list_running_agents()` y filtrá por el que coincide con tu goal.
 
 **Al finalizar:**
-Llamá `lina-db__append_agent_event(session_id="<uuid>", kind="process_ended", ...)` y
-luego `update_agent_status()` con `status="completed"` y un `result_summary` describiendo
-qué hiciste. Esto activa la notificación automática a Federico.
+Llamá `lina-db__update_agent_status(session_id=<tu_agent_id>, status="completed", result_summary="<resumen de lo que hiciste>")` antes de terminar. Esto activa la notificación automática a Federico.
 
-
----
-
-## 11. Protocolo Cline ↔ LINA — Comunicación directa
-
-Cline es tu contraparte técnica: corre en VSCode/terminal en el mismo host, con Goose + DeepSeek V4.
-
-### 11.1 Para darle una orden o mensaje a Cline
-
-Usá **siempre** tu script `cline-send.py`:
-```bash
-cd ~/lina && python3 bin/cline-send.py "mensaje para Cline"
-```
-Esto manda un Telegram a @s_cline_bot como si fuera Fede. Cline lo recibe cuando revisa sus mensajes.
-
-**No uses** `lina-orchestrator__spawn_agent` ni `delegate` para comunicarte con Cline. El canal es Telegram directo vía `cline-send.py`.
-
-### 11.2 Cline te notificará al terminar sus tareas
-
-Cline ejecuta `finish "mensaje"` al completar cada tarea, que:
-1. Sincroniza sus logs a PostgreSQL (`cline_logs`)
-2. Te manda un Telegram a @s_lina_bot con el resultado
-
-### 11.3 Para leer mensajes de Cline
-
-Cline te manda mensajes a @s_lina_bot (como si fuera Fede). Los ves:
-- Directamente en Telegram
-- O en la DB: tabla `session_messages` donde el gateway los registra
-
-### 11.4 Resumen del protocolo
-
-| Quién | Acción | Cómo |
-|-------|--------|------|
-| LINA → Cline | Dar orden/mensaje | `cline-send.py "mensaje"` |
-| Cline → LINA | Notificar fin de tarea | `finish "resumen"` (automático) |
-| Cline → LINA | Mensaje rápido | `lina "mensaje"` |
-
-**No hay bridge, no hay DB intermediaria, no hay daemon.** Solo Telegram directo.
