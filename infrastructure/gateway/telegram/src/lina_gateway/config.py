@@ -40,6 +40,10 @@ class Config:
     # --- Agent notifier ---
     # How often (seconds) the background poller checks lina-db for agent status
     # transitions.  Set to 0 to disable the notifier entirely.
+    # Override session_id to share a single session between Telegram and goose CLI/TUI.
+    # Set via GOOSE_FIXED_SESSION_ID env var.  When unset, one session per chat is used.
+    fixed_session_id: str | None
+
     agent_poll_interval: float
 
     def __init__(self) -> None:
@@ -58,6 +62,7 @@ class Config:
 
         self.lina_db_url = os.environ.get("LINA_DB_URL") or None
         self.deepseek_api_key = os.environ.get("DEEPSEEK_API_KEY") or None
+        self.fixed_session_id = os.environ.get("GOOSE_FIXED_SESSION_ID") or None
         self.agent_poll_interval = float(os.environ.get("GATEWAY_AGENT_POLL_INTERVAL", "10"))
 
         # GATEWAY_NOTIFY_CHAT_IDS takes priority; falls back to extracting numeric

@@ -44,9 +44,20 @@ RUN for d in secrets fs-safe shell-policy systemd-user moodle lina-db; do \
 COPY config/ config/
 COPY bin/ bin/
 
+
+# ─── Agent personality ────────────────────────────────────────────────────────
+# /app: CWD del proceso goosed (carga AGENTS al iniciar)
+# /tmp: CWD de las sesiones creadas via agent/start (carga AGENTS por sesión)
+ARG AGENT_PERSONALITY=lina
+COPY deploy/docker/AGENTS.${AGENT_PERSONALITY}.md /app/AGENTS.md
+COPY deploy/docker/AGENTS.${AGENT_PERSONALITY}.md /tmp/AGENTS.md
+
 # ─── goosed binary ────────────────────────────────────────────────────────────
 ARG GOOSED_BIN=bin/goosed-linux-amd64
 COPY ${GOOSED_BIN} /usr/local/bin/goosed
+# ─── Python deps (not shared via venvs) ──────────────────────────────────────
+RUN pip3 install --no-cache-dir --break-system-packages asyncpg
+
 RUN chmod +x /usr/local/bin/goosed
 
 # ─── runtime ──────────────────────────────────────────────────────────────────

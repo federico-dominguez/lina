@@ -28,6 +28,7 @@ from .formatter import (
     split_message,
 )
 from .goose_client import EventType, GoosedClient, TokenState
+from .observe import ObserveServer
 from .pacer import StreamingBubble
 from .telegram_client import (
     MAX_VOICE_FILE_SIZE,
@@ -79,6 +80,7 @@ class Bot:
         self._busy: dict[int, bool] = {}
         # chat_ids for which session context has been injected this process lifetime
         self._sessions_initialized: set[int] = set()
+        self._observer: ObserveServer | None = None
 
     @property
     def tg(self) -> TelegramClient:
@@ -86,6 +88,9 @@ class Bot:
         return self._tg
 
     def _session_id(self, chat_id: int) -> str:
+        # Allow overriding with a fixed session ID (set via GOOSE_FIXED_SESSION_ID env var).
+        if self._cfg.fixed_session_id:
+            return self._cfg.fixed_session_id
         if chat_id not in self._sessions:
             self._sessions[chat_id] = f"telegram-{chat_id}"
         return self._sessions[chat_id]
@@ -106,6 +111,16 @@ class Bot:
         # ── /agents ───────────────────────────────────────────────
         if text.strip() == "/agents":
             await self._handle_agents(chat_id)
+            return
+
+        # ── /cline ── muestra estado de CLINE (cross-agent) ────────────
+        if text.strip().lower() in ("/cline", "cline"):
+            await self._handle_cline_status(chat_id)
+            return
+
+        # ── /lina ── muestra estado de LINA (cross-agent) ──────────────
+        if text.strip().lower() in ("/lina", "lina"):
+            await self._handle_lina_status(chat_id)
             return
 
         # ── /status <agent_id> ────────────────────────────────────────────
@@ -394,6 +409,91 @@ class Bot:
             session_id,
         )
 
+    async def _handle_cline_status(self, chat_id: int) -> None:
+        """Muestra el estado de CLINE — cross-agent status check."""
+        db_url = self._cfg.lina_db_url
+        if not db_url:
+            await self._tg.send_message(chat_id, "⚠️ lina-db no disponible.")
+            return
+        try:
+            import asyncpg
+            conn = await asyncpg.connect(db_url, timeout=5)
+            try:
+                # Count orders by status for CLINE
+                orders = await conn.fetchrow(
+                    """SELECT 
+                        COUNT(*) FILTER (WHERE status='pending') as pending,
+                        COUNT(*) FILTER (WHERE status='running') as running,
+                        COUNT(*) FILTER (WHERE status='completed') as completed,
+                        COUNT(*) FILTER (WHERE status='failed') as failed
+                    FROM cline_commands"""
+                )
+                # Last completed order
+                last = await conn.fetchrow(
+                    """SELECT id, response, completed_at 
+                    FROM cline_commands WHERE status='completed' 
+                    ORDER BY completed_at DESC LIMIT 1"""
+                )
+            finally:
+                await conn.close()
+        except Exception as e:
+            await self._tg.send_message(chat_id, f"⚠️ Error: {e}")
+            return
+
+        parts = [
+            "<b>🤖 Estado de CLINE</b>",
+            "",
+            f"• Pendientes: <b>{orders['pending'] or 0}</b>",
+            f"• En ejecución: <b>{orders['running'] or 0}</b>",
+            f"• Completadas: <b>{orders['completed'] or 0}</b>",
+            f"• Fallidas: <b>{orders['failed'] or 0}</b>",
+        ]
+        if last and last['completed_at']:
+            parts.append("")
+            parts.append(f"✅ Última: #{last['id']} — <i>{last['response'][:80] if last['response'] else 'sin detalle'}</i>")
+        await self._tg.send_message(chat_id, "\n".join(parts))
+
+    async def _handle_lina_status(self, chat_id: int) -> None:
+        """Muestra el estado de LINA — cross-agent status check."""
+        db_url = self._cfg.lina_db_url
+        if not db_url:
+            await self._tg.send_message(chat_id, "⚠️ lina-db no disponible.")
+            return
+        try:
+            import asyncpg
+            conn = await asyncpg.connect(db_url, timeout=5)
+            try:
+                # LINA's orders created (write_cline_command)
+                orders = await conn.fetchrow(
+                    """SELECT 
+                        COUNT(*) FILTER (WHERE status='pending') as pending,
+                        COUNT(*) FILTER (WHERE status='running') as running,
+                        COUNT(*) FILTER (WHERE status='completed') as completed
+                    FROM cline_commands"""
+                )
+                # Last session
+                last_session = await conn.fetchrow(
+                    """SELECT session_id, summary, created_at 
+                    FROM session_summaries 
+                    ORDER BY created_at DESC LIMIT 1"""
+                )
+            finally:
+                await conn.close()
+        except Exception as e:
+            await self._tg.send_message(chat_id, f"⚠️ Error: {e}")
+            return
+
+        parts = [
+            "<b>🩷 Estado de LINA</b>",
+            "",
+            f"• Órdenes creadas: <b>{orders['completed'] or 0}</b> completadas, <b>{orders['pending'] or 0}</b> pendientes",
+            f"• En ejecución: <b>{orders['running'] or 0}</b>",
+        ]
+        if last_session and last_session['created_at']:
+            parts.append("")
+            parts.append(f"📚 Última sesión: <i>{last_session['summary'][:100] if last_session['summary'] else 'sin resumen'}</i>")
+        await self._tg.send_message(chat_id, "\n".join(parts))
+
     async def _handle_agents(self, chat_id: int, edit_msg_id: int | None = None) -> None:
         """Dashboard live editable de sub-agentes con botones inline.
 
@@ -594,6 +694,10 @@ class Bot:
             await asyncio.sleep(3.0)
         return False
 
+    def set_observer(self, observer: ObserveServer) -> None:
+        """Set observer for live streaming events to WebSocket clients."""
+        self._observer = observer
+
     async def _reply(
         self,
         chat_id: int,
@@ -612,6 +716,8 @@ class Bot:
         try:
             session_id, session_is_new = await self._goosed.ensure_session(session_id)
             self._sessions[chat_id] = session_id
+            if self._observer:
+                self._observer.push_event(session_id, "user_message", text)
         except Exception as exc:
             logger.warning("Could not ensure session for chat %s: %s", chat_id, exc)
 
@@ -712,20 +818,28 @@ class Bot:
                     break
 
                 if event.event_type == EventType.ERROR:
+                    if self._observer:
+                        self._observer.push_event(session_id, "error", event.error)
                     await _seal_all()
                     await self._tg.send_message(chat_id, f"⚠️ Error: <code>{event.error}</code>")
                     return
 
                 if event.event_type == EventType.FINISH:
+                    if self._observer:
+                        self._observer.push_event(session_id, "finish", event)
                     finish_token_state = event.token_state
                     break
 
                 if event.event_type != EventType.MESSAGE:
                     continue
 
+                logger.info('SSE_EVENT: %s types=%s', event.event_type, [i.content_type for i in event.contents])
                 # Process content items
                 for item in event.contents:
+                    logger.debug("CONTENT_TYPE: %s (tool_name=%s) (text=%s)", item.content_type, getattr(item, 'tool_name', ''), item.text[:30] if item.text else '')
                     if item.content_type == "thinking":
+                        if self._observer:
+                            self._observer.push_event(session_id, "thinking", item.thinking)
                         thinking_acc += item.thinking
                         total_thinking_acc += item.thinking
                         if thinking_bubble_msg_id is None:
@@ -745,6 +859,8 @@ class Bot:
                                 thinking_bubble.update(thinking=thinking_acc, body="")
 
                     elif item.content_type == "text":
+                        if self._observer:
+                            self._observer.push_event(session_id, "text", item.text)
                         body_acc += item.text
                         if body_bubble_msg_id is None:
                             # Seal thinking bubble first (marks it as collapsed/expandable)
@@ -769,6 +885,9 @@ class Bot:
                                 body_bubble.update(thinking="", body=body_acc)
 
                     elif item.content_type == "tool_request":
+                        logger.info("TOOL_REQUEST: %s args=%s", item.tool_name, item.args_preview[:80] if item.args_preview else "")
+                        if self._observer:
+                            self._observer.push_event(session_id, "tool_request", item)
                         # Seal all active bubbles before showing tool status
                         await _seal_all()
 
@@ -792,6 +911,9 @@ class Bot:
                         body_delivered_offset = 0
 
                     elif item.content_type == "tool_response":
+                        logger.info("TOOL_RESPONSE: %s success=%s result=%s", item.tool_name if hasattr(item,'tool_name') else '', item.success if hasattr(item,'success') else '?', item.result_preview[:80] if item.result_preview else '')
+                        if self._observer:
+                            self._observer.push_event(session_id, "tool_response", item)
                         # Update the matching tool status card
                         tool_entry = active_tools.pop(item.tool_name, None)
                         if tool_entry:

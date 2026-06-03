@@ -59,11 +59,14 @@ services:
   # ─── goosed runtime ─────────────────────────────────────────────────────────
   # Imagen buildeada desde el binario patched + MCPs Python.
   # Para rebuild: cp ~/goosed_patched bin/goosed-linux-amd64 && docker compose build goosed
-  goosed:
+  lina-goosed:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.goosed
+      args:
+        AGENT_PERSONALITY: lina
     image: lina-goosed:latest
+    container_name: lina-goosed
     restart: unless-stopped
     depends_on:
       lina-db:
@@ -93,6 +96,7 @@ services:
       # La deploy key (~/lina/.ssh/lina_deploy) debe estar creada y con write
       # access al repo — ver docs/runbooks/ para el procedimiento de setup.
       - ${HOME}:/home/user:rw
+      - lina-goosed-sessions:/root/.local/share/goose/sessions:rw
       # Solo la deploy key dedicada al repo lina (NO todo ~/.ssh).
       # Crear con: ssh-keygen -t ed25519 -f ~/lina/.ssh/lina_deploy -N ''
       # Agregar la clave pública como Deploy Key con write access en GitHub.
@@ -362,7 +366,7 @@ services:
       MCP_PORT: "8000"
       LINA_POLICIES_FILE: /home/user/lina/config/policies.yaml
       LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
-      LINA_GOOSED_URL: https://goosed:3000
+      LINA_GOOSED_URL: https://lina-goosed:3000
       LINA_GOOSED_SECRET: ${GOOSE_SERVER__SECRET_KEY:-}
     volumes:
       - ../../config/policies.yaml:/home/user/lina/config/policies.yaml:ro
@@ -445,8 +449,12 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.goosed
-    image: lina-goosed:latest
+      args:
+        AGENT_PERSONALITY: cline
+    image: cline-goosed:latest
+    container_name: cline-goosed
     restart: unless-stopped
+
     privileged: true               # acceso completo al host
     network_mode: host             # red del host (localhost funciona directo)
     pid: host                      # ver todos los procesos del host
@@ -464,14 +472,15 @@ services:
       GOOSE_CONTEXT_STRATEGY: ${GOOSE_CONTEXT_STRATEGY:-summarize}
       GOOSE_TELEMETRY_ENABLED: "false"
       GOOSE_DISABLE_AUTO_SESSION_TITLES: "true"
+      # GOOSE_THINKING_EFFORT: "true"  # desactivado 2026-06-03 — unificar thinking con LINA
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
       LINA_ENV: docker
     volumes:
       # Config específica para desktop (MCPs via localhost, sin gateway nginx interno)
       - ../../config/goose.config.desktop.yaml:/root/.config/goose/config.yaml:ro
       # Sessions y memoria persistentes
-      - ${HOME}/.config/goose/memory:/root/.config/goose/memory:rw
-      - ${HOME}/.config/goose/gateway:/root/.config/goose/gateway:rw
+      - ${HOME}/.config/goose/memory-desktop:/root/.config/goose/memory:rw  # CLINE desktop (separado de LINA)
+      - ${HOME}/.config/goose/gateway-desktop:/root/.config/goose/gateway:rw  # CLINE desktop (separado de LINA)
       - lina-logs:/app/logs
       # Acceso total al home del usuario
       - ${HOME}:/home/user:rw
@@ -502,6 +511,7 @@ services:
     environment:
       TELEGRAM_BOT_TOKEN: ${DESKTOP_BOT_TOKEN:-}
       GOOSED_URL: https://localhost:3001
+      GOOSE_SERVER__SECRET_KEY: ${GOOSE_SERVER__SECRET_KEY}
       GOOSE_SERVER_SECRET_KEY: ${GOOSE_SERVER__SECRET_KEY}
       GOOSE_GATEWAY_TRUSTED_USERS: ${DESKTOP_TRUSTED_USERS:-}
       GATEWAY_PACER_TICK: "1.5"
@@ -509,12 +519,44 @@ services:
       LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@localhost:5432/lina
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
       GATEWAY_NOTIFY_CHAT_IDS: ${DESKTOP_NOTIFY_CHAT_IDS:-}
+      OBSERVE_PORT: "9092"
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
     profiles: ["desktop"]
+
+  # ─── @s_goose_bot — Gateway para el goosed local (PC de Fede) ────────────
+  # Usa host network para alcanzar localhost:42359 (goosed local del usuario).
+  lina-gateway-goose:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.gateway
+    image: lina-gateway:latest
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      lina-db:
+        condition: service_healthy
+    environment:
+      TELEGRAM_BOT_TOKEN: ${GOOSE_BOT_TOKEN:-}
+      # GOOSED_URL: https://localhost:42359  # puerto original — el goosed local decide al iniciar
+      GOOSED_URL: ${GOOSED_LOCAL_URL:-https://localhost:42359}
+      GOOSE_SERVER__SECRET_KEY: ${GOOSE_BOT_SECRET_KEY:-}
+      GOOSE_SERVER_SECRET_KEY: ${GOOSE_BOT_SECRET_KEY:-}
+      GOOSE_GATEWAY_TRUSTED_USERS: ${GOOSE_BOT_TRUSTED_USERS:-}
+      GATEWAY_PACER_TICK: "1.5"
+      TELEGRAM_POLL_TIMEOUT: "30"
+      LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@localhost:5432/lina
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      GATEWAY_NOTIFY_CHAT_IDS: ${GOOSE_BOT_NOTIFY_CHAT_IDS:-}
+      OBSERVE_PORT: "9091"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ─── Docker socket proxy (Tecnativa) ────────────────────────────────────────
   # Expone un subconjunto restringido del Docker daemon para que LINA pueda
@@ -559,15 +601,17 @@ services:
     image: lina-gateway:latest
     restart: unless-stopped
     depends_on:
-      goosed:
+      lina-goosed:
         condition: service_healthy
       lina-db:
         condition: service_healthy
     volumes:
+      - lina-goosed-sessions:/goosed-sessions:ro
       - lina-secrets-data:/run/secrets/lina:ro
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      GOOSED_URL: https://goosed:3000
+      GOOSED_URL: https://lina-goosed:3000
+      GOOSE_SERVER__SECRET_KEY: ${GOOSE_SERVER__SECRET_KEY}
       GOOSE_SERVER_SECRET_KEY: ${GOOSE_SERVER__SECRET_KEY}
       GOOSE_GATEWAY_TRUSTED_USERS: ${GOOSE_GATEWAY_TRUSTED_USERS:-}
       GATEWAY_PACER_TICK: "1.5"
@@ -575,7 +619,9 @@ services:
       LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
       GATEWAY_NOTIFY_CHAT_IDS: ${GATEWAY_NOTIFY_CHAT_IDS:-}
-    # No ports needed — outbound only (Telegram API + goosed internal)
+    # Observe server (dashboard + WebSocket) — puerto para live stream de eventos
+    ports:
+      - "9090:9090"
     logging:
       driver: json-file
       options:
@@ -588,6 +634,7 @@ volumes:
   lina-secrets-data:
   lina-backup-data:
   lina-gcalendar-token:
+  lina-goosed-sessions:
 
 networks:
   default:
