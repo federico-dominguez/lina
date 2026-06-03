@@ -129,12 +129,17 @@ class Bot:
 
         return False
 
-    @staticmethod
-    def _is_this_bot(username: str) -> bool:
-        """Check if *username* refers to this bot, regardless of agent."""
-        return username.lower() in (
-            "s_lina_bot", "s_cline_bot", "s_goose_bot",
-        )
+    def _is_this_bot(self, username: str) -> bool:
+        """Check if *username* refers to this bot (by Telegram @ username)."""
+        # Map canonical bot names to their Telegram @usernames (no @ prefix)
+        mapping = {
+            "lina": "s_lina_bot",
+            "goose": "s_goose_bot",
+            "cline": "s_cline_bot",
+        }
+        my_name = self._cfg.bot_name.lower()
+        expected = mapping.get(my_name)
+        return username.lower() == expected
 
     async def _handle(self, msg: TelegramMessage) -> None:
         chat_id = msg.chat.id
