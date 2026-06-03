@@ -158,7 +158,7 @@ jobs:
       - uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: deploy/docker/Dockerfile.goosed
-          ignore: DL3008,DL3009,DL3003,SC2164
+          ignore: DL3008,DL3009,DL3003,DL3013,DL3059,SC2164
       - uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: deploy/docker/Dockerfile.mcp

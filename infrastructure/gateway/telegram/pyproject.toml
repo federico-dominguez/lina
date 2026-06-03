@@ -34,6 +34,15 @@ ignore = ["E501"]  # line length enforced by ruff format, not lint
 testpaths = ["tests"]
 asyncio_mode = "auto"
 
+[tool.uv]
+dev-dependencies = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "pytest-httpx>=0.36.2",
+    "ruff>=0.15.15",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8",

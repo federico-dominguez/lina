@@ -20,7 +20,7 @@ from telethon import TelegramClient
 
 API_ID = 35434942
 API_HASH = "9f2a614fbf2e8cbfaf844561b7f43294"
-SESSION_PATH = str(Path(__file__).parent.parent / "tests" / "e2e" / "telegram" / ".sessions" / "lina_e2e")
+SESSION_PATH = "/home/fede/lina/tests/e2e/telegram/.sessions/lina_e2e"
 LINA_BOT = "@s_lina_bot"
 
 

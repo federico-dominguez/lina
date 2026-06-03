@@ -309,10 +309,15 @@ requires-dist = [
 dev = [
     { name = "coverage", specifier = ">=7" },
     { name = "pytest", specifier = ">=8" },
+    { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
+    { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "pytest-cov", specifier = ">=5" },
+    { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "pytest-httpx", specifier = ">=0.30" },
+    { name = "pytest-httpx", specifier = ">=0.36.2" },
     { name = "ruff", specifier = ">=0.4" },
+    { name = "ruff", specifier = ">=0.15.15" },
 ]
 
 [[package]]

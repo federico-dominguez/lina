@@ -120,7 +120,7 @@ extensions:
 providers:
   custom_deepseek:
     enabled: true
-    model: deepseek-v4-pro
+    model: deepseek-v4-flash
     configured: true
 active_provider: custom_deepseek
 GOOSE_THINKING_EFFORT: false

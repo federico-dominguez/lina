@@ -522,7 +522,8 @@ def format_tool_status(
 ) -> str:
     """Format a tool-call status card for Telegram.
 
-    Header bubble always visible; output bubble collapsed (expandable).
+    Header visible at all times; input always expandable; output expandable
+    when tool completes.
     """
     if not done:
         icon = "⚙️"
@@ -531,17 +532,26 @@ def format_tool_status(
     else:
         icon = "❌"
 
-    args_part = f" <code>{escape_html(args_preview)}</code>" if args_preview else ""
-    header = f"<blockquote>{icon} <b>{escape_html(tool_name)}</b>{args_part}</blockquote>"
+    header = f"<blockquote>{icon} <b>{escape_html(tool_name)}</b></blockquote>"
+
+    # Input block — always present, always expandable
+    args_esc = escape_html(args_preview) if args_preview else ""
+    input_block = (
+        f"<blockquote expandable>📥 Input\n<pre><code>{args_esc}</code></pre></blockquote>"
+        if args_esc
+        else ""
+    )
 
     if not done or not result_preview:
-        return header
+        return "\n".join(p for p in (header, input_block) if p)
 
+    # Output block — only when done
     cleaned = strip_ansi(result_preview).rstrip()
     if not cleaned:
-        return header
+        return "\n".join(p for p in (header, input_block) if p)
 
     truncated = truncate_chars(cleaned, INLINE_TOOL_RESULT_MAX_CHARS)
     lang = "diff" if looks_like_diff(truncated) else lang_for_tool(tool_name)
     output = code_block(lang, truncated)
-    return f"{header}\n<blockquote expandable>{output}</blockquote>"
+    output_block = f"<blockquote expandable>📤 Output\n{output}</blockquote>"
+    return "\n".join(p for p in (header, input_block, output_block) if p)

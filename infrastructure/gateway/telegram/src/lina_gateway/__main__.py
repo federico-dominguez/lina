@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import signal
 from contextlib import suppress
 
@@ -9,6 +10,7 @@ from .agent_notifier import AgentNotifier
 from .boot_hook import on_boot, on_shutdown, record_balance_snapshot
 from .bot import Bot
 from .config import Config
+from .observe import create_observer
 
 
 def main() -> None:
@@ -38,6 +40,14 @@ async def _run() -> None:
     loop.add_signal_handler(signal.SIGTERM, stop.set)
     loop.add_signal_handler(signal.SIGINT, stop.set)
 
+    observe_port = int(os.environ.get("OBSERVE_PORT", "9090"))
+    observer = create_observer(
+        port=observe_port,
+        db_url=cfg.lina_db_url,
+        goosed_url=cfg.goosed_url,
+    )
+    await observer.start()
+    bot.set_observer(observer)
     bot_task = loop.create_task(bot.run(), name="bot")
     stop_task = loop.create_task(stop.wait(), name="stop")
 

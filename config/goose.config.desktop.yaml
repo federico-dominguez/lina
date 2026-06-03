@@ -120,7 +120,7 @@ providers:
     model: deepseek-v4-flash
     configured: true
 active_provider: custom_deepseek
-GOOSE_THINKING_EFFORT: false
+# GOOSE_THINKING_EFFORT set via env var
 
 # Sin gateway Telegram embebido — lo maneja lina-gateway-desktop (container separado)
 gateway_configs: []

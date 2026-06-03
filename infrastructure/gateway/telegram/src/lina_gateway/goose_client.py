@@ -17,6 +17,10 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# Track tool call IDs to names across SSE events.
+# key: call_id (e.g. "call_00_xxx"), value: tool_name (e.g. "shell")
+_tool_call_names: dict[str, str] = {}
+
 
 # ─── MessageEvent types (mirrors goose-server reply.rs) ─────────────────────
 
@@ -121,18 +125,31 @@ def _parse_event(data: dict[str, Any]) -> MessageEvent | None:
                 contents.append(
                     MessageContent(content_type="thinking", thinking=item.get("thinking", ""))
                 )
-            elif item_type == "tool_use" or item_type == "tool_request":
-                tool_call = item.get("tool_call") or item
+            elif item_type in ("tool_use", "tool_request", "toolRequest"):
+                tool_call = item.get("tool_call") or item.get("toolCall") or item
                 if isinstance(tool_call, dict) and "Err" in tool_call:
                     tool_call = {}
-                name = tool_call.get("name", item.get("name", ""))
-                args = tool_call.get("input", tool_call.get("arguments", {}))
+                # goosed >= 1.35 nests under toolCall.value
+                value = tool_call.get("value", {}) if isinstance(tool_call, dict) else {}
+                name = value.get("name") or tool_call.get("name") or item.get("name", "")
+                args = (
+                    value.get("arguments")
+                    or value.get("input")
+                    or tool_call.get("input")
+                    or tool_call.get("arguments", {})
+                )
                 if isinstance(args, str):
                     try:
                         args = json.loads(args)
                     except Exception:
                         args = {}
-                preview = _parse_tool_args(args)
+                preview = _parse_tool_args(args) if args else "{}"
+                if not name and not args:
+                    name = item.get("tool_name", "") or tool_call.get("tool_name", "") or ""
+                # Track tool name by call_id for matching with tool_response
+                call_id = item.get("id", "")
+                if call_id and name:
+                    _tool_call_names[call_id] = name
                 contents.append(
                     MessageContent(
                         content_type="tool_request",
@@ -140,29 +157,44 @@ def _parse_event(data: dict[str, Any]) -> MessageEvent | None:
                         args_preview=preview,
                     )
                 )
-            elif item_type == "tool_result" or item_type == "tool_response":
-                result = item.get("tool_result") or item
+            elif item_type in ("tool_result", "tool_response", "toolResponse"):
+                result = item.get("tool_result") or item.get("toolResult") or item
+                # Match by call_id: tool_response has an "id" field matching tool_request's id
+                call_id = item.get("id", "")
+                tool_name = _tool_call_names.pop(call_id, "") if call_id else ""
                 if isinstance(result, dict):
-                    ok = result.get("Ok") or result
-                    items = (
-                        ok
-                        if isinstance(ok, list)
-                        else ok.get("content", [])
-                        if isinstance(ok, dict)
-                        else []
-                    )
+                    # goosed >= 1.35 nests under toolResult.value
+                    value = result.get("value", {}) if isinstance(result, dict) else {}
+                    # Extract text from content array in value, or from top-level Ok
+                    content_items = value.get("content", []) or result.get("content", [])
+                    ok = result.get("Ok")
+                    if ok:
+                        # legacy format: {"Ok": [...]}
+                        content_items = (
+                            ok
+                            if isinstance(ok, list)
+                            else ok.get("content", [])
+                            if isinstance(ok, dict)
+                            else []
+                        )
                     text = " ".join(
                         c.get("text", "")
-                        for c in items
+                        for c in content_items
                         if isinstance(c, dict) and c.get("type") == "text"
                     )
-                    success = "Err" not in result
+                    # Also extract structuredContent output if available
+                    if not text and value.get("structuredContent"):
+                        sc = value["structuredContent"]
+                        text = sc.get("stdout", "") or sc.get("output", "") or str(sc)[:500]
+                    # Check for error in value.isError or top-level Err
+                    success = not value.get("isError", False) and "Err" not in result
                 else:
                     text = str(result)
                     success = True
                 contents.append(
                     MessageContent(
                         content_type="tool_response",
+                        tool_name=tool_name,
                         result_preview=text[:500],
                         success=success,
                     )
@@ -294,6 +326,7 @@ class GoosedClient:
                     if not line.startswith("data: "):
                         continue
                     raw = line[6:]
+                    logger.info("RAW_SSE: %s", raw[:200])
                     if not raw.strip():
                         continue
                     try:

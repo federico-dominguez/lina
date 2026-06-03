@@ -1395,6 +1395,158 @@ def get_pending_instructions(session_id: str) -> list[dict]:
     ]
 
 
+# ─── CLINE commands ────────────────────────────────────────────────────────────
+
+
+@mcp.tool()
+def write_cline_command(
+    command: str,
+    notification: str = "",
+    args_json: dict | None = None,
+) -> dict:
+    """Escribe una orden para CLINE en la cola de comandos.
+
+    LINA usa este tool para delegarle trabajo a CLINE. La orden se guarda
+    con status='pending' y un daemon externo (cline-poll) la detecta y
+    se la reenvia a CLINE via Telegram.
+
+    Args:
+        command:      texto de la orden (instrucciones completas para CLINE).
+        notification: breve descripcion para notificaciones (opcional).
+        args_json:    argumentos adicionales en JSON (opcional).
+
+    Returns:
+        {"id": int, "status": "pending", "command": str}
+    """
+    if not command.strip():
+        raise ValueError("command no puede estar vacio")
+
+    row = _execute(
+        """INSERT INTO cline_commands (command, args_json, notification, status)
+           VALUES (%s, %s, %s, 'pending')
+           RETURNING id, created_at""",
+        (command.strip(), json.dumps(args_json or {}), notification.strip() or None),
+        fetch="one",
+    )
+    cmd_id = row["id"] if row else None
+    # NOTIFY al daemon para que despierte instantáneamente
+    try:
+        _execute("NOTIFY cline_new_command, %s", (str(cmd_id),))
+    except Exception:
+        pass  # best-effort
+    _audit(
+        "write_cline_command",
+        {"command": command[:200], "notification": notification},
+        f"id={cmd_id}",
+    )
+    return {
+        "id": cmd_id,
+        "status": "pending",
+        "command": command[:200],
+        "created_at": row["created_at"].isoformat() if row and row.get("created_at") else None,
+    }
+
+
+@mcp.tool()
+def get_cline_commands(status: str = "pending", limit: int = 10) -> list[dict]:
+    """Lista las ordenes en la cola de CLINE.
+
+    Args:
+        status: filtrar por status ('pending', 'running', 'completed', etc.).
+                Usar 'all' para ver todas.
+        limit:  maximo de resultados (1-50).
+
+    Returns:
+        Lista de ordenes con id, command, status, notification, timestamps.
+    """
+    if status == "all":
+        status_filter = "1=1"
+        params: tuple = (min(max(limit, 1), 50),)
+    else:
+        status_filter = "status = %s"
+        params = (status, min(max(limit, 1), 50))
+
+    rows = _execute(
+        "SELECT id, command, status, notification,"
+        " created_at, started_at, completed_at, session_id"
+        " FROM cline_commands"
+        f" WHERE {status_filter}"
+        " ORDER BY created_at DESC LIMIT %s",
+        params,
+        fetch="all",
+    )
+    return [
+        {
+            "id": r["id"],
+            "command": r["command"][:200],
+            "status": r["status"],
+            "notification": r.get("notification"),
+            "session_id": r.get("session_id"),
+            "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
+            "started_at": r["started_at"].isoformat() if r.get("started_at") else None,
+            "completed_at": r["completed_at"].isoformat() if r.get("completed_at") else None,
+        }
+        for r in rows
+    ]
+
+
+def log_cline_activity(order_id: int, kind: str, tool_name: str = "", detail: str = "") -> dict:
+    """Registrar actividad de CLINE en tiempo real.
+
+    Llamalo ANTES y DESPUES de cada tool call para que LINA pueda monitorear.
+    El trigger NOTIFY 'cline_activity' avisa a LINA en tiempo real.
+
+    Args:
+        order_id:  id de la orden en cline_commands
+        kind:      'tool_start', 'tool_end', 'thinking', 'text', 'error'
+        tool_name: nombre del tool (ej: 'lina-shell-policy__sh_run')
+        detail:    detalle (args, preview, resultado corto, snippet de error)
+    """
+    _execute(
+        "INSERT INTO cline_activity (order_id, kind, tool_name, detail) VALUES (%s, %s, %s, %s)",
+        (order_id, kind, tool_name, detail[:500] if detail else ""),
+    )
+    return {"ok": True}
+
+
+def get_cline_activity(order_id: int | None = None, limit: int = 20) -> list[dict]:
+    """Leer actividad de CLINE en tiempo real.
+
+    Usalo para monitorear que esta haciendo CLINE AHORA MISMO.
+
+    Args:
+        order_id: filtrar por orden especifica. Si es None, trae las ultimas.
+        limit:    maximo de entradas (1-100).
+    """
+    if order_id is not None:
+        rows = _execute(
+            "SELECT id, order_id, kind, tool_name, detail, created_at"
+            " FROM cline_activity WHERE order_id = %s"
+            " ORDER BY created_at DESC LIMIT %s",
+            (order_id, min(max(limit, 1), 100)),
+            fetch="all",
+        )
+    else:
+        rows = _execute(
+            "SELECT id, order_id, kind, tool_name, detail, created_at"
+            " FROM cline_activity ORDER BY created_at DESC LIMIT %s",
+            (min(max(limit, 1), 100),),
+            fetch="all",
+        )
+
+    return [
+        {
+            "id": r["id"],
+            "order_id": r["order_id"],
+            "kind": r["kind"],
+            "tool_name": r["tool_name"],
+            "detail": r["detail"][:300] if r["detail"] else "",
+            "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
+        }
+        for r in rows
+    ]
+
+
 # ─── entrypoint ───────────────────────────────────────────────────────────────
 
 
