@@ -70,6 +70,7 @@ deploy/docker/secrets/
 # ─── Telegram E2E testing ───────────────────────────────────────────────
 tests/e2e/telegram/.sessions/
 tests/e2e/telegram/.report.json
+tests/e2e/telegram/.sessions/daemon/
 
 # ─── Audit outputs ──────────────────────────────────────────────────────
 limpiza-audit/

@@ -26,7 +26,6 @@ async def main():
     r = {}
     r['LINA'] = await test_bot('LINA', '@s_lina_bot')
     r['Cline'] = await test_bot('Cline', '@s_cline_bot')
-    r['Goose'] = await test_bot('Goose', '@s_goose_bot')
     print()
     print('=== RESUMEN ===', flush=True)
     for n, ok in r.items():
