@@ -94,14 +94,19 @@ def _env(*names: str, default: str | None = None) -> str | None:
     return default
 
 
-def _require(name: str) -> str:
-    value = os.environ.get(name)
-    if not value:
+def _require(*names: str) -> str:
+    """Read first env var from *names; raise if none set. Also checks secrets file."""
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
         # Fallback: try lina-secrets file backend (container mode, existing secrets)
         value = _try_secrets_file(name)
-    if not value:
-        raise RuntimeError(f"Required environment variable {name!r} is not set")
-    return value
+        if value:
+            return value
+    raise RuntimeError(
+        f"Required environment variable ({' | '.join(repr(n) for n in names)}) is not set"
+    )
 
 
 def _try_secrets_file(name: str) -> str | None:
