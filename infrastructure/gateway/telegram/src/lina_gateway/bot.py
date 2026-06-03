@@ -956,7 +956,9 @@ class Bot:
             await _seal_all()
             if _retry:
                 # Already retried once — give up gracefully
-                await self._tg.send_message(chat_id, f"⚠️ {self._cfg.bot_name} no está disponible. Intentá de nuevo.")
+                await self._tg.send_message(
+                    chat_id, f"⚠️ {self._cfg.bot_name} no está disponible. Intentá de nuevo."
+                )
                 return
             status_id = await self._tg.send_message(
                 chat_id, f"⏳ {self._cfg.bot_name} se está reiniciando, un momento..."
@@ -969,7 +971,9 @@ class Bot:
                     f"⚠️ {self._cfg.bot_name} no está disponible. Intentá de nuevo.",
                 )
                 return
-            await self._tg.edit_message(chat_id, status_id, f"✅ {self._cfg.bot_name} de vuelta. Reprocesando...")
+            await self._tg.edit_message(
+                chat_id, status_id, f"✅ {self._cfg.bot_name} de vuelta. Reprocesando..."
+            )
             # Invalidate cached session — force ensure_session to create/resume fresh
             self._sessions.pop(chat_id, None)
             await asyncio.sleep(1.0)  # let goosed settle
@@ -1159,7 +1163,9 @@ class Bot:
         elif action == "approve":
             # User approved a human input request — send approval as follow-up
             await self._tg.answer_callback_query(cq.id, "✅ Aprobado. Enviando respuesta...")
-            await self._tg.send_message(cq.chat_id, f"✅ Aprobado — reenviando a {self._cfg.bot_name}…")
+            await self._tg.send_message(
+                cq.chat_id, f"✅ Aprobado — reenviando a {self._cfg.bot_name}…"
+            )
             cancel = self._cancels.get(cq.chat_id) or asyncio.Event()
             # Send "Sí, aprobado" as a new user message to LINA
             asyncio.create_task(
@@ -1177,7 +1183,9 @@ class Bot:
         elif action == "reject":
             # User rejected — send rejection as follow-up
             await self._tg.answer_callback_query(cq.id, "❌ Rechazado.")
-            await self._tg.send_message(cq.chat_id, f"❌ Rechazado — reenviando a {self._cfg.bot_name}…")
+            await self._tg.send_message(
+                cq.chat_id, f"❌ Rechazado — reenviando a {self._cfg.bot_name}…"
+            )
             cancel = self._cancels.get(cq.chat_id) or asyncio.Event()
             asyncio.create_task(
                 self._reply(cq.chat_id, None, "No, no aprobado ❌", cancel),

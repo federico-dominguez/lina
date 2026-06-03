@@ -51,10 +51,19 @@ class Config:
         self.bot_name = _env("GATEWAY_BOT_NAME", default="LINA")
         # Token: each bot uses its own var; order = canonical → legacy
         self.bot_token = _require(
-            "LINA_BOT_TOKEN", "CLINE_BOT_TOKEN", "GOOSE_BOT_TOKEN",
-            "TELEGRAM_BOT_TOKEN", "DESKTOP_BOT_TOKEN",
+            "LINA_BOT_TOKEN",
+            "CLINE_BOT_TOKEN",
+            "GOOSE_BOT_TOKEN",
+            "TELEGRAM_BOT_TOKEN",
+            "DESKTOP_BOT_TOKEN",
         )
-        raw_trusted = _env("LINA_TRUSTED_USERS", "CLINE_TRUSTED_USERS", "GOOSE_TRUSTED_USERS", "GOOSE_GATEWAY_TRUSTED_USERS", default="")
+        raw_trusted = _env(
+            "LINA_TRUSTED_USERS",
+            "CLINE_TRUSTED_USERS",
+            "GOOSE_TRUSTED_USERS",
+            "GOOSE_GATEWAY_TRUSTED_USERS",
+            default="",
+        )
         self.trusted_users = frozenset(p.strip() for p in raw_trusted.split(",") if p.strip())
         self.max_voice_bytes = int(os.environ.get("MAX_VOICE_BYTES", str(20 * 1024 * 1024)))
 
@@ -73,7 +82,14 @@ class Config:
 
         # GATEWAY_NOTIFY_CHAT_IDS takes priority; falls back to extracting numeric
         # IDs from GOOSE_GATEWAY_TRUSTED_USERS ("telegram:<id>" entries).
-        raw_notify = _env("LINA_NOTIFY_CHAT_IDS", "CLINE_NOTIFY_CHAT_IDS", "GOOSE_NOTIFY_CHAT_IDS", "GOOSE_BOT_NOTIFY_CHAT_IDS", "GATEWAY_NOTIFY_CHAT_IDS", default="")
+        raw_notify = _env(
+            "LINA_NOTIFY_CHAT_IDS",
+            "CLINE_NOTIFY_CHAT_IDS",
+            "GOOSE_NOTIFY_CHAT_IDS",
+            "GOOSE_BOT_NOTIFY_CHAT_IDS",
+            "GATEWAY_NOTIFY_CHAT_IDS",
+            default="",
+        )
         if raw_notify.strip():
             self.notify_chat_ids = [
                 int(x.strip()) for x in raw_notify.split(",") if x.strip().lstrip("-").isdigit()
