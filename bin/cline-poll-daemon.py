@@ -25,7 +25,7 @@ LINA_DIR = Path(__file__).parent.parent
 
 API_ID = 35434942
 API_HASH = "9f2a614fbf2e8cbfaf844561b7f43294"
-SESSION_PATH = str(LINA_DIR / "tests" / "e2e" / "telegram" / ".sessions" / "lina_e2e")
+SESSION_PATH = str(LINA_DIR / "tests" / "e2e" / "telegram" / ".sessions" / "daemon" / "lina_e2e")
 CLINE_BOT = "@s_cline_bot"
 LINA_BOT = "@s_lina_bot"
 
