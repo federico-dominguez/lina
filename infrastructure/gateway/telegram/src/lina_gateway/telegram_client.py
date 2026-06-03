@@ -150,12 +150,30 @@ class TelegramClient:
 
     async def send_message(self, chat_id: int, text: str, **kw: Any) -> int | None:
         """Send a text message. Returns the new message_id."""
+        import re as _re
+        
         payload: dict[str, Any] = {
             "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "HTML",
             "disable_web_page_preview": True,
         }
+        
+        # Detect @mentions in CLEAN text (no HTML tags)
+        _clean = _re.sub(r"<[^>]+>", "", text)
+        _mentions = []
+        for _m in _re.finditer(r"@(s_lina_bot|s_cline_bot|s_goose_bot)", _clean):
+            _mentions.append({
+                "type": "mention",
+                "offset": _m.start(),
+                "length": _m.end() - _m.start(),
+            })
+        
+        if _mentions:
+            payload["text"] = _clean
+            payload["entities"] = _mentions
+        else:
+            payload["text"] = text
+            payload["parse_mode"] = "HTML"
+        
         payload.update(kw)
         r = await self._http.post(self._url("sendMessage"), json=payload)
         if not r.is_success:
