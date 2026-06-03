@@ -1189,6 +1189,20 @@ class Bot:
                 asyncio.create_task(self._handle(update.message))
             if update.callback_query:
                 asyncio.create_task(self._handle_callback(update.callback_query))
+        # Process comm messages (HTTP bridge from other bots)
+        if self._observer:
+            for cmd in self._observer.pop_comm_messages():
+                logger.info("Comm: handling from=%s text=%.60s", cmd.get("from","?"), cmd.get("text",""))
+                asyncio.create_task(
+                    self._handle(TelegramMessage(
+                        message_id=int(time.time() * 1000) % (2**31),
+                        chat=TelegramChat(id=8887121852, chat_type="private"),
+                        text=cmd.get("text", ""),
+                        from_user=TelegramUser(id=8887121852, first_name="Comm", is_bot=False, username="comm_bot"),
+                        voice=None,
+                    )),
+                    name=f"comm-{cmd.get('id','')}-{int(time.time())}",
+                )
         return offset
 
     async def _handle_callback(self, cq: TelegramCallbackQuery) -> None:

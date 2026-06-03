@@ -48,6 +48,7 @@ async def _run() -> None:
     )
     await observer.start()
     bot.set_observer(observer)
+    observer.set_bot(bot)
     bot_task = loop.create_task(bot.run(), name="bot")
     stop_task = loop.create_task(stop.wait(), name="stop")
 

@@ -222,6 +222,19 @@ class ObserveServer:
         self._event_count: dict[str, int] = {}
         self._last_tool_req_id: dict[str, int] = {}
         self._agent_sessions: dict[str, str] = {}
+        self._bot: Any = None  # reference to Bot for /api/comm
+        self._comm_queue: list[dict] = []
+
+    def set_bot(self, bot: Any) -> None:
+        self._bot = bot
+        logger.info("Observe: bot reference set for /api/comm")
+
+    def pop_comm_messages(self, limit: int = 10) -> list[dict]:
+        """Pop queued comm messages for bot processing."""
+        n = min(limit, len(self._comm_queue))
+        result = self._comm_queue[:n]
+        self._comm_queue = self._comm_queue[n:]
+        return result
 
     # ── Lifecycle ──────────────────────────────────────────────────────
 
@@ -419,6 +432,8 @@ class ObserveServer:
 
         if method == "GET" and path == "/":
             await self._serve_dashboard(writer)
+        elif method == "POST" and path == "/api/comm":
+            await self._handle_comm(writer, raw_data)
         elif method == "GET" and path.startswith("/api/"):
             await self._serve_api(writer, path)
         else:
@@ -441,6 +456,24 @@ class ObserveServer:
             writer.close()
         except Exception:
             pass
+
+    async def _handle_comm(self, writer, raw_data: bytes) -> None:
+        """POST /api/comm — receive a message from another bot."""
+        try:
+            body = json.loads(raw_data.split(b"\r\n\r\n", 1)[-1])
+        except (IndexError, json.JSONDecodeError):
+            await self._send_http(writer, 400, b'{"error":"bad request"}')
+            return
+        from_bot = body.get("from", "unknown")
+        text = body.get("text", "")
+        msg_id = body.get("id", "")
+        if not text:
+            await self._send_http(writer, 400, b'{"error":"missing text"}')
+            return
+        # Queue the message for the bot to process
+        self._comm_queue.append({"from": from_bot, "text": text, "id": msg_id})
+        logger.info("Comm: msg from %s: %.60s", from_bot, text)
+        await self._send_http(writer, 200, json.dumps({"status": "queued", "id": msg_id}).encode())
 
     async def _serve_api(self, writer, path):
         parts = path.strip("/").split("/")
