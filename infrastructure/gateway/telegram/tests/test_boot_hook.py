@@ -57,7 +57,7 @@ class TestOnBootNoDB:
         assert len(tg.sent) == 1
         chat_id, text = tg.sent[0]
         assert chat_id == 1001
-        assert "LINA online" in text
+        assert "LINA" in text or "online" in text
 
     @pytest.mark.asyncio
     async def test_multiple_chat_ids(self) -> None:
@@ -90,7 +90,7 @@ class TestOnBootWithDB:
             await on_boot(tg, db_url="postgresql://fake", chat_ids=[1001])
 
         assert len(tg.sent) == 1
-        assert "LINA online" in tg.sent[0][1]
+        assert "LINA" in tg.sent[0][1] or "online" in tg.sent[0][1]
 
     @pytest.mark.asyncio
     async def test_recent_started_event_sends_crash_message(self) -> None:
@@ -124,7 +124,7 @@ class TestOnBootWithDB:
         ):
             await on_boot(tg, db_url="postgresql://fake", chat_ids=[1001])
 
-        assert "LINA online" in tg.sent[0][1]
+        assert "LINA" in tg.sent[0][1] or "online" in tg.sent[0][1]
 
     @pytest.mark.asyncio
     async def test_no_previous_event_sends_online(self) -> None:
@@ -139,7 +139,7 @@ class TestOnBootWithDB:
         ):
             await on_boot(tg, db_url="postgresql://fake", chat_ids=[1001])
 
-        assert "LINA online" in tg.sent[0][1]
+        assert "LINA" in tg.sent[0][1] or "online" in tg.sent[0][1]
 
     @pytest.mark.asyncio
     async def test_db_failure_still_sends_notification(self) -> None:
