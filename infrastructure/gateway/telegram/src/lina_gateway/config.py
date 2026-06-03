@@ -49,7 +49,11 @@ class Config:
 
     def __init__(self) -> None:
         self.bot_name = _env("GATEWAY_BOT_NAME", default="LINA")
-        self.bot_token = _require("LINA_BOT_TOKEN", "TELEGRAM_BOT_TOKEN")
+        # Token: each bot uses its own var; order = canonical → legacy
+        self.bot_token = _require(
+            "LINA_BOT_TOKEN", "CLINE_BOT_TOKEN", "GOOSE_BOT_TOKEN",
+            "TELEGRAM_BOT_TOKEN", "DESKTOP_BOT_TOKEN",
+        )
         raw_trusted = _env("LINA_TRUSTED_USERS", "CLINE_TRUSTED_USERS", "GOOSE_TRUSTED_USERS", "GOOSE_GATEWAY_TRUSTED_USERS", default="")
         self.trusted_users = frozenset(p.strip() for p in raw_trusted.split(",") if p.strip())
         self.max_voice_bytes = int(os.environ.get("MAX_VOICE_BYTES", str(20 * 1024 * 1024)))
