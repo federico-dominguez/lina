@@ -190,7 +190,9 @@ class TestFormatToolStatus:
 
     def test_no_result_no_output_bubble(self):
         result = format_tool_status("shell_exec", "cmd", True, True, "")
-        assert "expandable" not in result
+        # Input is always wrapped in <blockquote expandable> now
+        assert "<blockquote expandable>" in result
+        assert "📤 Output" not in result  # no output block expected
 
 
 # ─── markdown_to_telegram_html ───────────────────────────────────────────────
