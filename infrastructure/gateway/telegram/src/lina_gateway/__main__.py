@@ -41,10 +41,12 @@ async def _run() -> None:
     loop.add_signal_handler(signal.SIGINT, stop.set)
 
     observe_port = int(os.environ.get("OBSERVE_PORT", "9090"))
+    agent_name = os.environ.get("GOOSE_AGENT_NAME", "lina")
     observer = create_observer(
         port=observe_port,
         db_url=cfg.lina_db_url,
         goosed_url=cfg.goosed_url,
+        agent=agent_name,
     )
     await observer.start()
     bot.set_observer(observer)
