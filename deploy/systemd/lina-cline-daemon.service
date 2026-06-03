@@ -1,0 +1,22 @@
+[Unit]
+Description=LINA — Cline Poll Daemon: reenvía órdenes de LINA a @s_cline_bot
+Documentation=https://github.com/federico-dominguez/lina
+After=docker.service docker-lina-db-1.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/lina/bin/cline-poll-daemon.py
+WorkingDirectory=%h/lina
+Restart=on-failure
+RestartSec=10
+
+Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="LINA_DB_URL=postgresql://lina:lina_dev@localhost:5432/lina"
+
+# Sin protecciones de FS — necesita acceder a scripts, sesión Telethon y subprocesos
+# ProtectSystem, ProtectHome y ReadWritePaths no aplican porque el daemon
+# ejecuta cline-send.py y lina-send.py como subprocesos
+
+[Install]
+WantedBy=default.target
