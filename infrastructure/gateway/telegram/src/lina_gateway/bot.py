@@ -149,7 +149,9 @@ class Bot:
         if not self._should_respond(msg):
             logger.debug(
                 "Ignoring message %s in %s chat %s (not addressed)",
-                msg.message_id, msg.chat.chat_type, chat_id,
+                msg.message_id,
+                msg.chat.chat_type,
+                chat_id,
             )
             return
 

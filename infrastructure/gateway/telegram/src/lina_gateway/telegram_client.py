@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import tempfile
@@ -76,7 +75,8 @@ class TelegramVoice:
 @dataclass
 class TelegramEntity:
     """Parsed entity from Telegram message."""
-    type: str          # "mention" | "text_mention" | "bot_command" | etc.
+
+    type: str  # "mention" | "text_mention" | "bot_command" | etc.
     offset: int
     length: int
     user: TelegramUser | None  # populated for "text_mention" type
@@ -192,12 +192,6 @@ class TelegramClient:
             return True
         return r.is_success
 
-
-
-
-
-
-
     async def send_chat_action(self, chat_id: int, action: str = "typing") -> None:
         """Send a chat action (typing indicator, etc.)."""
         try:
@@ -291,25 +285,32 @@ class TelegramClient:
 
 
 def _parse_entities(
-    raw_entities: list[dict[str, Any]], text: str,
+    raw_entities: list[dict[str, Any]],
+    text: str,
 ) -> list[TelegramEntity]:
     """Parse Telegram message entities into clean objects."""
     entities: list[TelegramEntity] = []
     for e in raw_entities:
         user_raw = e.get("user")
-        user = TelegramUser(
-            first_name=user_raw.get("first_name", "") if user_raw else "",
-            last_name=user_raw.get("last_name") if user_raw else None,
-            username=user_raw.get("username") if user_raw else None,
-            is_bot=user_raw.get("is_bot", False) if user_raw else False,
-        ) if user_raw else None
+        user = (
+            TelegramUser(
+                first_name=user_raw.get("first_name", "") if user_raw else "",
+                last_name=user_raw.get("last_name") if user_raw else None,
+                username=user_raw.get("username") if user_raw else None,
+                is_bot=user_raw.get("is_bot", False) if user_raw else False,
+            )
+            if user_raw
+            else None
+        )
 
-        entities.append(TelegramEntity(
-            type=e["type"],
-            offset=e["offset"],
-            length=e["length"],
-            user=user,
-        ))
+        entities.append(
+            TelegramEntity(
+                type=e["type"],
+                offset=e["offset"],
+                length=e["length"],
+                user=user,
+            )
+        )
     return entities
 
 
@@ -368,12 +369,16 @@ def _parse_update(raw: dict[str, Any]) -> TelegramUpdate:
 
 def _parse_callback_query(raw: dict[str, Any]) -> TelegramCallbackQuery:
     from_raw = raw.get("from")
-    from_user = TelegramUser(
-        first_name=from_raw.get("first_name", ""),
-        last_name=from_raw.get("last_name"),
-        username=from_raw.get("username"),
-        is_bot=from_raw.get("is_bot", False),
-    ) if from_raw else None
+    from_user = (
+        TelegramUser(
+            first_name=from_raw.get("first_name", ""),
+            last_name=from_raw.get("last_name"),
+            username=from_raw.get("username"),
+            is_bot=from_raw.get("is_bot", False),
+        )
+        if from_raw
+        else None
+    )
 
     return TelegramCallbackQuery(
         id=raw["id"],
