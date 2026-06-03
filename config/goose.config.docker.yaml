@@ -21,6 +21,7 @@ extensions:
   analyze:            {enabled: true,  type: platform, name: analyze,             display_name: Analyze,             bundled: true}
   summon:             {enabled: false, type: platform, name: summon,            display_name: Summon,              bundled: true}
   summarize:          {enabled: true,  type: platform, name: summarize,           display_name: Summarize,           bundled: true}
+  tom:                {enabled: true,  type: platform, name: tom,                display_name: Top Of Mind,         bundled: true}
 
   # ─── MCPs de LINA — acceso vía streamable_http (lina-mcp-gateway:8101-8106) ──
   # El gateway nginx expone cada MCP en un puerto distinto dentro del network.
@@ -114,7 +115,7 @@ extensions:
     display_name: LINA Orchestrator
     type: streamable_http
     uri: http://lina-mcp-gateway:8111/mcp
-    enabled: true
+    enabled: false
     timeout: 30
 
 providers:
