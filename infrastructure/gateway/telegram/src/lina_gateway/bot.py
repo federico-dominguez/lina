@@ -417,6 +417,7 @@ class Bot:
             return
         try:
             import asyncpg
+
             conn = await asyncpg.connect(db_url, timeout=5)
             try:
                 # Count orders by status for CLINE
@@ -448,9 +449,11 @@ class Bot:
             f"• Completadas: <b>{orders['completed'] or 0}</b>",
             f"• Fallidas: <b>{orders['failed'] or 0}</b>",
         ]
-        if last and last['completed_at']:
+        if last and last["completed_at"]:
             parts.append("")
-            parts.append(f"✅ Última: #{last['id']} — <i>{last['response'][:80] if last['response'] else 'sin detalle'}</i>")
+            parts.append(
+                f"✅ Última: #{last['id']} — <i>{last['response'][:80] if last['response'] else 'sin detalle'}</i>"
+            )
         await self._tg.send_message(chat_id, "\n".join(parts))
 
     async def _handle_lina_status(self, chat_id: int) -> None:
@@ -461,6 +464,7 @@ class Bot:
             return
         try:
             import asyncpg
+
             conn = await asyncpg.connect(db_url, timeout=5)
             try:
                 # LINA's orders created (write_cline_command)
@@ -489,9 +493,11 @@ class Bot:
             f"• Órdenes creadas: <b>{orders['completed'] or 0}</b> completadas, <b>{orders['pending'] or 0}</b> pendientes",
             f"• En ejecución: <b>{orders['running'] or 0}</b>",
         ]
-        if last_session and last_session['created_at']:
+        if last_session and last_session["created_at"]:
             parts.append("")
-            parts.append(f"📚 Última sesión: <i>{last_session['summary'][:100] if last_session['summary'] else 'sin resumen'}</i>")
+            parts.append(
+                f"📚 Última sesión: <i>{last_session['summary'][:100] if last_session['summary'] else 'sin resumen'}</i>"
+            )
         await self._tg.send_message(chat_id, "\n".join(parts))
 
     async def _handle_agents(self, chat_id: int, edit_msg_id: int | None = None) -> None:
@@ -833,10 +839,19 @@ class Bot:
                 if event.event_type != EventType.MESSAGE:
                     continue
 
-                logger.info('SSE_EVENT: %s types=%s', event.event_type, [i.content_type for i in event.contents])
+                logger.info(
+                    "SSE_EVENT: %s types=%s",
+                    event.event_type,
+                    [i.content_type for i in event.contents],
+                )
                 # Process content items
                 for item in event.contents:
-                    logger.debug("CONTENT_TYPE: %s (tool_name=%s) (text=%s)", item.content_type, getattr(item, 'tool_name', ''), item.text[:30] if item.text else '')
+                    logger.debug(
+                        "CONTENT_TYPE: %s (tool_name=%s) (text=%s)",
+                        item.content_type,
+                        getattr(item, "tool_name", ""),
+                        item.text[:30] if item.text else "",
+                    )
                     if item.content_type == "thinking":
                         if self._observer:
                             self._observer.push_event(session_id, "thinking", item.thinking)
@@ -885,7 +900,11 @@ class Bot:
                                 body_bubble.update(thinking="", body=body_acc)
 
                     elif item.content_type == "tool_request":
-                        logger.info("TOOL_REQUEST: %s args=%s", item.tool_name, item.args_preview[:80] if item.args_preview else "")
+                        logger.info(
+                            "TOOL_REQUEST: %s args=%s",
+                            item.tool_name,
+                            item.args_preview[:80] if item.args_preview else "",
+                        )
                         if self._observer:
                             self._observer.push_event(session_id, "tool_request", item)
                         # Seal all active bubbles before showing tool status
@@ -911,7 +930,12 @@ class Bot:
                         body_delivered_offset = 0
 
                     elif item.content_type == "tool_response":
-                        logger.info("TOOL_RESPONSE: %s success=%s result=%s", item.tool_name if hasattr(item,'tool_name') else '', item.success if hasattr(item,'success') else '?', item.result_preview[:80] if item.result_preview else '')
+                        logger.info(
+                            "TOOL_RESPONSE: %s success=%s result=%s",
+                            item.tool_name if hasattr(item, "tool_name") else "",
+                            item.success if hasattr(item, "success") else "?",
+                            item.result_preview[:80] if item.result_preview else "",
+                        )
                         if self._observer:
                             self._observer.push_event(session_id, "tool_response", item)
                         # Update the matching tool status card

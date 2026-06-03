@@ -536,7 +536,11 @@ def format_tool_status(
 
     # Input block — always present, always expandable
     args_esc = escape_html(args_preview) if args_preview else ""
-    input_block = f"<blockquote expandable>📥 Input\n<pre><code>{args_esc}</code></pre></blockquote>" if args_esc else ""
+    input_block = (
+        f"<blockquote expandable>📥 Input\n<pre><code>{args_esc}</code></pre></blockquote>"
+        if args_esc
+        else ""
+    )
 
     if not done or not result_preview:
         return "\n".join(p for p in (header, input_block) if p)

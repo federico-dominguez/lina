@@ -1434,7 +1434,11 @@ def write_cline_command(
         _execute("NOTIFY cline_new_command, %s", (str(cmd_id),))
     except Exception:
         pass  # best-effort
-    _audit("write_cline_command", {"command": command[:200], "notification": notification}, f"id={cmd_id}")
+    _audit(
+        "write_cline_command",
+        {"command": command[:200], "notification": notification},
+        f"id={cmd_id}",
+    )
     return {
         "id": cmd_id,
         "status": "pending",
@@ -1463,9 +1467,11 @@ def get_cline_commands(status: str = "pending", limit: int = 10) -> list[dict]:
         params = (status, min(max(limit, 1), 50))
 
     rows = _execute(
-        f"SELECT id, command, status, notification, created_at, started_at, completed_at, session_id"
-        f" FROM cline_commands WHERE {status_filter}"
-        f" ORDER BY created_at DESC LIMIT %s",
+        "SELECT id, command, status, notification,"
+        " created_at, started_at, completed_at, session_id"
+        " FROM cline_commands"
+        f" WHERE {status_filter}"
+        " ORDER BY created_at DESC LIMIT %s",
         params,
         fetch="all",
     )

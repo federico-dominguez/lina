@@ -44,9 +44,7 @@ class EventStore:
             logger.info("Observe: sin DB (observabilidad desactivada)")
             return
         try:
-            self._pool = await asyncpg.create_pool(
-                self._db_url, min_size=1, max_size=3, timeout=5
-            )
+            self._pool = await asyncpg.create_pool(self._db_url, min_size=1, max_size=3, timeout=5)
             logger.info("Observe: EventStore conectado a PostgreSQL")
         except Exception as e:
             logger.warning("Observe: no se pudo conectar a PG: %s", e)
@@ -111,7 +109,8 @@ class EventStore:
                        WHERE session_id = $1
                        ORDER BY id ASC
                        LIMIT $2""",
-                    session_id, limit,
+                    session_id,
+                    limit,
                 )
                 return [dict(r) for r in rows]
         except Exception as e:
@@ -229,12 +228,12 @@ class ObserveServer:
     async def start(self) -> None:
         await self.store.connect()
         self._server = await asyncio.start_server(
-            self._handle_connection, "0.0.0.0", self.port,
+            self._handle_connection,
+            "0.0.0.0",
+            self.port,
         )
         addr = self._server.sockets[0].getsockname()
-        logger.info(
-            "Observe: http://localhost:%d  ws://localhost:%d", addr[1], addr[1]
-        )
+        logger.info("Observe: http://localhost:%d  ws://localhost:%d", addr[1], addr[1])
         self._agent_poll_task = asyncio.create_task(self._poll_agent_events())
         self._goosed_db_task = asyncio.create_task(self._poll_goosed_db())
         asyncio.create_task(self._server.serve_forever(), name="observe-server")
@@ -300,14 +299,18 @@ class ObserveServer:
 
         # Persistir a DB (async, fire-and-forget)
         if db_payload:
-            parent_id = self._last_tool_req_id.get(session_id) if event_type == "tool_response" else None
+            parent_id = (
+                self._last_tool_req_id.get(session_id) if event_type == "tool_response" else None
+            )
             asyncio.create_task(self._save_and_track(session_id, event_type, db_payload, parent_id))
 
         # Contar
         self._event_count[session_id] = self._event_count.get(session_id, 0) + 1
 
     async def _save_and_track(self, session_id, event_type, db_payload, parent_id=None):
-        event_id = await self.store.save_event(session_id, event_type, db_payload, parent_id=parent_id)
+        event_id = await self.store.save_event(
+            session_id, event_type, db_payload, parent_id=parent_id
+        )
         if event_type == "tool_request" and event_id:
             self._last_tool_req_id[session_id] = event_id
 
@@ -326,7 +329,6 @@ class ObserveServer:
     async def _save_event(self, session_id, event_type, db_payload):
         """Save to session_events (fire-and-forget)."""
         if self.store and self.store._pool:
-            import json
             asyncio.create_task(self._save_and_track(session_id, event_type, db_payload))
 
     # ── Connection handler ─────────────────────────────────────────────
@@ -334,7 +336,7 @@ class ObserveServer:
     async def _handle_connection(self, reader, writer):
         try:
             data = await asyncio.wait_for(reader.read(8192), timeout=10)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             writer.close()
             return
         request = data.decode("utf-8", errors="replace")
@@ -356,9 +358,7 @@ class ObserveServer:
             writer.close()
             return
 
-        accept_key = hashlib.sha1(
-            (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()
-        ).digest()
+        accept_key = hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()
         accept_b64 = base64.b64encode(accept_key).decode()
 
         response = (
@@ -371,7 +371,9 @@ class ObserveServer:
         await writer.drain()
 
         self._rooms.setdefault(session_id, set()).add(writer)
-        await _ws_send(writer, json.dumps({"type":"connected","session":session_id,"ts":time.time()}))
+        await _ws_send(
+            writer, json.dumps({"type": "connected", "session": session_id, "ts": time.time()})
+        )
 
         try:
             while True:
@@ -391,7 +393,9 @@ class ObserveServer:
                         self._rooms.get(session_id, set()).discard(writer)
                         session_id = new_sid
                         self._rooms.setdefault(session_id, set()).add(writer)
-                        await _ws_send(writer, json.dumps({"type":"subscribed","session":session_id}))
+                        await _ws_send(
+                            writer, json.dumps({"type": "subscribed", "session": session_id})
+                        )
         except Exception:
             pass
         finally:
@@ -446,11 +450,17 @@ class ObserveServer:
         resource = parts[1]
         if resource == "status":
             ws_count = sum(len(v) for v in self._rooms.values())
-            await self._send_http(writer, 200, json.dumps({
-                "rooms": len(self._rooms),
-                "clients": ws_count,
-                "sessions": {s: len(w) for s, w in self._rooms.items()},
-            }).encode())
+            await self._send_http(
+                writer,
+                200,
+                json.dumps(
+                    {
+                        "rooms": len(self._rooms),
+                        "clients": ws_count,
+                        "sessions": {s: len(w) for s, w in self._rooms.items()},
+                    }
+                ).encode(),
+            )
             return
         if resource == "sessions":
             if len(parts) == 2:
@@ -461,9 +471,18 @@ class ObserveServer:
             if len(parts) == 3:
                 timeline = await self.store.get_timeline(session_id)
                 stats = await self.store.get_stats(session_id)
-                await self._send_http(writer, 200, json.dumps({
-                    "session_id": session_id, "events": timeline, "stats": stats,
-                }, default=str).encode())
+                await self._send_http(
+                    writer,
+                    200,
+                    json.dumps(
+                        {
+                            "session_id": session_id,
+                            "events": timeline,
+                            "stats": stats,
+                        },
+                        default=str,
+                    ).encode(),
+                )
                 return
         # Direct session ID lookup
         session_id = resource
@@ -472,9 +491,18 @@ class ObserveServer:
             await self._send_http(writer, 404, b'{"error":"session not found"}')
             return
         stats = await self.store.get_stats(session_id)
-        await self._send_http(writer, 200, json.dumps({
-            "session_id": session_id, "events": timeline, "stats": stats,
-        }, default=str).encode())
+        await self._send_http(
+            writer,
+            200,
+            json.dumps(
+                {
+                    "session_id": session_id,
+                    "events": timeline,
+                    "stats": stats,
+                },
+                default=str,
+            ).encode(),
+        )
 
     async def _serve_dashboard(self, writer):
         html = self._dashboard_html()
@@ -573,7 +601,6 @@ conn();ls();setInterval(ls,5000);setInterval(function(){if(ws)ws.send(JSON.strin
 </script></body></html>
 """
 
-
     async def _poll_agent_events(self):
         """Background: poll agent_events for sub-agent tool calls and broadcast them."""
         await asyncio.sleep(2.0)
@@ -582,56 +609,110 @@ conn();ls();setInterval(ls,5000);setInterval(function(){if(ws)ws.send(JSON.strin
             if self.store and self.store._pool:
                 async with self.store._pool.acquire() as conn:
                     r = await conn.fetchrow("SELECT COALESCE(max(id),0) FROM agent_events")
-                    if r: last_id = r[0]
-        except: pass
+                    if r:
+                        last_id = r[0]
+        except Exception:
+            pass
         while True:
             try:
                 if not self.store or not self.store._pool:
-                    await asyncio.sleep(5); continue
+                    await asyncio.sleep(5)
+                    continue
                 async with self.store._pool.acquire() as conn:
-                    rows = await conn.fetch("SELECT id, session_id, payload_json FROM agent_events WHERE kind='process_started' AND id>$1 ORDER BY id LIMIT 20", last_id)
+                    rows = await conn.fetch(
+                        "SELECT id, session_id, payload_json FROM agent_events WHERE kind='process_started' AND id>$1 ORDER BY id LIMIT 20",
+                        last_id,
+                    )
                     for r in rows:
                         p = r["payload_json"]
                         if isinstance(p, str):
-                            try: p = __import__("json").loads(p)
-                            except: p = {}
-                        m = p.get("goosed_session_id","")
-                        if m: self._agent_sessions[r["session_id"]] = m
-                        if r["id"]>last_id: last_id=r["id"]
-                    rows = await conn.fetch("SELECT id, session_id, payload_json, ts FROM agent_events WHERE kind='tool_called' AND id>$1 ORDER BY id LIMIT 50", last_id)
+                            try:
+                                p = __import__("json").loads(p)
+                            except Exception:
+                                p = {}
+                        m = p.get("goosed_session_id", "")
+                        if m:
+                            self._agent_sessions[r["session_id"]] = m
+                        if r["id"] > last_id:
+                            last_id = r["id"]
+                    rows = await conn.fetch(
+                        "SELECT id, session_id, payload_json, ts FROM agent_events WHERE kind='tool_called' AND id>$1 ORDER BY id LIMIT 50",
+                        last_id,
+                    )
                     for r in rows:
-                        sub=r["session_id"]; main=self._agent_sessions.get(sub,"")
+                        sub = r["session_id"]
+                        main = self._agent_sessions.get(sub, "")
                         if not main:
-                            if r["id"]>last_id: last_id=r["id"]; continue
-                        p=r["payload_json"]
-                        if isinstance(p,str):
-                            try: p=__import__("json").loads(p)
-                            except: p={}
-                        cmds=p.get("commands",[]); act=p.get("action","")
-                        cmd="; ".join(cmds) if cmds else (act or "shell")
-                        ts_raw=r["ts"]
-                        e=ts_raw.timestamp() if hasattr(ts_raw,"timestamp") else time.time()
-                        asyncio.create_task(self._broadcast(main,{"type":"tool_request","session":main,"ts":e,"tool":"shell","args":cmd}))
+                            if r["id"] > last_id:
+                                last_id = r["id"]
+                                continue
+                        p = r["payload_json"]
+                        if isinstance(p, str):
+                            try:
+                                p = __import__("json").loads(p)
+                            except Exception:
+                                p = {}
+                        cmds = p.get("commands", [])
+                        act = p.get("action", "")
+                        cmd = "; ".join(cmds) if cmds else (act or "shell")
+                        ts_raw = r["ts"]
+                        e = ts_raw.timestamp() if hasattr(ts_raw, "timestamp") else time.time()
+                        asyncio.create_task(
+                            self._broadcast(
+                                main,
+                                {
+                                    "type": "tool_request",
+                                    "session": main,
+                                    "ts": e,
+                                    "tool": "shell",
+                                    "args": cmd,
+                                },
+                            )
+                        )
                         # Also persist to session_events so they appear on reload
-                        asyncio.create_task(self._save_and_track(main, "tool_request", {"tool": "shell", "args": cmd}))
-                        asyncio.create_task(self._broadcast(main,{"type":"tool_response","session":main,"ts":e+0.1,"text":p.get("result","✅ done")}))
-                        asyncio.create_task(self._save_and_track(main, "tool_response", {"text": (p.get("result") or "✅ done")[:300]}))
-                        if r["id"]>last_id: last_id=r["id"]
-                    rows = await conn.fetch("SELECT id FROM agent_events WHERE kind='process_ended' AND id>$1 ORDER BY id LIMIT 20", last_id)
+                        asyncio.create_task(
+                            self._save_and_track(
+                                main, "tool_request", {"tool": "shell", "args": cmd}
+                            )
+                        )
+                        asyncio.create_task(
+                            self._broadcast(
+                                main,
+                                {
+                                    "type": "tool_response",
+                                    "session": main,
+                                    "ts": e + 0.1,
+                                    "text": p.get("result", "✅ done"),
+                                },
+                            )
+                        )
+                        asyncio.create_task(
+                            self._save_and_track(
+                                main,
+                                "tool_response",
+                                {"text": (p.get("result") or "✅ done")[:300]},
+                            )
+                        )
+                        if r["id"] > last_id:
+                            last_id = r["id"]
+                    rows = await conn.fetch(
+                        "SELECT id FROM agent_events WHERE kind='process_ended' AND id>$1 ORDER BY id LIMIT 20",
+                        last_id,
+                    )
                     for r in rows:
-                        if r["id"]>last_id: last_id=r["id"]
+                        if r["id"] > last_id:
+                            last_id = r["id"]
             except Exception as e:
                 logger.debug("Observe: agent_poll error: %s", e)
             await asyncio.sleep(3.0)
-
-
 
     async def _poll_goosed_db(self):
         """Background: poll goosed SQLite DB for tool/thinking events not in SSE."""
         await asyncio.sleep(5.0)
         db_paths = ["/goosed-sessions/sessions.db", "/root/.local/share/goose/sessions/sessions.db"]
         last_ids: dict[str, int] = {}
-        import json, time
+        import json
+
         while True:
             db_path = None
             for p in db_paths:
@@ -644,6 +725,7 @@ conn();ls();setInterval(ls,5000);setInterval(function(){if(ws)ws.send(JSON.strin
                 continue
             try:
                 import sqlite3
+
                 conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
                 conn.row_factory = sqlite3.Row
                 c = conn.cursor()
@@ -655,17 +737,24 @@ conn();ls();setInterval(ls,5000);setInterval(function(){if(ws)ws.send(JSON.strin
                     last_id = last_ids.get(db_path + session_id, 0)
                     if mid <= last_id:
                         continue
-                    role = row["role"]
+                    # role unused
                     content_json = row["content_json"]
                     for item in json.loads(content_json):
                         item_type = item.get("type", "")
                         ts = row["created_timestamp"]
                         if item_type == "thinking":
                             thinking_text = item.get("thinking", "")
-                            payload = {"type": "thinking", "session": session_id, "ts": ts, "text": thinking_text}
+                            payload = {
+                                "type": "thinking",
+                                "session": session_id,
+                                "ts": ts,
+                                "text": thinking_text,
+                            }
                             asyncio.create_task(self._broadcast(session_id, payload))
                             db_payload = {"text": thinking_text, "full": thinking_text}
-                            asyncio.create_task(self._save_event(session_id, "thinking", db_payload))
+                            asyncio.create_task(
+                                self._save_event(session_id, "thinking", db_payload)
+                            )
                         elif item_type == "toolRequest":
                             pass  # SSE now includes toolRequest - skip to avoid duplicates and wrong ordering
                         elif item_type == "toolResponse":
@@ -675,7 +764,6 @@ conn();ls();setInterval(ls,5000);setInterval(function(){if(ws)ws.send(JSON.strin
             except Exception as e:
                 logger.debug("Observe: goosed DB poll error: %s", e)
             await asyncio.sleep(5.0)
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════

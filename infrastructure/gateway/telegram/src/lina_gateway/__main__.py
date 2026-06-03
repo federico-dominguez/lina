@@ -1,8 +1,8 @@
 """Entry point: python -m lina_gateway."""
 
 import asyncio
-import os
 import logging
+import os
 import signal
 from contextlib import suppress
 
