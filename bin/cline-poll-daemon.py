@@ -217,11 +217,40 @@ async def process_pending(conn, tg: TelegramClient):
         _pending = False
 
 
+async def reset_orphaned_running(conn) -> int:
+    """Resetea órdenes en 'running' que quedaron colgadas (daemon reiniciado).
+
+    Busca órdenes con status='running' que tengan más de 120s sin completarse.
+    Las resetea a 'pending' para que sean reprocesadas.
+    """
+    rows = await conn.fetch(
+        """UPDATE cline_commands
+           SET status = 'pending',
+               started_at = NULL,
+               response = COALESCE(response || '\n\n⏰ Timeout — daemon reiniciado', '⏰ Timeout — daemon reiniciado')
+           WHERE status = 'running'
+             AND (started_at IS NULL OR started_at < NOW() - INTERVAL '120 seconds')
+           RETURNING id"""
+    )
+    count = len(rows)
+    if count:
+        ids = [r["id"] for r in rows]
+        log(f"  ♻️ {count} orden(es) colgadas reseteadas: {ids}")
+    return count
+
+
 async def main_loop():
     log("Iniciando daemon bidireccional LINA ↔ CLINE")
 
     conn = await asyncpg.connect(DB_URL, timeout=10)
     log("✅ Conectado a PostgreSQL")
+
+    # Reprocesar órdenes colgadas antes de arrancar
+    colgadas = await reset_orphaned_running(conn)
+    if colgadas:
+        log(f"  ♻️ {colgadas} orden(es) serán reprocesadas")
+    else:
+        log("  ✅ No hay órdenes colgadas")
 
     tg = TelegramClient(SESSION_PATH, API_ID, API_HASH)
     await tg.start()
