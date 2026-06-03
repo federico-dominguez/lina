@@ -59,18 +59,20 @@ class EventStore:
         event_type: str,
         payload: dict,
         parent_id: int | None = None,
+        agent: str = "lina",
     ) -> int | None:
         if not self._pool:
             return None
         try:
             async with self._pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    """INSERT INTO session_events (session_id, event_type, payload, parent_event_id)
-                       VALUES ($1, $2, $3::jsonb, $4) RETURNING id""",
+                    """INSERT INTO session_events (session_id, event_type, payload, parent_event_id, agent)
+                       VALUES ($1, $2, $3::jsonb, $4, $5) RETURNING id""",
                     session_id,
                     event_type,
                     json.dumps(payload),
                     parent_id,
+                    agent,
                 )
                 return row["id"] if row else None
         except Exception as e:
@@ -213,9 +215,11 @@ class ObserveServer:
         port: int = 9090,
         db_url: str | None = None,
         goosed_url: str = "",
+        agent: str = "lina",
     ):
         self.port = port
         self.goosed_url = goosed_url
+        self.agent = agent
         self.store = EventStore(db_url)
         self._rooms: dict[str, set[asyncio.StreamWriter]] = {}
         self._current_text: dict[str, str] = {}
@@ -322,7 +326,7 @@ class ObserveServer:
 
     async def _save_and_track(self, session_id, event_type, db_payload, parent_id=None):
         event_id = await self.store.save_event(
-            session_id, event_type, db_payload, parent_id=parent_id
+            session_id, event_type, db_payload, parent_id=parent_id, agent=self.agent
         )
         if event_type == "tool_request" and event_id:
             self._last_tool_req_id[session_id] = event_id
@@ -808,6 +812,7 @@ def create_observer(
     port: int = 9090,
     db_url: str | None = None,
     goosed_url: str = "",
+    agent: str = "lina",
 ) -> ObserveServer:
     """Crea y retorna un ObserveServer listo para start()."""
-    return ObserveServer(port=port, db_url=db_url, goosed_url=goosed_url)
+    return ObserveServer(port=port, db_url=db_url, goosed_url=goosed_url, agent=agent)
