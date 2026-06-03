@@ -1,13 +1,12 @@
-"""Minimal async Telegram Bot API client using raw HTTP polling.
-
-No Telethon — uses direct Bot API calls for polling & sending.
-"""
+"""Low-level Telegram Bot API client (long-poll, sendMessage, editMessage, etc.)."""
 
 from __future__ import annotations
 
-import html
+import asyncio
 import logging
-from collections.abc import AsyncGenerator
+import os
+import tempfile
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -17,8 +16,13 @@ logger = logging.getLogger(__name__)
 
 # ─── Constants ───────────────────────────────────────────────────────────────
 
+# Telegram Bot API base
+TELEGRAM_API_BASE = "https://api.telegram.org"
+
 MAX_VOICE_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
-MAX_MESSAGE_LENGTH = 4096
+MAX_MESSAGE_LENGTH = 4096  # Telegram hard limit
+_MIN_EDIT_INTERVAL_S = 0.5
+_MAX_429_RETRIES = 3
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -188,44 +192,86 @@ class TelegramClient:
             return True
         return r.is_success
 
-    async def set_reaction(self, chat_id: int, message_id: int, emoji: str = "👍") -> bool:
-        """Set a reaction on a message."""
-        try:
-            r = await self._http.post(
-                self._url("setMessageReaction"),
-                json={
-                    "chat_id": chat_id,
-                    "message_id": message_id,
-                    "reaction": [{"type": "emoji", "emoji": emoji}],
-                    "is_big": False,
-                },
-            )
-            return r.is_success
-        except Exception:
-            return False
 
-    async def delete_message(self, chat_id: int, message_id: int) -> bool:
-        """Delete a message."""
-        try:
-            r = await self._http.post(
-                self._url("deleteMessage"),
-                json={"chat_id": chat_id, "message_id": message_id},
-            )
-            if r.status_code == 400 and "message can't be deleted" in r.text:
-                return False
-            return r.is_success
-        except Exception:
-            return False
 
-    async def answer_callback_query(self, query_id: str, text: str | None = None) -> bool:
-        payload: dict[str, Any] = {"callback_query_id": query_id}
+
+
+
+
+    async def send_chat_action(self, chat_id: int, action: str = "typing") -> None:
+        """Send a chat action (typing indicator, etc.)."""
+        try:
+            await self._http.post(
+                self._url("sendChatAction"),
+                json={"chat_id": chat_id, "action": action},
+            )
+        except Exception as exc:
+            logger.debug("sendChatAction error: %s", exc)
+
+    async def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> None:
+        """Answer a callback query (required by Telegram to stop the loading indicator)."""
+        payload: dict[str, str] = {"callback_query_id": callback_query_id}
         if text:
             payload["text"] = text
+            payload["show_alert"] = "false"
         try:
-            r = await self._http.post(self._url("answerCallbackQuery"), json=payload)
-            return r.is_success
+            await self._http.post(self._url("answerCallbackQuery"), json=payload)
         except Exception:
-            return False
+            logger.warning("answerCallbackQuery: error for %s", callback_query_id)
+
+    async def edit_message_reply_markup(
+        self, chat_id: int, message_id: int, reply_markup: dict | None = None
+    ) -> None:
+        """Edit only the inline keyboard of an existing message."""
+        payload: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        try:
+            await self._http.post(self._url("editMessageReplyMarkup"), json=payload)
+        except Exception:
+            logger.warning(
+                "editMessageReplyMarkup: error for msg %s in chat %s", message_id, chat_id
+            )
+
+    async def set_reaction(self, chat_id: int, message_id: int, emoji: str) -> None:
+        """Set a reaction emoji on a message."""
+        reaction: list[Any] = [] if not emoji else [{"type": "emoji", "emoji": emoji}]
+        try:
+            await self._http.post(
+                self._url("setMessageReaction"),
+                json={"chat_id": chat_id, "message_id": message_id, "reaction": reaction},
+            )
+        except Exception as exc:
+            logger.debug("setMessageReaction error: %s", exc)
+
+    async def get_file_path(self, file_id: str) -> str:
+        """Get the file path for a Telegram file_id."""
+        resp = await self._http.post(self._url("getFile"), json={"file_id": file_id})
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("ok"):
+            raise RuntimeError(f"getFile error: {data.get('description')}")
+        return data["result"]["file_path"]
+
+    async def download_file(self, file_id: str) -> bytes:
+        """Download a file from Telegram by file_id."""
+        file_path = await self.get_file_path(file_id)
+        url = f"{TELEGRAM_API_BASE}/file/bot{self._token}/{file_path}"
+        resp = await self._http.get(url)
+        resp.raise_for_status()
+        return resp.content
+
+    async def save_voice_file(self, data: bytes, mime_type: str | None) -> str:
+        """Save voice bytes to a temp file and return the path."""
+        ext = _ext_from_mime(mime_type)
+        voice_dir = os.path.join(tempfile.gettempdir(), "lina_voice")
+        os.makedirs(voice_dir, mode=0o700, exist_ok=True)
+        filename = f"voice_{uuid.uuid4()}.{ext}"
+        path = os.path.join(voice_dir, filename)
+        with open(path, "wb") as f:
+            os.chmod(path, 0o600)
+            f.write(data)
+        return path
 
     async def get_chat_member(self, chat_id: int, user_id: int) -> dict[str, Any]:
         """Get info about a chat member."""
@@ -236,8 +282,6 @@ class TelegramClient:
         if r.is_success:
             return r.json().get("result", {})
         return {}
-
-    # ── Close ─────────────────────────────────────────────────────────
 
     async def close(self) -> None:
         await self._http.aclose()
