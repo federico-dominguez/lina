@@ -10,6 +10,7 @@ class Config:
 
     # --- Telegram ---
     bot_token: str
+    bot_name: str  # "LINA" | "Goose" | "Cline" — via GATEWAY_BOT_NAME
     # Comma-separated list of "telegram:<chat_id>" trusted users (auto-paired).
     trusted_users: frozenset[str]
     # Maximum voice file size we'll attempt to process (bytes).
@@ -47,8 +48,9 @@ class Config:
     agent_poll_interval: float
 
     def __init__(self) -> None:
-        self.bot_token = _require("TELEGRAM_BOT_TOKEN")
-        raw_trusted = os.environ.get("GOOSE_GATEWAY_TRUSTED_USERS", "")
+        self.bot_name = _env("GATEWAY_BOT_NAME", default="LINA")
+        self.bot_token = _require("LINA_BOT_TOKEN", "TELEGRAM_BOT_TOKEN")
+        raw_trusted = _env("LINA_TRUSTED_USERS", "CLINE_TRUSTED_USERS", "GOOSE_TRUSTED_USERS", "GOOSE_GATEWAY_TRUSTED_USERS", default="")
         self.trusted_users = frozenset(p.strip() for p in raw_trusted.split(",") if p.strip())
         self.max_voice_bytes = int(os.environ.get("MAX_VOICE_BYTES", str(20 * 1024 * 1024)))
 
@@ -67,7 +69,7 @@ class Config:
 
         # GATEWAY_NOTIFY_CHAT_IDS takes priority; falls back to extracting numeric
         # IDs from GOOSE_GATEWAY_TRUSTED_USERS ("telegram:<id>" entries).
-        raw_notify = os.environ.get("GATEWAY_NOTIFY_CHAT_IDS", "")
+        raw_notify = _env("LINA_NOTIFY_CHAT_IDS", "CLINE_NOTIFY_CHAT_IDS", "GOOSE_NOTIFY_CHAT_IDS", "GOOSE_BOT_NOTIFY_CHAT_IDS", "GATEWAY_NOTIFY_CHAT_IDS", default="")
         if raw_notify.strip():
             self.notify_chat_ids = [
                 int(x.strip()) for x in raw_notify.split(",") if x.strip().lstrip("-").isdigit()
@@ -81,6 +83,15 @@ class Config:
 
     def is_trusted(self, chat_id: int) -> bool:
         return f"telegram:{chat_id}" in self.trusted_users
+
+
+def _env(*names: str, default: str | None = None) -> str | None:
+    """Read first env var from *names (backward-compatible aliases)."""
+    for name in names:
+        val = os.environ.get(name)
+        if val:
+            return val
+    return default
 
 
 def _require(name: str) -> str:

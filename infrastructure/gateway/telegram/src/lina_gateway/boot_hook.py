@@ -17,10 +17,14 @@ raised — the gateway must continue operating even if the DB is temporarily dow
 from __future__ import annotations
 
 import logging
+import os
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
+
+# Nombre del bot — configurable via env var (issue: @s_goose_bot mostraba "LINA")
+_BOT_NAME = os.environ.get("GATEWAY_BOT_NAME", "LINA")
 
 # Maximum age of an interrupted 'started' event that we still consider relevant.
 # Events older than this are treated as a clean/cold start.
@@ -104,11 +108,11 @@ async def on_boot(
 
     if was_interrupted:
         msg = (
-            "⚡ <b>LINA reiniciada inesperadamente.</b>\n"
+            f"⚡ <b>{_BOT_NAME} reiniciada inesperadamente.</b>\n"
             "Retomando — si estabas en medio de algo, volvé a pedírmelo."
         )
     else:
-        msg = "✅ <b>LINA online.</b>"
+        msg = f"✅ <b>{_BOT_NAME} online.</b>"
 
     for chat_id in chat_ids:
         try:
@@ -523,9 +527,10 @@ class SmartContext:
 
     def format_warmup_prompt(self) -> str:
         """Return the complete warmup prompt string to send to goosed."""
+        agent_name = _BOT_NAME
         parts: list[str] = [
             "[SISTEMA: CONTEXTO_RECUPERADO_AUTOMATICAMENTE]\n"
-            "LINA fue reiniciada. Contexto de la sesión anterior para retomar "
+            f"{agent_name} fue reiniciada. Contexto de la sesión anterior para retomar "
             "sin pedirle al usuario que repita nada:\n"
         ]
 
@@ -534,7 +539,7 @@ class SmartContext:
 
         if self.messages:
             recent = "\n".join(
-                f"{'Fede' if m['role'] == 'user' else 'LINA'}: {m['content']}"
+                f"{'Fede' if m['role'] == 'user' else agent_name}: {m['content']}"
                 for m in self.messages
             )
             parts.append(f"## Últimos mensajes\n{recent}\n")

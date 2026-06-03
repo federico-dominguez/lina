@@ -75,7 +75,7 @@ services:
         condition: service_started
     environment:
       LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
-      GOOSE_SERVER__SECRET_KEY: ${GOOSE_SERVER__SECRET_KEY}
+      LINA_SECRET_KEY: ${LINA_SECRET_KEY:-${GOOSE_SERVER__SECRET_KEY:-}}
       GOOSE_HOST: "0.0.0.0"
       GOOSE_MAX_TURNS: ${GOOSE_MAX_TURNS:-1000}
       GOOSE_GATEWAY_MAX_TURNS: ${GOOSE_GATEWAY_MAX_TURNS:-50}
@@ -445,7 +445,7 @@ services:
   # Contenedor privileged con host network para acceso total al sistema.
   # Comparte los MCPs de LINA vía localhost (host network).
   # Escucha en puerto 3001 para no colisionar con LINA (puerto 3000).
-  goosed-desktop:
+  cline-goosed-dev:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.goosed
@@ -463,7 +463,7 @@ services:
         condition: service_started
     environment:
       LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@localhost:5432/lina
-      GOOSE_SERVER__SECRET_KEY: ${GOOSE_SERVER__SECRET_KEY}
+      LINA_SECRET_KEY: ${LINA_SECRET_KEY:-${GOOSE_SERVER__SECRET_KEY:-}}
       GOOSE_PORT: "3001"
       GOOSE_HOST: "127.0.0.1"
       GOOSE_MAX_TURNS: ${GOOSE_MAX_TURNS:-1000}
@@ -495,30 +495,32 @@ services:
     profiles: ["desktop"]
 
   # ─── CLINE Desktop — Telegram gateway para @s_cline_bot ─────────────────────
-  # Bot de Telegram independiente que se conecta a goosed-desktop.
+  # Bot de Telegram independiente que se conecta a cline-goosed.
   # Usa host network para alcanzar localhost:3001.
-  # Requiere configurar DESKTOP_BOT_TOKEN y DESKTOP_TRUSTED_USERS en .env
-  lina-gateway-desktop:
+  # Requiere configurar CLINE_BOT_TOKEN y DESKTOP_TRUSTED_USERS en .env
+  cline-gateway:
+    container_name: cline-gateway
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.gateway
-    image: lina-gateway:latest
+    image: cline-gateway:latest
     restart: unless-stopped
     network_mode: host
     depends_on:
       lina-db:
         condition: service_healthy
     environment:
-      TELEGRAM_BOT_TOKEN: ${DESKTOP_BOT_TOKEN:-}
-      GOOSED_URL: https://localhost:3001
-      GOOSE_SERVER__SECRET_KEY: ${GOOSE_SERVER__SECRET_KEY}
-      GOOSE_SERVER_SECRET_KEY: ${GOOSE_SERVER__SECRET_KEY}
-      GOOSE_GATEWAY_TRUSTED_USERS: ${DESKTOP_TRUSTED_USERS:-}
+      CLINE_BOT_TOKEN: ${CLINE_BOT_TOKEN:-${DESKTOP_BOT_TOKEN:-}}
+      GOOSED_URL: https://localhost:3001  # cline-goosed
+      LINA_SECRET_KEY: ${LINA_SECRET_KEY:-${GOOSE_SERVER__SECRET_KEY:-}}
+      GOOSE_SERVER_SECRET_KEY: ${LINA_SECRET_KEY:-${GOOSE_SERVER__SECRET_KEY:-}}
+      CLINE_TRUSTED_USERS: ${CLINE_TRUSTED_USERS:-${DESKTOP_TRUSTED_USERS:-}}
+      GATEWAY_BOT_NAME: ${GATEWAY_BOT_NAME:-Cline}
       GATEWAY_PACER_TICK: "1.5"
       TELEGRAM_POLL_TIMEOUT: "30"
       LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@localhost:5432/lina
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
-      GATEWAY_NOTIFY_CHAT_IDS: ${DESKTOP_NOTIFY_CHAT_IDS:-}
+      CLINE_NOTIFY_CHAT_IDS: ${CLINE_NOTIFY_CHAT_IDS:-${DESKTOP_NOTIFY_CHAT_IDS:-}}
       OBSERVE_PORT: "9092"
     logging:
       driver: json-file
@@ -529,11 +531,12 @@ services:
 
   # ─── @s_goose_bot — Gateway para el goosed local (PC de Fede) ────────────
   # Usa host network para alcanzar localhost:42359 (goosed local del usuario).
-  lina-gateway-goose:
+  goose-gateway:
+    container_name: goose-gateway
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.gateway
-    image: lina-gateway:latest
+    image: goose-gateway:latest
     restart: unless-stopped
     network_mode: host
     depends_on:
@@ -541,16 +544,16 @@ services:
         condition: service_healthy
     environment:
       TELEGRAM_BOT_TOKEN: ${GOOSE_BOT_TOKEN:-}
-      # GOOSED_URL: https://localhost:42359  # puerto original — el goosed local decide al iniciar
       GOOSED_URL: ${GOOSED_LOCAL_URL:-https://localhost:42359}
-      GOOSE_SERVER__SECRET_KEY: ${GOOSE_BOT_SECRET_KEY:-}
-      GOOSE_SERVER_SECRET_KEY: ${GOOSE_BOT_SECRET_KEY:-}
-      GOOSE_GATEWAY_TRUSTED_USERS: ${GOOSE_BOT_TRUSTED_USERS:-}
+      GOOSE_SERVER__SECRET_KEY: ${GOOSE_SECRET_KEY:-${GOOSE_BOT_SECRET_KEY:-}}
+      GOOSE_SERVER_SECRET_KEY: ${GOOSE_SECRET_KEY:-${GOOSE_BOT_SECRET_KEY:-}}
+      GOOSE_TRUSTED_USERS: ${GOOSE_TRUSTED_USERS:-${GOOSE_BOT_TRUSTED_USERS:-}}
+      GATEWAY_BOT_NAME: ${GATEWAY_BOT_NAME:-Goose}
       GATEWAY_PACER_TICK: "1.5"
       TELEGRAM_POLL_TIMEOUT: "30"
       LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@localhost:5432/lina
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
-      GATEWAY_NOTIFY_CHAT_IDS: ${GOOSE_BOT_NOTIFY_CHAT_IDS:-}
+      GOOSE_NOTIFY_CHAT_IDS: ${GOOSE_NOTIFY_CHAT_IDS:-${GOOSE_BOT_NOTIFY_CHAT_IDS:-}}
       OBSERVE_PORT: "9091"
     logging:
       driver: json-file
@@ -595,6 +598,7 @@ services:
   # Pollea Telegram, reenvía mensajes a goosed /reply (SSE) y muestra
   # respuestas con efecto typewriter via editMessageText.
   lina-gateway:
+    container_name: lina-gateway
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.gateway
@@ -609,19 +613,20 @@ services:
       - lina-goosed-sessions:/goosed-sessions:ro
       - lina-secrets-data:/run/secrets/lina:ro
     environment:
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      LINA_BOT_TOKEN: ${LINA_BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:-}}
       GOOSED_URL: https://lina-goosed:3000
-      GOOSE_SERVER__SECRET_KEY: ${GOOSE_SERVER__SECRET_KEY}
-      GOOSE_SERVER_SECRET_KEY: ${GOOSE_SERVER__SECRET_KEY}
-      GOOSE_GATEWAY_TRUSTED_USERS: ${GOOSE_GATEWAY_TRUSTED_USERS:-}
+      LINA_SECRET_KEY: ${LINA_SECRET_KEY:-${GOOSE_SERVER__SECRET_KEY:-}}
+      GOOSE_SERVER_SECRET_KEY: ${LINA_SECRET_KEY:-${GOOSE_SERVER__SECRET_KEY:-}}
+      LINA_TRUSTED_USERS: ${LINA_TRUSTED_USERS:-${GOOSE_GATEWAY_TRUSTED_USERS:-}}
+      GATEWAY_BOT_NAME: ${GATEWAY_BOT_NAME:-LINA}
       GATEWAY_PACER_TICK: "1.5"
       TELEGRAM_POLL_TIMEOUT: "30"
       LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
-      GATEWAY_NOTIFY_CHAT_IDS: ${GATEWAY_NOTIFY_CHAT_IDS:-}
+      LINA_NOTIFY_CHAT_IDS: ${LINA_NOTIFY_CHAT_IDS:-${GATEWAY_NOTIFY_CHAT_IDS:-}}
     # Observe server (dashboard + WebSocket) — puerto para live stream de eventos
     ports:
-      - "9090:9090"
+      - "9093:9093"
     logging:
       driver: json-file
       options:
