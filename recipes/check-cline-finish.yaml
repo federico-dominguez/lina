@@ -1,9 +1,0 @@
----
-version: '1.0.0'
-title: Check Cline Finish
-description: 'Cada 5 min: revisa si Cline completó tarea sin finish y lo fuerza.'
-prompt: |
-  Ejecutá: python3 /home/user/lina/bin/check-cline-finish.py
-  No respondas nada, solo ejecutá y terminá.
-settings:
-  max_turns: 2
