@@ -1,0 +1,177 @@
+# LINA — Roadmap v0.4+
+# Machine-readable. Fuente de verdad: ROADMAP.md, CHANGELOG.md, ADRs.
+# Última actualización: 2026-06-02
+
+metadata:
+  version: "0.4.0"
+  updated: "2026-06-02"
+  status: "v0.4_completado"
+  repo: "https://github.com/federico-dominguez/lina"
+  changelog: "CHANGELOG.md"
+  architecture_adrs: "docs/architecture/"
+
+milestones:
+  - id: "v0.4"
+    name: "Multi-agent core"
+    description: "Orquestador con mcp-agent (Orchestrator-Workers). LINA spawn/subagentes via goosed HTTP API."
+    priority: 1
+    status: "completado"
+    tag: "v0.4.0"
+    completed_at: "2026-06-02"
+    pr:
+      - "#78"
+      - "#100"
+      - "#123"
+
+  - id: "v0.4.1"
+    name: "Telegram UX subagentes"
+    description: "Dashboard live, comandos /kill /pause /resume, botones inline, failure modes."
+    priority: 2
+    status: "pendiente"
+    depends_on: ["v0.4"]
+    issues:
+      - id: "#86"
+        title: "Comando /agents (dashboard live editable)"
+        status: "completado"
+        effort: "M"
+        area: "gateway"
+      - id: "#87"
+        title: "Comandos /kill /pause /resume /replan"
+        status: "completado"
+        effort: "M"
+        area: "gateway"
+      - id: "#88"
+        title: "HumanInputRequest → botones inline"
+        status: "completado"
+        effort: "L"
+        area: "gateway"
+      - id: "#89"
+        title: "Failure modes (timeouts, DLQ, restart con backoff)"
+        status: "abierto"
+        effort: "L"
+        area: "orchestrator"
+
+  - id: "v0.5"
+    name: "Self-modify + Hot-reload"
+    description: "Hot-reload de MCPs sin reiniciar goosed. Ciclo completo de auto-mejora."
+    priority: 3
+    status: "pendiente"
+    depends_on: []
+    issues:
+      - id: "#48"
+        title: "Hot-reload de MCPs sin reiniciar goosed"
+        status: "abierto"
+        effort: "XL"
+        area: "infra"
+        can_start_parallel: true
+      - id: "#51"
+        title: "LINA self-modify — ciclo completo con Temporal"
+        status: "abierto"
+        effort: "XXL"
+        area: "orchestrator"
+        requires_review: true
+
+  - id: "v0.5.1"
+    name: "Observabilidad + guardrails"
+    description: "Métricas, rate-limiting, backups, comando /audit."
+    priority: 3
+    status: "pendiente"
+    depends_on: ["v0.4"]
+    issues:
+      - id: "#67"
+        title: "Prometheus + Grafana + alerts"
+        status: "abierto"
+        effort: "L"
+        area: "infra"
+      - id: "#91"
+        title: "Rate-limiting + cost-guards por rol"
+        status: "abierto"
+        effort: "L"
+        area: "orchestrator"
+      - id: "#92"
+        title: "Backup automatizado + restore drill mensual"
+        status: "abierto"
+        effort: "M"
+        area: "infra"
+      - id: "#93"
+        title: "Comando /audit en Telegram"
+        status: "abierto"
+        effort: "S"
+        area: "gateway"
+
+  - id: "v0.6"
+    name: "Multimodal + Proactivo"
+    description: "Visión, TTS, scheduler proactivo, Android remote."
+    priority: 4
+    status: "pendiente"
+    issues:
+      - id: "#64"
+        title: "Image understanding (vision)"
+        status: "backlog"
+        effort: "XL"
+        area: "gateway"
+      - id: "#65"
+        title: "TTS voice responses (opt-in)"
+        status: "backlog"
+        effort: "L"
+        area: "gateway"
+      - id: "#66"
+        title: "Proactive scheduler"
+        status: "backlog"
+        effort: "M"
+        area: "infra"
+      - id: "#68"
+        title: "LINA Android remote (opcional)"
+        status: "backlog"
+        effort: "XL"
+        area: "mobile"
+
+  - id: "v0.7"
+    name: "LINA as MCP server"
+    description: "Exponer LINA como MCP lina-bridge para otros agentes."
+    priority: 4
+    status: "pendiente"
+    depends_on: ["v0.4", "v0.4.1"]
+    issues:
+      - id: "#90"
+        title: "MCP lina-bridge — expone LINA a otros agentes"
+        status: "abierto"
+        effort: "XL"
+        area: "orchestrator"
+
+transversal:
+  - id: "#79"
+    title: "Build de imágenes Docker en cada PR + size-gate"
+    status: "completado"
+    effort: "M"
+    area: "ci/cd"
+    priority: "inmediata"
+    can_start_parallel: true
+  - id: "#80"
+    title: "Integration tests con MCP spawn real"
+    status: "pendiente"
+    effort: "L"
+    area: "ci/cd"
+    priority: "alta"
+    can_start_parallel: true
+  - id: "#81"
+    title: "Coverage agregado + gate global 60%"
+    status: "pendiente"
+    effort: "M"
+    area: "ci/cd"
+    priority: "media"
+    can_start_parallel: true
+
+next_actions:
+  - priority: "inmediata"
+    id: "#89"
+    title: "Failure modes (timeouts, DLQ, restart con backoff)"
+    desc: "Manejo de errores: timeouts en sub-agentes, dead letter queue, reintentos con backoff"
+    area: "orchestrator"
+    depends_on: ["v0.4"]
+  - priority: "alta"
+    id: "#80"
+    title: "Integration tests con MCP spawn real"
+    desc: "Tests E2E que spawnen sub-agentes reales en CI"
+    area: "ci/cd"
+    depends_on: []
