@@ -2,30 +2,52 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import tempfile
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
 
-# Minimum seconds between successive edits of the same message.
-# Safety net against 429 flood-waits during rapid streaming updates.
-_MIN_EDIT_INTERVAL_S = 0.5
-
-# Maximum retries on Telegram 429 Too Many Requests.
-_MAX_429_RETRIES = 3
-
-# Telegram hard limit per message.
-_TG_MAX_MSG_LEN = 4096
-
 logger = logging.getLogger(__name__)
 
+# ─── Constants ───────────────────────────────────────────────────────────────
+
+# Telegram Bot API base
 TELEGRAM_API_BASE = "https://api.telegram.org"
+
 MAX_VOICE_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+MAX_MESSAGE_LENGTH = 4096  # Telegram hard limit
+_MIN_EDIT_INTERVAL_S = 0.5
+_MAX_429_RETRIES = 3
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+
+def split_message(text: str, max_len: int = MAX_MESSAGE_LENGTH) -> list[str]:
+    """Split a long string into chunks ≤ *max_len* characters at line breaks."""
+    if len(text) <= max_len:
+        return [text]
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        end = start + max_len
+        if end >= len(text):
+            chunks.append(text[start:])
+            break
+        # Try to break at last newline before max_len
+        nl = text.rfind("\n", start, end)
+        if nl > start:
+            end = nl + 1
+        chunks.append(text[start:end])
+        start = end
+    return chunks
+
+
+# ─── Data types (Telegram Bot API shapes) ────────────────────────────────────
 
 
 @dataclass
@@ -33,12 +55,13 @@ class TelegramUser:
     first_name: str
     last_name: str | None
     username: str | None
+    is_bot: bool = False
 
 
 @dataclass
 class TelegramChat:
     id: int
-    chat_type: str
+    chat_type: str  # "private" | "group" | "supergroup" | "channel"
 
 
 @dataclass
@@ -50,12 +73,24 @@ class TelegramVoice:
 
 
 @dataclass
+class TelegramEntity:
+    """Parsed entity from Telegram message."""
+
+    type: str  # "mention" | "text_mention" | "bot_command" | etc.
+    offset: int
+    length: int
+    user: TelegramUser | None  # populated for "text_mention" type
+
+
+@dataclass
 class TelegramMessage:
     message_id: int
     chat: TelegramChat
     from_user: TelegramUser | None
     text: str | None
     voice: TelegramVoice | None
+    entities: list[TelegramEntity] = field(default_factory=list)
+    reply_to_message_id: int | None = None
 
 
 @dataclass
@@ -74,8 +109,11 @@ class TelegramUpdate:
     callback_query: TelegramCallbackQuery | None = None
 
 
+# ─── Client ──────────────────────────────────────────────────────────────────
+
+
 class TelegramClient:
-    """Minimal async Telegram Bot API client."""
+    """Minimal async Telegram Bot API client using Bot API HTTP polling."""
 
     def __init__(self, bot_token: str, poll_timeout: int = 30) -> None:
         self._token = bot_token
@@ -88,160 +126,74 @@ class TelegramClient:
         self._last_edit_at: dict[tuple[int, int], float] = {}
 
     def _url(self, method: str) -> str:
-        return f"{TELEGRAM_API_BASE}/bot{self._token}/{method}"
+        return f"https://api.telegram.org/bot{self._token}/{method}"
+
+    # ── Polling ──────────────────────────────────────────────────────────
 
     async def get_updates(self, offset: int | None) -> list[TelegramUpdate]:
+        """Long-poll for new updates."""
         params: dict[str, Any] = {
             "timeout": self._poll_timeout,
             "allowed_updates": ["message", "callback_query"],
         }
         if offset is not None:
             params["offset"] = offset
-
-        resp = await self._http.post(self._url("getUpdates"), json=params)
-        resp.raise_for_status()
-        data = resp.json()
+        r = await self._http.get(self._url("getUpdates"), params=params)
+        r.raise_for_status()
+        data = r.json()
         if not data.get("ok"):
-            raise RuntimeError(f"Telegram getUpdates error: {data.get('description')}")
+            logger.warning("getUpdates !ok: %s", data)
+            return []
         return [_parse_update(u) for u in data.get("result", [])]
 
-    async def send_message(
-        self, chat_id: int, html: str, reply_markup: dict | None = None
-    ) -> int | None:
-        """Send *html* to *chat_id*, splitting if necessary.  Returns last message_id.
-        If *reply_markup* is given, it is only attached to the LAST chunk."""
-        from .formatter import split_message, strip_html_tags
+    # ── Send / Edit / Delete ────────────────────────────────────────────
 
-        last_id: int | None = None
-        chunks = split_message(html)
-        for i, chunk in enumerate(chunks):
-            payload: dict = {"chat_id": chat_id, "text": chunk, "parse_mode": "HTML"}
-            if reply_markup and i == len(chunks) - 1:
-                payload["reply_markup"] = reply_markup
-            resp: httpx.Response | None = None
-            for attempt in range(_MAX_429_RETRIES):
-                resp = await self._http.post(self._url("sendMessage"), json=payload)
-                if resp.status_code == 429:
-                    retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
-                    logger.warning(
-                        "sendMessage 429 chat=%s retry_after=%ss attempt=%s",
-                        chat_id,
-                        retry_after,
-                        attempt + 1,
-                    )
-                    await asyncio.sleep(retry_after)
-                    continue
-                break
-            if resp is None:
-                logger.error("sendMessage: no response after retries chat=%s", chat_id)
-                return last_id
-            resp.raise_for_status()
-            data = resp.json()
-            if data.get("ok"):
-                last_id = data["result"].get("message_id")
-                logger.debug("sendMessage ok chat=%s chars=%s", chat_id, len(chunk))
-            else:
-                # HTML rejected — fallback to plain text
-                logger.warning(
-                    "sendMessage HTML rejected chat=%s err=%s, falling back to plain",
-                    chat_id,
-                    data.get("description"),
-                )
-                plain_chunks = split_message(strip_html_tags(html))
-                for plain in plain_chunks:
-                    r2 = await self._http.post(
-                        self._url("sendMessage"),
-                        json={"chat_id": chat_id, "text": plain},
-                    )
-                    r2.raise_for_status()
-                    d2 = r2.json()
-                    if d2.get("ok"):
-                        last_id = d2["result"].get("message_id")
-                return last_id
-        return last_id
-
-    async def edit_message(self, chat_id: int, message_id: int, html: str) -> bool:
-        """Edit an existing message.  Returns True if content was too long and
-        needs continuation (caller should create a new message for overflow).
-
-        Handles 429 with Retry-After back-off, and throttles successive edits
-        of the same message to avoid triggering Telegram flood limits.  When
-        the formatted HTML exceeds Telegram's 4096-character limit the first
-        chunk is sent as-is (without truncation indicator) and the method
-        returns True so the caller can create a continuation message.
-        """
-        from .formatter import split_message, strip_html_tags
-
-        # ── Per-message edit throttle ─────────────────────────────────────
-        key = (chat_id, message_id)
-        last = self._last_edit_at.get(key, 0.0)
-        gap = asyncio.get_running_loop().time() - last
-        if gap < _MIN_EDIT_INTERVAL_S:
-            await asyncio.sleep(_MIN_EDIT_INTERVAL_S - gap)
-
-        # ── Check if content fits in one message ──────────────────────────
-        chunks = split_message(html, max_len=_TG_MAX_MSG_LEN)
-        needs_continuation = len(chunks) > 1
-        text = chunks[0] if chunks else html
-
-        payload = {
+    async def send_message(self, chat_id: int, text: str, **kw: Any) -> int | None:
+        """Send a text message. Returns the new message_id."""
+        payload: dict[str, Any] = {
             "chat_id": chat_id,
-            "message_id": message_id,
             "text": text,
             "parse_mode": "HTML",
+            "disable_web_page_preview": True,
         }
+        payload.update(kw)
+        r = await self._http.post(self._url("sendMessage"), json=payload)
+        if not r.is_success:
+            logger.warning("sendMessage failed: %s %s", r.status_code, r.text[:200])
+            return None
+        result = r.json().get("result", {})
+        return result.get("message_id")
 
-        for attempt in range(_MAX_429_RETRIES):
-            try:
-                resp = await self._http.post(self._url("editMessageText"), json=payload)
-            except Exception as exc:
-                logger.warning("editMessageText network error: %s", exc)
-                return needs_continuation
-
-            if resp.status_code == 429:
-                retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
-                logger.warning(
-                    "editMessageText 429 chat=%s msg=%s retry_after=%ss attempt=%s",
-                    chat_id,
-                    message_id,
-                    retry_after,
-                    attempt + 1,
-                )
-                await asyncio.sleep(retry_after)
-                continue
-
-            if not resp.is_success:
-                body = resp.text
-                if "message is not modified" in body:
-                    break
-                if resp.status_code == 400:
-                    # HTML probably malformed (streaming partial tag) — retry as plain
-                    plain = strip_html_tags(text)
-                    r2 = await self._http.post(
-                        self._url("editMessageText"),
-                        json={"chat_id": chat_id, "message_id": message_id, "text": plain},
-                    )
-                    if not r2.is_success and "message is not modified" not in r2.text:
-                        logger.warning(
-                            "editMessageText plain fallback failed chat=%s msg=%s err=%s",
-                            chat_id,
-                            message_id,
-                            r2.text[:200],
-                        )
-                    break
-                logger.warning(
-                    "editMessageText failed chat=%s msg=%s status=%s err=%s",
-                    chat_id,
-                    message_id,
-                    resp.status_code,
-                    body[:200],
-                )
-            break  # success or non-retryable error
-
-        self._last_edit_at[key] = asyncio.get_running_loop().time()
-        return needs_continuation
+    async def edit_message(self, chat_id: int, message_id: int, text: str) -> bool:
+        """Edit an existing message (throttled)."""
+        now = __import__("time").time()
+        key = (chat_id, message_id)
+        last = self._last_edit_at.get(key, 0)
+        if now - last < 2.0:
+            return False  # throttled
+        if not text.strip():
+            return False
+        self._last_edit_at[key] = now
+        try:
+            r = await self._http.post(
+                self._url("editMessageText"),
+                json={
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "text": text,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                },
+            )
+        except httpx.TimeoutException:
+            logger.info("editMessage Text timeout (chat=%s msg=%s)", chat_id, message_id)
+            return False
+        if r.status_code == 400 and "message is not modified" in r.text:
+            return True
+        return r.is_success
 
     async def send_chat_action(self, chat_id: int, action: str = "typing") -> None:
+        """Send a chat action (typing indicator, etc.)."""
         try:
             await self._http.post(
                 self._url("sendChatAction"),
@@ -276,6 +228,7 @@ class TelegramClient:
             )
 
     async def set_reaction(self, chat_id: int, message_id: int, emoji: str) -> None:
+        """Set a reaction emoji on a message."""
         reaction: list[Any] = [] if not emoji else [{"type": "emoji", "emoji": emoji}]
         try:
             await self._http.post(
@@ -286,6 +239,7 @@ class TelegramClient:
             logger.debug("setMessageReaction error: %s", exc)
 
     async def get_file_path(self, file_id: str) -> str:
+        """Get the file path for a Telegram file_id."""
         resp = await self._http.post(self._url("getFile"), json={"file_id": file_id})
         resp.raise_for_status()
         data = resp.json()
@@ -294,6 +248,7 @@ class TelegramClient:
         return data["result"]["file_path"]
 
     async def download_file(self, file_id: str) -> bytes:
+        """Download a file from Telegram by file_id."""
         file_path = await self.get_file_path(file_id)
         url = f"{TELEGRAM_API_BASE}/file/bot{self._token}/{file_path}"
         resp = await self._http.get(url)
@@ -312,44 +267,58 @@ class TelegramClient:
             f.write(data)
         return path
 
+    async def get_chat_member(self, chat_id: int, user_id: int) -> dict[str, Any]:
+        """Get info about a chat member."""
+        r = await self._http.post(
+            self._url("getChatMember"),
+            json={"chat_id": chat_id, "user_id": user_id},
+        )
+        if r.is_success:
+            return r.json().get("result", {})
+        return {}
+
     async def close(self) -> None:
         await self._http.aclose()
 
 
-# ─── Parsing helpers ─────────────────────────────────────────────────────────
+# ─── Parsers ─────────────────────────────────────────────────────────────────
 
 
-def _parse_update(raw: dict[str, Any]) -> TelegramUpdate:
-    msg = raw.get("message")
-    cb = raw.get("callback_query")
-    cq = None
-    if cb:
-        msg_raw = cb.get("message", {})
-        from_raw = cb.get("from", {})
-        cq = TelegramCallbackQuery(
-            id=cb["id"],
-            chat_id=msg_raw.get("chat", {}).get("id", 0),
-            message_id=msg_raw.get("message_id", 0),
-            data=cb.get("data", ""),
-            from_user=TelegramUser(
-                first_name=from_raw.get("first_name", ""),
-                last_name=from_raw.get("last_name"),
-                username=from_raw.get("username"),
+def _parse_entities(
+    raw_entities: list[dict[str, Any]],
+    text: str,
+) -> list[TelegramEntity]:
+    """Parse Telegram message entities into clean objects."""
+    entities: list[TelegramEntity] = []
+    for e in raw_entities:
+        user_raw = e.get("user")
+        user = (
+            TelegramUser(
+                first_name=user_raw.get("first_name", "") if user_raw else "",
+                last_name=user_raw.get("last_name") if user_raw else None,
+                username=user_raw.get("username") if user_raw else None,
+                is_bot=user_raw.get("is_bot", False) if user_raw else False,
             )
-            if from_raw
-            else None,
+            if user_raw
+            else None
         )
-    return TelegramUpdate(
-        update_id=raw["update_id"],
-        message=_parse_message(msg) if msg else None,
-        callback_query=cq,
-    )
+
+        entities.append(
+            TelegramEntity(
+                type=e["type"],
+                offset=e["offset"],
+                length=e["length"],
+                user=user,
+            )
+        )
+    return entities
 
 
 def _parse_message(raw: dict[str, Any]) -> TelegramMessage:
     chat = raw["chat"]
     from_raw = raw.get("from")
     voice_raw = raw.get("voice") or raw.get("audio")
+    reply_raw = raw.get("reply_to_message")
 
     from_user = None
     if from_raw:
@@ -357,6 +326,7 @@ def _parse_message(raw: dict[str, Any]) -> TelegramMessage:
             first_name=from_raw.get("first_name", ""),
             last_name=from_raw.get("last_name"),
             username=from_raw.get("username"),
+            is_bot=from_raw.get("is_bot", False),
         )
 
     voice = None
@@ -368,23 +338,62 @@ def _parse_message(raw: dict[str, Any]) -> TelegramMessage:
             mime_type=voice_raw.get("mime_type"),
         )
 
+    entities: list[TelegramEntity] = []
+    if "entities" in raw:
+        entities = _parse_entities(raw["entities"], raw.get("text", ""))
+
+    reply_to_id = None
+    if reply_raw:
+        reply_to_id = reply_raw.get("message_id")
+
     return TelegramMessage(
         message_id=raw["message_id"],
         chat=TelegramChat(id=chat["id"], chat_type=chat.get("type", "private")),
         from_user=from_user,
         text=raw.get("text"),
         voice=voice,
+        entities=entities,
+        reply_to_message_id=reply_to_id,
     )
 
 
-def _ext_from_mime(mime_type: str | None) -> str:
-    if not mime_type:
-        return "ogg"
-    sub = mime_type.split("/")[-1]
-    return {"mpeg": "mp3", "mp4": "m4a", "x-m4a": "m4a", "ogg": "ogg", "wav": "wav"}.get(sub, sub)
+def _parse_update(raw: dict[str, Any]) -> TelegramUpdate:
+    msg = raw.get("message")
+    cq = raw.get("callback_query")
+    return TelegramUpdate(
+        update_id=raw["update_id"],
+        message=_parse_message(msg) if msg else None,
+        callback_query=_parse_callback_query(cq) if cq else None,
+    )
+
+
+def _parse_callback_query(raw: dict[str, Any]) -> TelegramCallbackQuery:
+    from_raw = raw.get("from")
+    from_user = (
+        TelegramUser(
+            first_name=from_raw.get("first_name", ""),
+            last_name=from_raw.get("last_name"),
+            username=from_raw.get("username"),
+            is_bot=from_raw.get("is_bot", False),
+        )
+        if from_raw
+        else None
+    )
+
+    return TelegramCallbackQuery(
+        id=raw["id"],
+        chat_id=raw["message"]["chat"]["id"],
+        message_id=raw["message"]["message_id"],
+        data=raw.get("data", ""),
+        from_user=from_user,
+    )
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
 
 
 def voice_prompt(path: str, duration: int | None, mime_type: str | None) -> str:
+    """Build a system prompt for voice message transcription."""
     duration_hint = f" (duration: {duration}s)" if duration else ""
     format_hint = f" The file format is {mime_type}." if mime_type else ""
     return (
@@ -394,4 +403,11 @@ def voice_prompt(path: str, duration: int | None, mime_type: str | None) -> str:
         "(e.g. whisper, ffmpeg, sox, or any STT utility you can find on this system) "
         "and then respond to what the user said. "
         "If no transcription tool is available, let the user know and ask them to type their message instead."
+    )
+
+
+def _ext_from_mime(mime_type: str | None) -> str:
+    """Map Telegram mime types to file extensions."""
+    return {"audio/ogg": ".ogg", "audio/mpeg": ".mp3", "audio/mp4": ".m4a"}.get(
+        mime_type or "", ".oga"
     )

@@ -340,6 +340,7 @@ class TestBotInstructExpansion:
         msg = MagicMock(spec=TelegramMessage)
         msg.chat = MagicMock()
         msg.chat.id = 42
+        msg.chat.chat_type = "private"
         msg.text = "/instruct"
         msg.voice = None
         msg.message_id = 1
@@ -379,6 +380,7 @@ class TestBotInstructExpansion:
         msg = MagicMock(spec=TelegramMessage)
         msg.chat = MagicMock()
         msg.chat.id = 42
+        msg.chat.chat_type = "private"
         msg.text = "/instruct abc123"
         msg.voice = None
         msg.message_id = 1

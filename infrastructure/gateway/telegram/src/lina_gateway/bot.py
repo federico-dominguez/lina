@@ -95,9 +95,65 @@ class Bot:
             self._sessions[chat_id] = f"telegram-{chat_id}"
         return self._sessions[chat_id]
 
+    def _should_respond(self, msg: TelegramMessage) -> bool:
+        """Decide if this bot should respond to *msg*.
+
+        Rules:
+        1. Private chat → always respond.
+        2. Group / supergroup → respond if:
+           a. Bot is @mentioned in the text.
+           b. Sender is another bot (bot-to-bot bridge).
+        """
+        # Private — always
+        if msg.chat.chat_type == "private":
+            return True
+
+        if msg.chat.chat_type not in ("group", "supergroup"):
+            return False  # channel or unknown → no
+
+        # Bot-to-bot
+        if msg.from_user and msg.from_user.is_bot:
+            return True
+
+        # @mention check
+        if msg.entities:
+            text = (msg.text or "").lower()
+            for ent in msg.entities:
+                if ent.type == "mention":
+                    mentioned = text[ent.offset : ent.offset + ent.length].lstrip("@")
+                    if self._is_this_bot(mentioned):
+                        return True
+                elif ent.type == "text_mention":
+                    # text_mention to a user/bot by ID — assume it's us
+                    return True
+
+        return False
+
+    def _is_this_bot(self, username: str) -> bool:
+        """Check if *username* refers to this bot (by Telegram @ username)."""
+        # Map canonical bot names to their Telegram @usernames (no @ prefix)
+        mapping = {
+            "lina": "s_lina_bot",
+            "goose": "s_goose_bot",
+            "cline": "s_cline_bot",
+        }
+        my_name = self._cfg.bot_name.lower()
+        expected = mapping.get(my_name)
+        return username.lower() == expected
+
     async def _handle(self, msg: TelegramMessage) -> None:
         chat_id = msg.chat.id
         text = msg.text or ""
+
+        # ── Mention filter: skip if not addressed to this bot ──────────────
+        if not self._should_respond(msg):
+            logger.debug(
+                "Ignoring message %s in %s chat %s (not addressed)",
+                msg.message_id,
+                msg.chat.chat_type,
+                chat_id,
+            )
+            return
 
         # ── /stop ──────────────────────────────────────────────────────
         if text.strip() in _STOP_COMMANDS:
