@@ -615,6 +615,41 @@ services:
         max-size: "5m"
         max-file: "3"
 
+  # ─── Monitoring Dashboard (Issue #156) ──────────────────────────────────────
+  # Dashboard web unificado que muestra bots, sesiones activas, contenedores
+  # y healthchecks de MCPs. Auto-refresh cada 30s.
+  # Accesible en http://localhost:8090
+  lina-dashboard:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.dashboard
+    image: lina-dashboard:latest
+    container_name: lina-dashboard
+    restart: unless-stopped
+    depends_on:
+      lina-mcp-gateway:
+        condition: service_started
+    environment:
+      DASHBOARD_PORT: "8090"
+      DASHBOARD_HOST: "0.0.0.0"
+      # Observe ports (bot gateways → host.docker.internal si no están en host network)
+      # LINA-gateway: 9093, CLINE-gateway: 9092, Goose-gateway: 9091
+      # Usamos host.docker.internal para alcanzar servicios en host network
+      MCP_HOST: "lina-mcp-gateway"
+    ports:
+      - "127.0.0.1:8090:8090"
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -sf http://localhost:8090/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # ─── Telegram Gateway (Issue #16) ────────────────────────────────────────
   # Servicio Python independiente que reemplaza el gateway embebido en goosed.
   # Pollea Telegram, reenvía mensajes a goosed /reply (SSE) y muestra
