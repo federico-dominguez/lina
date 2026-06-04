@@ -119,7 +119,8 @@ Terminá con:
 ---
 RESUMEN: 3 líneas con lo más importante.
 
-⚠️ MANDATORIO: Posteá tu trabajo como comentario en el GitHub issue usando gh issue comment.""",
+⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
+## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
             "Research": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
 Tu rol: RESEARCH ENGINEER. Investigá para la implementación.
 
@@ -132,7 +133,8 @@ Terminá con:
 ---
 RESUMEN: 3 líneas o "Sin hallazgos adicionales".
 
-⚠️ MANDATORIO: Posteá tu trabajo como comentario en el GitHub issue.""",
+⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
+## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
             "Dev": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
 Tu rol: DEVELOPER. Implementá la solución con estándar profesional.
 
@@ -155,7 +157,8 @@ Terminá con:
 ---
 RESUMEN: branch | archivos | tests pasan (SÍ/NO)
 
-⚠️ MANDATORIO: gh issue comment con resumen.""",
+⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
+## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
             "Review": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
 Tu rol: CODE REVIEWER. Revisá la implementación de Cline.
 
@@ -169,7 +172,8 @@ Terminá con:
 ---
 RESUMEN: ✅ Aprobado / ❌ Rechazado + razón.
 
-⚠️ MANDATORIO: gh issue comment con revision.""",
+⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
+## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
             "Test": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
 Tu rol: QA. Validá la implementación rigurosamente.
 
@@ -182,7 +186,8 @@ Terminá con:
 ---
 RESUMEN: ✅ tests OK / ❌ FAIL + cuáles fallaron.
 
-⚠️ MANDATORIO: gh issue comment con resultados.""",
+⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
+## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
             "Doc": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
 Tu rol: DOCS. Documentá los cambios realizados.
 
@@ -193,7 +198,10 @@ Tu rol: DOCS. Documentá los cambios realizados.
 
 Terminá con:
 ---
-RESUMEN: docs actualizados o "Sin cambios".""",
+RESUMEN: docs actualizados o "Sin cambios".
+
+⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
+## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
             "Analysis": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
 Tu rol: ANALYST. Verificá la calidad general de la implementación.
 
@@ -205,7 +213,10 @@ Tu rol: ANALYST. Verificá la calidad general de la implementación.
 
 Terminá con:
 ---
-RESUMEN: ✅ Aprobado / 🔄 Reiterar + cambios.""",
+RESUMEN: ✅ Aprobado / 🔄 Reiterar + cambios.
+
+⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
+## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
             "Decision": f"""Revisa el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
 Tu rol: TECH LEAD DECISION. BASADO EN TODOS LOS PASOS PREVIOS.
 
@@ -215,14 +226,22 @@ CHECKLIST:
 3. El PR es mergeable?
 4. Codigo limpio y profesional?
 
-SI TODO OK: gh pr merge PR --squash && DECISION: COMPLETE
-SI FALLA ALGO: DECISION: REITERATE + detallar cambios exactos.
+SI TODO OK: EJECUTA:
+  1. gh pr merge PR --squash
+  2. gh issue close #{issue_num}
+  3. DECISION: COMPLETE
+SI FALLA ALGO: DECISION: REITERATE + detallar cambios exactos que faltan.
 
 Termina con:
 ---
 DECISION: COMPLETE / REITERATE
 RAZON: ...
-PR: #NUMERO"""
+PR: #NUMERO
+MERGE: ✓ (si COMPLETE)
+COMMIT: hash del squash merge
+
+⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
+## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión"""
         }
         p = prompts.get(name, extra)
         return {"name": name, "bot": bot, "timeout": timeout, "prompt": p}

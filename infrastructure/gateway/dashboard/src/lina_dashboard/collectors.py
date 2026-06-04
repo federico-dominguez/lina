@@ -25,23 +25,32 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 BOT_NAMES = {
+    9090: "Gemma",
     9091: "Goose",
     9092: "CLINE",
     9093: "LINA",
 }
 
+# Telegram handles y orden de display
+BOT_METADATA: list[dict[str, Any]] = [
+    {"name": "Goose",  "port": 9091, "username": "s_goose_bot"},
+    {"name": "LINA",   "port": 9093, "username": "s_lina_bot"},
+    {"name": "CLINE",  "port": 9092, "username": "s_cline_bot"},
+    {"name": "Gemma",  "port": 9090, "username": "s_gemma_bot"},
+]
+
 MCP_REGISTRY: list[dict[str, Any]] = [
-    {"name": "lina-secrets", "port": 8101, "url": "/"},
-    {"name": "lina-fs-safe", "port": 8102, "url": "/"},
-    {"name": "lina-shell-policy", "port": 8103, "url": "/"},
-    {"name": "lina-systemd-user", "port": 8104, "url": "/"},
-    {"name": "lina-moodle", "port": 8105, "url": "/"},
-    {"name": "lina-db", "port": 8106, "url": "/"},
-    {"name": "lina-github", "port": 8107, "url": "/"},
-    {"name": "lina-gitlab", "port": 8108, "url": "/"},
-    {"name": "lina-gcalendar", "port": 8109, "url": "/"},
-    {"name": "lina-gns3", "port": 8110, "url": "/"},
-    {"name": "lina-orchestrator", "port": 8111, "url": "/"},
+    {"name": "lina-secrets",      "port": 8101, "url": "/", "used_by": ["LINA", "CLINE", "Goose", "Gemma"]},
+    {"name": "lina-fs-safe",      "port": 8102, "url": "/", "used_by": ["LINA", "CLINE", "Goose", "Gemma"]},
+    {"name": "lina-shell-policy", "port": 8103, "url": "/", "used_by": ["LINA", "CLINE"]},
+    {"name": "lina-systemd-user", "port": 8104, "url": "/", "used_by": ["LINA"]},
+    {"name": "lina-moodle",       "port": 8105, "url": "/", "used_by": ["LINA"]},
+    {"name": "lina-db",           "port": 8106, "url": "/", "used_by": ["LINA", "CLINE", "Goose", "Gemma"]},
+    {"name": "lina-github",       "port": 8107, "url": "/", "used_by": ["LINA", "CLINE"]},
+    {"name": "lina-gitlab",       "port": 8108, "url": "/", "used_by": ["LINA"]},
+    {"name": "lina-gcalendar",    "port": 8109, "url": "/", "used_by": ["LINA"]},
+    {"name": "lina-gns3",         "port": 8110, "url": "/", "used_by": ["LINA"]},
+    {"name": "lina-orchestrator", "port": 8111, "url": "/", "used_by": ["LINA", "CLINE"]},
 ]
 
 
@@ -50,6 +59,7 @@ class BotStatus:
     name: str
     port: int
     online: bool
+    username: str = ""
     error: str | None = None
     sessions: list[dict[str, Any]] = field(default_factory=list)
     session_count: int = 0
@@ -69,6 +79,7 @@ class BotStatus:
             "name": self.name,
             "port": self.port,
             "online": self.online,
+            "username": self.username,
             "error": self.error,
             "session_count": self.session_count,
             "last_event": self.last_event,
@@ -105,6 +116,7 @@ class MCPStatus:
     name: str
     port: int
     online: bool
+    used_by: list[str] | None = None
     error: str | None = None
     response_time_ms: float | None = None
 
@@ -113,6 +125,7 @@ class MCPStatus:
             "name": self.name,
             "port": self.port,
             "online": self.online,
+            "used_by": self.used_by,
             "error": self.error,
             "response_time_ms": self.response_time_ms,
         }
@@ -151,7 +164,7 @@ class DashboardCollector:
         mcp_host: str = "localhost",
         timeout: float = 5.0,
     ):
-        self.bot_ports = bot_ports or [9091, 9092, 9093]
+        self.bot_ports = bot_ports or [m["port"] for m in BOT_METADATA]
         self.docker_url = docker_url
         self.mcp_host = mcp_host
         self.timeout = timeout
@@ -170,13 +183,22 @@ class DashboardCollector:
     # ── Bots ─────────────────────────────────────────────────────────────────
 
     async def collect_bots(self) -> list[BotStatus]:
-        """Poll all bot observe ports for sessions + status."""
+        """Poll all bot observe ports for sessions + status.
+
+        Returns bots in BOT_METADATA order (Goose, LINA, CLINE, Gemma),
+        filtered by self.bot_ports.
+        """
         client = await self._get_client()
         results: list[BotStatus] = []
+        enabled_ports = set(self.bot_ports)
 
-        for port in self.bot_ports:
+        for meta in BOT_METADATA:
+            if meta["port"] not in enabled_ports:
+                continue
+            port = meta["port"]
+            username = meta.get("username", "")
             name = BOT_NAMES.get(port, f"Bot:{port}")
-            bot = BotStatus(name=name, port=port, online=False)
+            bot = BotStatus(name=name, port=port, online=False, username=username)
 
             try:
                 # Get sessions list
@@ -280,7 +302,12 @@ class DashboardCollector:
         for mcp in MCP_REGISTRY:
             url = f"http://{self.mcp_host}:{mcp['port']}{mcp['url']}"
             start = time.monotonic()
-            mcp_status = MCPStatus(name=mcp["name"], port=mcp["port"], online=False)
+            mcp_status = MCPStatus(
+                name=mcp["name"],
+                port=mcp["port"],
+                online=False,
+                used_by=mcp.get("used_by"),
+            )
 
             try:
                 resp = await client.get(url)

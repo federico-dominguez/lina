@@ -19,20 +19,22 @@ class TestHTMLTemplate:
     """HTML template contains all required sections."""
 
     def test_contains_all_sections(self):
-        assert "Bots" in HTML_TEMPLATE
-        assert "Sesiones" in HTML_TEMPLATE
+        assert "bot" in HTML_TEMPLATE.lower()
         assert "Contenedores" in HTML_TEMPLATE
         assert "MCPs" in HTML_TEMPLATE
+        # Each bot column has a column per bot
+        assert "bot-grid" in HTML_TEMPLATE
+        assert "bot-col" in HTML_TEMPLATE
 
     def test_has_api_endpoint(self):
         assert "/api/json" in HTML_TEMPLATE
 
     def test_has_auto_refresh(self):
-        assert "setInterval(fetchData, 30000)" in HTML_TEMPLATE
+        assert "setInterval(fetchData,30000)" in HTML_TEMPLATE
 
     def test_has_alert_visual(self):
-        assert "alert-banner" in HTML_TEMPLATE
-        assert "contenedores caídos" in HTML_TEMPLATE.lower() or "alert" in HTML_TEMPLATE.lower()
+        assert "alerts" in HTML_TEMPLATE
+        assert "Contenedores caídos" in HTML_TEMPLATE or "contenedores caídos" in HTML_TEMPLATE
 
     def test_has_fetch_function(self):
         assert "fetchData" in HTML_TEMPLATE
@@ -104,7 +106,7 @@ class TestDashboardServer:
 
     async def test_refresh_snapshot_no_network(self):
         """Refresh gracefully handles network errors."""
-        collector = DashboardCollector(bot_ports=[9099], docker_url="http://nope:2375", mcp_host="nope")
+        collector = DashboardCollector(bot_ports=[9090], docker_url="http://nope:2375", mcp_host="nope")
         srv = DashboardServer(collector, host="127.0.0.1", port=0)
         try:
             await srv._refresh_snapshot()

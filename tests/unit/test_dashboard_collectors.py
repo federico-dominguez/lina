@@ -96,11 +96,12 @@ class TestDashboardCollector:
     async def test_bot_connection_error(self, httpx_mock):
         """Bot observe port is unreachable."""
         import httpx
+        # Gemma port 9090 — will fail
         httpx_mock.add_exception(
             httpx.ConnectError("conexión rechazada"),
-            url="http://localhost:9099/api/sessions",
+            url="http://localhost:9090/api/sessions",
         )
-        collector = DashboardCollector(bot_ports=[9099])
+        collector = DashboardCollector(bot_ports=[9090])
         bots = await collector.collect_bots()
         await collector.close()
 
@@ -235,6 +236,15 @@ class TestDashboardCollector:
             url="http://localhost:9091/api/status",
             json={"rooms": 0, "clients": 0, "sessions": {}},
         )
+        # Bot 9090 (Gemma) — 0 sessions
+        httpx_mock.add_response(
+            url="http://localhost:9090/api/sessions",
+            json=[],
+        )
+        httpx_mock.add_response(
+            url="http://localhost:9090/api/status",
+            json={"rooms": 0, "clients": 0, "sessions": {}},
+        )
         # Containers — empty list
         httpx_mock.add_response(
             url="http://localhost:2375/containers/json?all=true",
@@ -252,12 +262,10 @@ class TestDashboardCollector:
         snapshot = await collector.collect_all()
         await collector.close()
 
-        assert len(snapshot.bots) == 3
-        assert snapshot.bots[0].online is True
-        assert snapshot.bots[1].online is True
-        assert snapshot.bots[2].online is True
+        assert len(snapshot.bots) == 4
+        assert all(b.online for b in snapshot.bots)  # All 4 bots online (all mocked)
 
-        assert len(snapshot.all_sessions) == 3  # 2 + 1 + 0
+        assert len(snapshot.all_sessions) == 3  # 2 + 1 + 0 + 0
         session_bots = {s["bot"] for s in snapshot.all_sessions}
         assert "LINA" in session_bots
         assert "CLINE" in session_bots
