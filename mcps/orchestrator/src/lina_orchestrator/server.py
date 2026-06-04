@@ -166,25 +166,65 @@ def reload_policies() -> dict:
 
 
 @mcp.tool()
-def spawn_agent(role: str, goal: str) -> dict:
+def spawn_agent(
+    role: str,
+    goal: str,
+    emergency: bool = False,
+) -> dict:
     """Lanza un sub-agente goosed con los MCPs del rol indicado.
 
     El sub-agente recibe `goal` como instrucción inicial y trabaja de forma
     autónoma. LINA principal puede monitorear su progreso con get_agent_status()
     o enviarle instrucciones adicionales con send_instruction().
 
+    Antes de spawnear, verifica el presupuesto diario del rol (max_usd_per_day).
+    Si el rol excedió su presupuesto, el spawn es REJECTADO a menos que
+    `emergency=True` (bypass de emergencia que notifica a Federico).
+
     Argumentos:
         role: rol del sub-agente — debe existir en policies.yaml
               (ej. "dev", "ops", "study", "research").
         goal: instrucción inicial para el sub-agente (texto libre).
+        emergency: bypass del rate-limiting diario (default False).
+                   Solo para emergencias reales — notifica a Federico.
 
     Retorna:
-        {agent_id, role, goal, pid, status, config_path}
-        Errores: {"error": "..."} si el rol es inválido o goosed no está disponible.
+        {agent_id, role, goal, pid, status, config_path} en éxito.
+        {"error": "...", "budget": {...}} si el presupuesto está excedido.
     """
     try:
-        return _spw().spawn(role, goal)
-    except (ValueError, RuntimeError) as exc:
+        # Obtener política del rol
+        role_policy = _svc().get_role(role)
+        max_usd = role_policy.get("max_usd_per_day", 0.0)
+
+        # Verificar presupuesto diario
+        from lina_orchestrator.infrastructure.cost_guard import check_daily_budget  # noqa: PLC0415
+
+        budget = check_daily_budget(role, max_usd)
+
+        if not budget.allowed and not emergency:
+            log.warning(
+                "spawn_agent REJECTED: role=%s budget=%.4f/%.2f",
+                role, float(budget.current_usd), float(budget.max_usd),
+            )
+            return {
+                "error": budget.reason,
+                "budget": {
+                    "allowed": False,
+                    "current_usd": float(budget.current_usd),
+                    "max_usd": float(budget.max_usd),
+                },
+            }
+
+        if not budget.allowed and emergency:
+            log.warning(
+                "spawn_agent EMERGENCY BYPASS: role=%s budget=%.4f/%.2f",
+                role, float(budget.current_usd), float(budget.max_usd),
+            )
+
+        result = _spw().spawn(role, goal)
+        return result
+    except (ValueError, RuntimeError, Exception) as exc:  # noqa: BLE001
         return {"error": str(exc)}
 
 
