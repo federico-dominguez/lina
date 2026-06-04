@@ -33,13 +33,13 @@ log = logging.getLogger("lina-gemini-multimodal")
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
-_GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+_GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY", ""))
 if not _GEMINI_API_KEY:
-    log.error("GEMINI_API_KEY no configurada — las tools fallarán con auth error")
+    log.error("GOOGLE_API_KEY|GEMINI_API_KEY no configurada — las tools fallarán con auth error")
 
 # Gemini Flash-Lite es el más barato con multimodal completo.
 # Ver issue #148 para justificación de costos.
-_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash-lite")
+_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
 _IMAGE_GEN_MODEL = os.environ.get("GEMINI_IMAGE_MODEL", "imagen-3.0-generate-001")
 
 _MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
@@ -53,6 +53,14 @@ mcp = FastMCP(
 
 _MAX_UPLOAD_BYTES = int(os.environ.get("LINA_MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))  # 20 MiB
 _SUPPORTED_AUDIO_EXTS = {".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac"}
+_AUDIO_MIME_MAP = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".ogg": "audio/ogg",
+    ".m4a": "audio/mp4",
+    ".flac": "audio/flac",
+    ".aac": "audio/aac",
+}
 _SUPPORTED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 _SUPPORTED_DOC_EXTS = {".pdf", ".docx", ".pptx", ".txt", ".csv", ".html", ".md"}
 
@@ -87,7 +95,9 @@ def _validate_file(path: str, supported_exts: set[str]) -> Path:
 
 def _upload_file(client: Any, path: str | Path) -> Any:
     """Sube un archivo a Gemini y espera a que esté activo."""
-    f = client.files.upload(file=str(path))
+    mime_type = _AUDIO_MIME_MAP.get(Path(str(path)).suffix.lower())
+    config = genai_types.UploadFileConfig(mimeType=mime_type) if mime_type else None
+    f = client.files.upload(file=str(path), config=config)
     # Esperar a que el archivo esté procesado
     import time
 
@@ -154,7 +164,7 @@ def transcribe_audio(audio_path: str) -> str:
     contents = [
         genai_types.Content(
             role="user",
-            parts=[genai_types.Part.from_uri(file_uri=gf.uri, mime_type=gf.mime_type)],
+            parts=[genai_types.Part.from_uri(file_uri=gf.uri, mime_type=gf.mime_type or _AUDIO_MIME_MAP.get(p.suffix.lower(), "audio/ogg"))],
         ),
         genai_types.Content(
             role="user",

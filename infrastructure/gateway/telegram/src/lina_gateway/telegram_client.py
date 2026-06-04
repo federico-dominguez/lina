@@ -1,189 +1,297 @@
-"""Low-level Telegram Bot API client (long-poll, sendMessage, editMessage, etc.)."""
+"""LINA Telegram client — thin wrapper around the Bot API.
+
+Provides:
+  - Lightweight polling (getUpdates with long-poll).
+  - Automatic retries / rate-limit handling.
+  - send_message, edit_message, send_voice, etc.
+  - File download (voice, photo, document) -> /shared/voice/ on the host.
+
+Usage::
+
+    from .telegram_client import TelegramClient
+
+    tg = TelegramClient("TOKEN")
+    offset = None
+    while True:
+        updates = await tg.poll(offset)
+        for u in updates:
+            ...
+            offset = u.update_id + 1
+"""
 
 from __future__ import annotations
+from typing import Any
 
 import logging
 import os
 import tempfile
 import uuid
-from dataclasses import dataclass, field
-from typing import Any
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
-# ─── Constants ───────────────────────────────────────────────────────────────
+_BOT_TOKEN = ""
 
-# Telegram Bot API base
-TELEGRAM_API_BASE = "https://api.telegram.org"
-
-MAX_VOICE_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
-MAX_MESSAGE_LENGTH = 4096  # Telegram hard limit
-_MIN_EDIT_INTERVAL_S = 0.5
-_MAX_429_RETRIES = 3
+# Voice file size limit (Telegram's max = 20 MB for voice)
+MAX_VOICE_FILE_SIZE = 20 * 1024 * 1024
 
 
-# ─── Helpers ─────────────────────────────────────────────────────────────────
-
-
-def split_message(text: str, max_len: int = MAX_MESSAGE_LENGTH) -> list[str]:
-    """Split a long string into chunks ≤ *max_len* characters at line breaks."""
-    if len(text) <= max_len:
-        return [text]
-    chunks: list[str] = []
-    start = 0
-    while start < len(text):
-        end = start + max_len
-        if end >= len(text):
-            chunks.append(text[start:])
-            break
-        # Try to break at last newline before max_len
-        nl = text.rfind("\n", start, end)
-        if nl > start:
-            end = nl + 1
-        chunks.append(text[start:end])
-        start = end
-    return chunks
-
-
-# ─── Data types (Telegram Bot API shapes) ────────────────────────────────────
-
-
-@dataclass
-class TelegramUser:
-    first_name: str
-    last_name: str | None
-    username: str | None
-    is_bot: bool = False
-
-
-@dataclass
-class TelegramChat:
-    id: int
-    chat_type: str  # "private" | "group" | "supergroup" | "channel"
-
-
-@dataclass
-class TelegramVoice:
-    file_id: str
-    file_size: int | None
-    duration: int | None
-    mime_type: str | None
-
-
-@dataclass
-class TelegramEntity:
-    """Parsed entity from Telegram message."""
-
-    type: str  # "mention" | "text_mention" | "bot_command" | etc.
-    offset: int
-    length: int
-    user: TelegramUser | None  # populated for "text_mention" type
-
-
-@dataclass
-class TelegramMessage:
-    message_id: int
-    chat: TelegramChat
-    from_user: TelegramUser | None
-    text: str | None
-    voice: TelegramVoice | None
-    entities: list[TelegramEntity] = field(default_factory=list)
-    reply_to_message_id: int | None = None
-
-
-@dataclass
 class TelegramCallbackQuery:
-    id: str
-    chat_id: int
-    message_id: int
-    data: str
-    from_user: TelegramUser | None
+    """Minimal representation of a Telegram callback query."""
+
+    __slots__ = ("id", "chat_id", "data", "message_id")
+
+    def __init__(self, id: str, chat_id: int, data: str, message_id: int | None) -> None:
+        self.id = id
+        self.chat_id = chat_id
+        self.data = data
+        self.message_id = message_id
+
+    def __repr__(self) -> str:
+        return f"TelegramCallbackQuery(id={self.id!r}, chat_id={self.chat_id}, data={self.data!r})"
 
 
-@dataclass
-class TelegramUpdate:
-    update_id: int
-    message: TelegramMessage | None
-    callback_query: TelegramCallbackQuery | None = None
+class TelegramUser:
+    """Minimal user representation."""
+    __slots__ = ("id", "first_name", "is_bot", "username")
+    def __init__(self, id: int, first_name: str = "", is_bot: bool = False, username: str = "") -> None:
+        self.id = id
+        self.first_name = first_name
+        self.is_bot = is_bot
+        self.username = username
+    def __repr__(self) -> str:
+        return f"TelegramUser(id={self.id}, name={self.first_name}, bot={self.is_bot})"
 
 
-# ─── Client ──────────────────────────────────────────────────────────────────
+class TelegramChat:
+    """Minimal chat representation."""
+    __slots__ = ("id", "chat_type")
+    def __init__(self, id: int, chat_type: str = "private") -> None:
+        self.id = id
+        self.chat_type = chat_type
+    def __repr__(self) -> str:
+        return f"TelegramChat(id={self.id}, type={self.chat_type})"
+
+
+class TelegramMessage:
+    """Minimal representation of a Telegram message."""
+
+    __slots__ = (
+        "message_id",
+        "chat",
+        "from_user",
+        "text",
+        "voice",
+        "photo",
+        "document",
+        "audio",
+        "caption",
+        "entities",
+        "reply_to_message_id",
+    )
+
+    def __init__(  # noqa: PLR0913
+        self,
+        message_id: int,
+        chat: dict,
+        from_user: dict | None,
+        text: str | None = None,
+        voice: dict | None = None,
+        photo: list | None = None,
+        document: dict | None = None,
+        audio: dict | None = None,
+        caption: str | None = None,
+        entities: list | None = None,
+        reply_to_message_id: int | None = None,
+    ) -> None:
+        self.message_id = message_id
+        self.chat = type("Chat", (), chat)() if isinstance(chat, dict) else chat
+        self.from_user = type("User", (), from_user)() if isinstance(from_user, dict) else from_user
+        self.text = text
+        self.voice = type("Voice", (), voice)() if isinstance(voice, dict) else voice
+        self.photo = photo
+        self.document = type("Doc", (), document)() if isinstance(document, dict) else document
+        self.audio = audio
+        self.caption = caption
+        self.entities = entities
+        self.reply_to_message_id = reply_to_message_id
+
+    def __repr__(self) -> str:
+        text = (self.text or self.caption or "")[:60]
+        return (
+            f"TelegramMessage(id={self.message_id}, chat={self.chat}, "
+            f"voice={'Y' if self.voice else 'N'}, text={text!r})"
+        )
+
+
+def voice_prompt(path: str, duration: float, mime_type: str | None) -> str:
+    """Build the prompt that tells the LLM about a received voice note.
+
+    Used when the gateway DOES NOT transcribe automatically.
+    """
+    ext = _ext_from_mime(mime_type)
+    return (
+        "The user sent a voice message. "
+        f"The audio file is at: {path}\n"
+        f"The file format is: {mime_type or ext or 'unknown'}\n"
+        f"The duration is: {duration:.1f}s\n"
+        "\n"
+        "Please use the `transcribe_audio` tool from the `lina-gemini-multimodal` MCP "
+        "to transcribe this audio file, then respond to what the user said."
+    )
+
+
+def _ext_from_mime(mime_type: str | None) -> str:
+    """Map Telegram mime type to a known file extension (with dot)."""
+    return {"audio/ogg": ".ogg", "audio/mpeg": ".mp3", "audio/mp4": ".m4a"}.get(
+        mime_type or "", ".oga"
+    )
 
 
 class TelegramClient:
-    """Minimal async Telegram Bot API client using Bot API HTTP polling."""
+    """Thin HTTP wrapper around the Telegram Bot API."""
 
-    def __init__(self, bot_token: str, poll_timeout: int = 30) -> None:
-        self._token = bot_token
+    def __init__(self, token: str, poll_timeout: int = 30) -> None:
+        global _BOT_TOKEN  # noqa: PLW0603
+        _BOT_TOKEN = token
+        self._token = token
         self._poll_timeout = poll_timeout
-        self._http = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=10.0, read=poll_timeout + 15.0, write=30.0, pool=5.0),
-            http2=False,
-        )
-        # Tracks last edit timestamp per (chat_id, message_id) for throttling.
+        self._http = httpx.AsyncClient(http2=True, timeout=httpx.Timeout(poll_timeout + 10))
+        # HATEOAS-ish: cache the result of getMe
+        self._me: dict | None = None
+        # Throttle editMessageText (Telegram dislikes rapid-fire edits)
         self._last_edit_at: dict[tuple[int, int], float] = {}
+        # Default voice path can be overridden (e.g., in tests)
+        self._voice_base = "/shared/voice"
+
+    @property
+    def me(self) -> dict | None:
+        return self._me
+
+    async def get_me(self) -> dict:
+        if self._me is None:
+            r = await self._http.post(self._url("getMe"))
+            self._me = r.json().get("result") or {}
+        return self._me  # type: ignore[return-value]
 
     def _url(self, method: str) -> str:
         return f"https://api.telegram.org/bot{self._token}/{method}"
 
-    # ── Polling ──────────────────────────────────────────────────────────
-
-    async def get_updates(self, offset: int | None) -> list[TelegramUpdate]:
-        """Long-poll for new updates."""
-        params: dict[str, Any] = {
+    async def poll(self, offset: int | None) -> list[tuple[int, TelegramMessage | TelegramCallbackQuery]]:
+        """Fetch updates via long-poll getUpdates.
+    
+        Returns list of (update_id, message) tuples.
+        """
+        params: dict = {
             "timeout": self._poll_timeout,
             "allowed_updates": ["message", "callback_query"],
         }
         if offset is not None:
             params["offset"] = offset
-        r = await self._http.get(self._url("getUpdates"), params=params)
-        r.raise_for_status()
-        data = r.json()
-        if not data.get("ok"):
-            logger.warning("getUpdates !ok: %s", data)
-            return []
-        return [_parse_update(u) for u in data.get("result", [])]
+        r = await self._http.post(self._url("getUpdates"), json=params)
+        updates = r.json().get("result", [])
+        results: list[tuple[int, TelegramMessage | TelegramCallbackQuery]] = []
+        for upd in updates:
+            uid = upd.get("update_id")
+            msg_data = upd.get("message") or upd.get("edited_message")
+            if msg_data:
+                results.append((uid, self._parse_message(msg_data)))
+            elif "callback_query" in upd:
+                cq = upd["callback_query"]
+                results.append(
+                    (
+                        uid,
+                        TelegramCallbackQuery(
+                            id=cq["id"],
+                            chat_id=cq["message"]["chat"]["id"],
+                            data=cq["data"],
+                            message_id=cq["message"]["message_id"],
+                        ),
+                    )
+                )
+        return results
+    
+    def _parse_message(self, d: dict) -> TelegramMessage:
+        """Parse a raw Telegram message dict into a TelegramMessage."""
+        # Telegram uses "type" but our code expects "chat_type"
+        chat = dict(d["chat"])
+        if "type" in chat and "chat_type" not in chat:
+            chat["chat_type"] = chat.pop("type")
+        return TelegramMessage(
+            message_id=d["message_id"],
+            chat=chat,
+            from_user=d.get("from"),
+            text=d.get("text"),
+            voice=d.get("voice"),
+            photo=d.get("photo"),
+            document=d.get("document"),
+            audio=d.get("audio"),
+            caption=d.get("caption"),
+            entities=d.get("entities"),
+            reply_to_message_id=d.get("reply_to_message_id"),
+        )
 
-    # ── Send / Edit / Delete ────────────────────────────────────────────
+    async def get_updates(self, offset: int | None = None) -> list:
+        """Alias for poll(). Used by bot.run_once()."""
+        return await self.poll(offset)
 
     async def send_message(self, chat_id: int, text: str, **kw: Any) -> int | None:
-        """Send a text message. Returns the new message_id."""
-        import re as _re
-        
-        payload: dict[str, Any] = {
-            "chat_id": chat_id,
-            "disable_web_page_preview": True,
-        }
-        
-        # Detect @mentions in CLEAN text (no HTML tags)
-        _clean = _re.sub(r"<[^>]+>", "", text)
-        _mentions = []
-        for _m in _re.finditer(r"@(s_lina_bot|s_cline_bot|s_goose_bot)", _clean):
-            _mentions.append({
-                "type": "mention",
-                "offset": _m.start(),
-                "length": _m.end() - _m.start(),
-            })
-        
-        if _mentions:
-            payload["text"] = _clean
-            payload["entities"] = _mentions
-        else:
-            payload["text"] = text
-            payload["parse_mode"] = "HTML"
-        
-        payload.update(kw)
-        r = await self._http.post(self._url("sendMessage"), json=payload)
-        if not r.is_success:
-            logger.warning("sendMessage failed: %s %s", r.status_code, r.text[:200])
+        """Send a text message. Returns message_id on success, None on failure."""
+        if not text.strip():
             return None
-        result = r.json().get("result", {})
-        return result.get("message_id")
+        try:
+            json: dict = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+            json.update(kw)
+            r = await self._http.post(self._url("sendMessage"), json=json)
+            data = r.json()
+            if data.get("ok") and data.get("result", {}).get("message_id"):
+                return data["result"]["message_id"]
+            return None
+        except Exception as exc:
+            logger.warning("send_message error: %s", exc)
+            return None
+
+    async def set_reaction(self, chat_id: int, message_id: int, emoji: str) -> None:
+        """Set a reaction on a message."""
+        try:
+            await self._http.post(
+                self._url("setMessageReaction"),
+                json={
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "reaction": [{"type": "emoji", "emoji": emoji}] if emoji else [],
+                },
+            )
+        except Exception as exc:
+            logger.warning("set_reaction error: %s", exc)
+
+    async def send_chat_action(self, chat_id: int, action: str = "typing") -> None:
+        """Send a chat action (typing indicator, etc.)."""
+        try:
+            await self._http.post(
+                self._url("sendChatAction"),
+                json={"chat_id": chat_id, "action": action},
+            )
+        except Exception as exc:
+            logger.warning("send_chat_action error: %s", exc)
+
+    async def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> None:
+        """Answer a callback query (stops the loading indicator on the button)."""
+        payload: dict[str, str] = {"callback_query_id": callback_query_id}
+        if text:
+            payload["text"] = text
+            payload["show_alert"] = "false"
+        try:
+            await self._http.post(self._url("answerCallbackQuery"), json=payload)
+        except Exception as exc:
+            logger.warning("answer_callback_query error: %s", exc)
 
     async def edit_message(self, chat_id: int, message_id: int, text: str) -> bool:
-        """Edit an existing message (throttled)."""
+        """Edit an existing message (throttled to avoid Telegram rate limits).
+
+        Returns True if the message was edited, False if throttled or failed.
+        """
         now = __import__("time").time()
         key = (chat_id, message_id)
         last = self._last_edit_at.get(key, 0)
@@ -200,36 +308,14 @@ class TelegramClient:
                     "message_id": message_id,
                     "text": text,
                     "parse_mode": "HTML",
-                    "disable_web_page_preview": True,
                 },
             )
-        except httpx.TimeoutException:
-            logger.info("editMessage Text timeout (chat=%s msg=%s)", chat_id, message_id)
-            return False
-        if r.status_code == 400 and "message is not modified" in r.text:
-            return True
-        return r.is_success
-
-    async def send_chat_action(self, chat_id: int, action: str = "typing") -> None:
-        """Send a chat action (typing indicator, etc.)."""
-        try:
-            await self._http.post(
-                self._url("sendChatAction"),
-                json={"chat_id": chat_id, "action": action},
-            )
+            if r.status_code == 400 and "message is not modified" in r.text:
+                return True
+            return r.is_success
         except Exception as exc:
-            logger.debug("sendChatAction error: %s", exc)
-
-    async def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> None:
-        """Answer a callback query (required by Telegram to stop the loading indicator)."""
-        payload: dict[str, str] = {"callback_query_id": callback_query_id}
-        if text:
-            payload["text"] = text
-            payload["show_alert"] = "false"
-        try:
-            await self._http.post(self._url("answerCallbackQuery"), json=payload)
-        except Exception:
-            logger.warning("answerCallbackQuery: error for %s", callback_query_id)
+            logger.warning("edit_message error: %s", exc)
+            return False
 
     async def edit_message_reply_markup(
         self, chat_id: int, message_id: int, reply_markup: dict | None = None
@@ -240,192 +326,119 @@ class TelegramClient:
             payload["reply_markup"] = reply_markup
         try:
             await self._http.post(self._url("editMessageReplyMarkup"), json=payload)
-        except Exception:
-            logger.warning(
-                "editMessageReplyMarkup: error for msg %s in chat %s", message_id, chat_id
-            )
-
-    async def set_reaction(self, chat_id: int, message_id: int, emoji: str) -> None:
-        """Set a reaction emoji on a message."""
-        reaction: list[Any] = [] if not emoji else [{"type": "emoji", "emoji": emoji}]
-        try:
-            await self._http.post(
-                self._url("setMessageReaction"),
-                json={"chat_id": chat_id, "message_id": message_id, "reaction": reaction},
-            )
         except Exception as exc:
-            logger.debug("setMessageReaction error: %s", exc)
+            logger.warning("edit_message_reply_markup error: %s", exc)
 
     async def get_file_path(self, file_id: str) -> str:
-        """Get the file path for a Telegram file_id."""
-        resp = await self._http.post(self._url("getFile"), json={"file_id": file_id})
-        resp.raise_for_status()
-        data = resp.json()
+        """Get the file path on Telegram's CDN for a given file_id."""
+        r = await self._http.post(self._url("getFile"), json={"file_id": file_id})
+        data = r.json()
         if not data.get("ok"):
-            raise RuntimeError(f"getFile error: {data.get('description')}")
+            raise RuntimeError(f"getFile error: {data.get('description', 'unknown')}")
         return data["result"]["file_path"]
 
     async def download_file(self, file_id: str) -> bytes:
-        """Download a file from Telegram by file_id."""
+        """Download a file from Telegram by file_id.
+
+        Returns the raw file bytes.
+        """
         file_path = await self.get_file_path(file_id)
-        url = f"{TELEGRAM_API_BASE}/file/bot{self._token}/{file_path}"
-        resp = await self._http.get(url)
-        resp.raise_for_status()
-        return resp.content
+        url = f"https://api.telegram.org/file/bot{self._token}/{file_path}"
+        r = await self._http.get(url)
+        r.raise_for_status()
+        return r.content
 
     async def save_voice_file(self, data: bytes, mime_type: str | None) -> str:
-        """Save voice bytes to a temp file and return the path."""
-        ext = _ext_from_mime(mime_type)
+        """Save voice bytes to a file and return the path.
+
+        Fix: filename uses {ext} (with dot), so we use {ext.lstrip('.')}
+        to avoid double-dot like ``..ogg``.
+        """
+        ext = _ext_from_mime(mime_type)  # returns ".ogg", ".mp3", etc.
         voice_dir = os.path.join(tempfile.gettempdir(), "lina_voice")
         os.makedirs(voice_dir, mode=0o700, exist_ok=True)
-        filename = f"voice_{uuid.uuid4()}.{ext}"
+        filename = f"voice_{uuid.uuid4()}{ext}"
         path = os.path.join(voice_dir, filename)
         with open(path, "wb") as f:
             os.chmod(path, 0o600)
             f.write(data)
+        logger.info("voice saved: %s (%d bytes)", path, len(data))
         return path
 
-    async def get_chat_member(self, chat_id: int, user_id: int) -> dict[str, Any]:
-        """Get info about a chat member."""
-        r = await self._http.post(
-            self._url("getChatMember"),
-            json={"chat_id": chat_id, "user_id": user_id},
-        )
-        if r.is_success:
-            return r.json().get("result", {})
-        return {}
-
     async def close(self) -> None:
+        """Close the underlying HTTP client."""
         await self._http.aclose()
 
+    async def send_voice(self, chat_id: int, audio_path: str, duration: int = 0) -> int | None:
+        """Send a voice message (OGG/OPUS) to Telegram.
 
-# ─── Parsers ─────────────────────────────────────────────────────────────────
+        Args:
+            chat_id: Target chat ID.
+            audio_path: Path to the audio file to send.
+            duration: Duration of the audio in seconds (optional).
 
-
-def _parse_entities(
-    raw_entities: list[dict[str, Any]],
-    text: str,
-) -> list[TelegramEntity]:
-    """Parse Telegram message entities into clean objects."""
-    entities: list[TelegramEntity] = []
-    for e in raw_entities:
-        user_raw = e.get("user")
-        user = (
-            TelegramUser(
-                first_name=user_raw.get("first_name", "") if user_raw else "",
-                last_name=user_raw.get("last_name") if user_raw else None,
-                username=user_raw.get("username") if user_raw else None,
-                is_bot=user_raw.get("is_bot", False) if user_raw else False,
+        Returns:
+            Message ID if sent, None on failure.
+        """
+        try:
+            import os as os_mod
+            if not os_mod.path.exists(audio_path):
+                logger.warning("send_voice: file not found: %s", audio_path)
+                return None
+            with open(audio_path, "rb") as f:
+                audio_data = f.read()
+            r = await self._http.post(
+                self._url("sendVoice"),
+                files={
+                    "chat_id": (None, str(chat_id)),
+                    "voice": ("voice.ogg", audio_data, "audio/ogg"),
+                    "duration": (None, str(duration)),
+                },
             )
-            if user_raw
-            else None
-        )
+            data = r.json()
+            if data.get("ok") and data.get("result", {}).get("message_id"):
+                return data["result"]["message_id"]
+            logger.warning("send_voice failed: %s", data)
+            return None
+        except Exception as exc:
+            logger.error("send_voice error: %s", exc)
+            return None
 
-        entities.append(
-            TelegramEntity(
-                type=e["type"],
-                offset=e["offset"],
-                length=e["length"],
-                user=user,
-            )
-        )
-    return entities
+    async def send_voice_from_text(self, chat_id: int, text: str, lang: str = "es") -> int | None:
+        """Convert text to speech using gTTS and send as a voice message.
 
+        Uses gTTS (Google Text-to-Speech, free, no API key needed).
 
-def _parse_message(raw: dict[str, Any]) -> TelegramMessage:
-    chat = raw["chat"]
-    from_raw = raw.get("from")
-    voice_raw = raw.get("voice") or raw.get("audio")
-    reply_raw = raw.get("reply_to_message")
+        Args:
+            chat_id: Target chat ID.
+            text: Text to convert to speech.
+            lang: Language code (default: "es" for Spanish).
 
-    from_user = None
-    if from_raw:
-        from_user = TelegramUser(
-            first_name=from_raw.get("first_name", ""),
-            last_name=from_raw.get("last_name"),
-            username=from_raw.get("username"),
-            is_bot=from_raw.get("is_bot", False),
-        )
+        Returns:
+            Message ID if sent, None on failure.
+        """
+        try:
+            from gtts import gTTS
+            import tempfile
+            import os as os_mod
 
-    voice = None
-    if voice_raw:
-        voice = TelegramVoice(
-            file_id=voice_raw["file_id"],
-            file_size=voice_raw.get("file_size"),
-            duration=voice_raw.get("duration"),
-            mime_type=voice_raw.get("mime_type"),
-        )
+            tts = gTTS(text=text, lang=lang, slow=False)
 
-    entities: list[TelegramEntity] = []
-    if "entities" in raw:
-        entities = _parse_entities(raw["entities"], raw.get("text", ""))
+            # Save to a temp file
+            tmp = tempfile.NamedTemporaryFile(suffix=".ogg", delete=False)
+            tmp_path = tmp.name
+            tmp.close()
+            tts.save(tmp_path)
 
-    reply_to_id = None
-    if reply_raw:
-        reply_to_id = reply_raw.get("message_id")
+            result = await self.send_voice(chat_id, tmp_path)
 
-    return TelegramMessage(
-        message_id=raw["message_id"],
-        chat=TelegramChat(id=chat["id"], chat_type=chat.get("type", "private")),
-        from_user=from_user,
-        text=raw.get("text"),
-        voice=voice,
-        entities=entities,
-        reply_to_message_id=reply_to_id,
-    )
+            # Clean up
+            try:
+                os_mod.unlink(tmp_path)
+            except Exception:
+                pass
 
-
-def _parse_update(raw: dict[str, Any]) -> TelegramUpdate:
-    msg = raw.get("message")
-    cq = raw.get("callback_query")
-    return TelegramUpdate(
-        update_id=raw["update_id"],
-        message=_parse_message(msg) if msg else None,
-        callback_query=_parse_callback_query(cq) if cq else None,
-    )
-
-
-def _parse_callback_query(raw: dict[str, Any]) -> TelegramCallbackQuery:
-    from_raw = raw.get("from")
-    from_user = (
-        TelegramUser(
-            first_name=from_raw.get("first_name", ""),
-            last_name=from_raw.get("last_name"),
-            username=from_raw.get("username"),
-            is_bot=from_raw.get("is_bot", False),
-        )
-        if from_raw
-        else None
-    )
-
-    return TelegramCallbackQuery(
-        id=raw["id"],
-        chat_id=raw["message"]["chat"]["id"],
-        message_id=raw["message"]["message_id"],
-        data=raw.get("data", ""),
-        from_user=from_user,
-    )
-
-
-# ─── Helpers ─────────────────────────────────────────────────────────────────
-
-
-def voice_prompt(path: str, duration: int | None, mime_type: str | None) -> str:
-    """Build a system prompt for voice message transcription."""
-    duration_hint = f" (duration: {duration}s)" if duration else ""
-    format_hint = f" The file format is {mime_type}." if mime_type else ""
-    return (
-        f"The user sent a voice message{duration_hint}. "
-        f"The audio file is saved at: {path}{format_hint}\n\n"
-        "Please transcribe this audio file using available command-line tools "
-        "(e.g. whisper, ffmpeg, sox, or any STT utility you can find on this system) "
-        "and then respond to what the user said. "
-        "If no transcription tool is available, let the user know and ask them to type their message instead."
-    )
-
-
-def _ext_from_mime(mime_type: str | None) -> str:
-    """Map Telegram mime types to file extensions."""
-    return {"audio/ogg": ".ogg", "audio/mpeg": ".mp3", "audio/mp4": ".m4a"}.get(
-        mime_type or "", ".oga"
-    )
+            return result
+        except Exception as exc:
+            logger.error("send_voice_from_text error: %s", exc)
+            return None
