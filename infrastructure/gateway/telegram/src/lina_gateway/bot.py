@@ -31,6 +31,7 @@ from .goose_client import EventType, GoosedClient, TokenState
 from .observe import ObserveServer
 from .pacer import StreamingBubble
 from .transcriber import transcribe_audio
+from .commands.audit import handle_audit
 from .telegram_client import (
     TelegramUser,
     MAX_VOICE_FILE_SIZE,
@@ -312,6 +313,12 @@ class Bot:
                 )
                 return
             await self._replan_agent(chat_id, parts[1].strip(), parts[2].strip())
+            return
+
+        # ── /audit ── consulta de acciones recientes ─────────────────────
+        if text.strip().lower().startswith("/audit"):
+            args = text.strip()[len("/audit"):].strip()
+            await handle_audit(chat_id, args, self._tg, self._cfg.lina_db_url)
             return
 
         # ── /voz ── respond with voice (TTS) ──────────────────────────
