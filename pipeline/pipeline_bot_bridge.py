@@ -101,22 +101,27 @@ async def _send(bot_name: str, text: str, timeout: int, last_n: int = 0) -> str:
                     continue
                 if sender.username.lower().lstrip("@") != username.lower().lstrip("@"):
                     continue
-                
+
+                # ── Edit detection (via Telegram edit_date) ──
+                is_edit = msg.edit_date is not None
+                was_seen = msg.id in seen
+                if was_seen and (not EDIT_DETECT or not is_edit):
+                    continue
+                if was_seen and is_edit:
+                    t = (msg.text or "").strip()
+                    for i, (mid, _) in enumerate(messages):
+                        if mid == msg.id:
+                            messages[i] = (msg.id, t)
+                            break
+                    got_new = True
+                    print(f"    ✏️  msg#{msg.id} editado ({len(t)} chars)")
+                    continue
+
+                seen.add(msg.id)
                 t = (msg.text or "").strip()
-                is_edit = msg.id in seen
-                
-                if not is_edit:
-                    seen.add(msg.id)
-                    messages.append((msg.id, t))
-                    got_new = True
-                    print(f"    📥 msg#{msg.id} ({len(t)} chars)")
-                else:
-                    # Edit detected — update text and treat as new
-                    messages = [(mid, mt) for mid, mt in messages if mid != msg.id]
-                    messages.append((msg.id, t))
-                    seen.add(msg.id)
-                    got_new = True
-                    print(f"    📝 msg#{msg.id} EDIT → ({len(t)} chars)")
+                messages.append((msg.id, t))
+                got_new = True
+                print(f"    📥 msg#{msg.id} ({len(t)} chars)")
 
             if got_new:
                 idle_since = None
