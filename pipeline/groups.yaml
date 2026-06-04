@@ -1,0 +1,23 @@
+# Grupos de trabajo paralelos
+# Cada grupo es un worker process independiente.
+# auto: toma el próximo issue abierto sin asignar del repo.
+#
+# Comm A — Issues rápidos: bugs, hotfixes
+# Comm B — Issues medios: features, enhancements
+# Comm C — Issues complejos: memoria, arquitectura, infra
+
+groups:
+  - name: "Comm A"
+    session: "sessions/group_a"
+    issue: "auto"
+    auto_next: true
+
+  - name: "Comm B"
+    session: "sessions/group_b"
+    issue: "auto"
+    auto_next: true
+
+  - name: "Comm C"
+    session: "sessions/group_c"
+    issue: "auto"
+    auto_next: true

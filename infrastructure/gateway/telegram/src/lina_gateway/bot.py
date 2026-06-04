@@ -30,9 +30,12 @@ from .formatter import (
 from .goose_client import EventType, GoosedClient, TokenState
 from .observe import ObserveServer
 from .pacer import StreamingBubble
+from .transcriber import transcribe_audio
 from .telegram_client import (
+    TelegramUser,
     MAX_VOICE_FILE_SIZE,
     TelegramCallbackQuery,
+    TelegramChat,
     TelegramClient,
     TelegramMessage,
     voice_prompt,
@@ -81,6 +84,10 @@ class Bot:
         # chat_ids for which session context has been injected this process lifetime
         self._sessions_initialized: set[int] = set()
         self._observer: ObserveServer | None = None
+        # chat_id → last assistant response text (for /voz command)
+        self._last_response: dict[int, str] = {}
+        # chat_id → True if we should send voice response (voice thread)
+        self._voice_mode: dict[int, bool] = {}
 
     @property
     def tg(self) -> TelegramClient:
@@ -119,11 +126,11 @@ class Bot:
         if msg.entities:
             text = (msg.text or "").lower()
             for ent in msg.entities:
-                if ent.type == "mention":
+                if (isinstance(ent, dict) and ent.get("type") == "mention") or (not isinstance(ent, dict) and ent.type == "mention"):
                     mentioned = text[ent.offset : ent.offset + ent.length].lstrip("@")
                     if self._is_this_bot(mentioned):
                         return True
-                elif ent.type == "text_mention":
+                elif (isinstance(ent, dict) and ent.get("type") == "text_mention") or (not isinstance(ent, dict) and ent.type == "text_mention"):
                     # text_mention to a user/bot by ID — assume it's us
                     return True
 
@@ -244,6 +251,45 @@ class Bot:
                 await self._pause_agent(chat_id, parts[1].strip())
             return
 
+        # ── /resumen ── audio summary via TTS ─────────────────────────
+        if text.strip().lower() == "/resumen":
+            cancel_event = asyncio.Event()
+            self._cancels[chat_id] = cancel_event
+            self._busy[chat_id] = True
+            try:
+                session_id = self._session_id(chat_id)
+                try:
+                    session_id, _ = await self._goosed.ensure_session(session_id)
+                except Exception as exc:
+                    logger.warning("Could not ensure session for /resumen: %s", exc)
+                await self._tg.send_message(chat_id, "🎙️ Generando resumen de audio...")
+                prompt = (
+                    "Generá un RESUMEN AUDIO de nuestra conversación reciente en este chat. "
+                    "Incluí SOLO la información importante: decisiones tomadas, conclusiones, "
+                    "hallazgos clave. Ignorá comandos internos, mensajes de sistema y herramientas. "
+                    "Respondé en español neutro, en un formato pensado para ser LEÍDO EN VOZ ALTA "
+                    "por un sistema text-to-speech. Usá frases fluidas y naturales. "
+                    "Máximo 200 palabras. Empezá directamente con el resumen, "
+                    "sin introducciones ni frases como 'Aquí tienes el resumen'."
+                )
+                body_acc = ""
+                async for event in self._goosed.reply_stream(session_id, prompt):
+                    if cancel_event.is_set():
+                        break
+                    if event.event_type == EventType.MESSAGE:
+                        for item in event.contents:
+                            if item.content_type == "text" and item.text:
+                                body_acc += item.text
+                    if event.event_type == EventType.FINISH:
+                        break
+                if body_acc.strip():
+                    await self._tg.send_voice_from_text(chat_id, body_acc.strip())
+                else:
+                    await self._tg.send_message(chat_id, "⚠️ No se pudo generar el resumen.")
+            finally:
+                self._busy[chat_id] = False
+            return
+
         # ── /resume <agent_id> ───────────────────────────────────────────
         if text.strip().lower().startswith("/resume"):
             parts = text.strip().split(None, 1)
@@ -268,6 +314,16 @@ class Bot:
             await self._replan_agent(chat_id, parts[1].strip(), parts[2].strip())
             return
 
+        # ── /voz ── respond with voice (TTS) ──────────────────────────
+        if text.strip().lower() == "/voz":
+            last = self._last_response.get(chat_id)
+            if last:
+                await self._tg.send_message(chat_id, "🔊 Convirtiendo a voz...")
+                await self._tg.send_voice_from_text(chat_id, last)
+            else:
+                await self._tg.send_message(chat_id, "ℹ️ No hay respuesta previa para convertir a voz.")
+            return
+
         # ── voice note ─────────────────────────────────────────────────
         if msg.voice:
             if msg.voice.file_size and msg.voice.file_size > MAX_VOICE_FILE_SIZE:
@@ -278,10 +334,13 @@ class Bot:
             try:
                 data = await self._tg.download_file(msg.voice.file_id)
                 path = await self._tg.save_voice_file(data, msg.voice.mime_type)
-                text = voice_prompt(path, msg.voice.duration, msg.voice.mime_type)
+                status_id = await self._tg.send_message(chat_id, "🎤 Transcribiendo audio...")
+                transcription = await transcribe_audio(path)
+                await self._tg.edit_message(chat_id, status_id, "🎤 Audio transcrito.")
+                text = f"[transcripción automática] {transcription}"
             except Exception as exc:
-                logger.error("Failed to download voice file: %s", exc)
-                await self._tg.send_message(chat_id, "⚠️ No pude descargar la nota de voz.")
+                logger.error("Failed to process voice file: %s", exc)
+                await self._tg.send_message(chat_id, "⚠️ No pude procesar la nota de voz.")
                 return
 
         if not text.strip():
@@ -1069,6 +1128,10 @@ class Bot:
         if body_acc and body_bubble_msg_id is None and thinking_bubble_msg_id is None:
             await self._tg.send_message(chat_id, markdown_to_telegram_html(body_acc))
 
+        # Save response for /voz command
+        if body_acc:
+            self._last_response[chat_id] = body_acc
+
         # Persist this turn for session recovery across restarts (best-effort)
         if self._cfg.lina_db_url and text.strip() and body_acc.strip():
             asyncio.create_task(
@@ -1184,11 +1247,21 @@ class Bot:
         """Poll once. Returns the new offset."""
         updates = await self._tg.get_updates(offset)
         for update in updates:
-            offset = update.update_id + 1
-            if update.message:
-                asyncio.create_task(self._handle(update.message))
-            if update.callback_query:
-                asyncio.create_task(self._handle_callback(update.callback_query))
+            # poll() returns (update_id, item) tuples
+            if isinstance(update, tuple):
+                uid, item = update
+                offset = uid + 1
+                if isinstance(item, TelegramCallbackQuery):
+                    asyncio.create_task(self._handle_callback(item))
+                else:
+                    asyncio.create_task(self._handle(item))
+            else:
+                # Legacy: object with .update_id, .message, .callback_query
+                offset = update.update_id + 1
+                if hasattr(update, 'message') and update.message:
+                    asyncio.create_task(self._handle(update.message))
+                if hasattr(update, 'callback_query') and update.callback_query:
+                    asyncio.create_task(self._handle_callback(update.callback_query))
         # Process comm messages (HTTP bridge from other bots)
         if self._observer:
             for cmd in self._observer.pop_comm_messages():

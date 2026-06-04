@@ -14,6 +14,8 @@ dependencies = [
     # Optional: used by boot_hook.py when LINA_DB_URL is set.
     # Declared as a hard dependency so the image always has it available.
     "asyncpg>=0.29",
+    "google-genai>=2.0.0",
+    "gtts>=2.5",
 ]
 
 [project.scripts]
