@@ -27,6 +27,11 @@ x-mcp-defaults: &mcp-defaults
     options:
       max-size: "10m"
       max-file: "3"
+  # ── Memory limits (Issue #160: evitar OOM Killer) ─────────────────────────
+  # MCPs livianos — threshold seguro para evitar fugas.
+  mem_limit: 512m
+  memswap_limit: 512m
+  oom_kill_disable: false       # permitir que Docker OOM-kille si excede
 
 services:
 
@@ -55,6 +60,9 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    # ── Memory limits: DB con datos puede crecer, pero no descontrolarse
+    mem_limit: 1g
+    memswap_limit: 1g
 
   # ─── goosed runtime ─────────────────────────────────────────────────────────
   # Imagen buildeada desde el binario patched + MCPs Python.
@@ -117,6 +125,9 @@ services:
       options:
         max-size: "20m"
         max-file: "5"
+    # ── Memory limits: goosed con contexto puede crecer; tope amplio
+    mem_limit: 2g
+    memswap_limit: 2g
 
   # ─── goosed (modo dev, binario montado desde host) ──────────────────────────
   goosed-dev:
@@ -135,6 +146,9 @@ services:
       - ${GOOSED_BIN:-/usr/local/bin/goosed}:/usr/local/bin/goosed:ro
       - ${HOME}/.config/goose:/root/.config/goose:ro
       - lina-logs:/app/logs
+    # ── Memory limits
+    mem_limit: 2g
+    memswap_limit: 2g
 
   # ─── MCP: lina-secrets ──────────────────────────────────────────────────────
   # Backend: archivo en volumen (libsecret no funciona en containers).
@@ -437,6 +451,9 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    # ── nginx es liviano
+    mem_limit: 128m
+    memswap_limit: 128m
 
   # ─── Backup automático (3.6) ─────────────────────────────────────────────────
   # Ejecuta pg_dump horario. Retiene las últimas 24 copias (= 1 día).
@@ -462,6 +479,9 @@ services:
       options:
         max-size: "5m"
         max-file: "2"
+    # ── backup es liviano
+    mem_limit: 256m
+    memswap_limit: 256m
 
   # ─── CLINE Desktop — goosed con acceso total a la PC ────────────────────────
   # Contenedor privileged con host network para acceso total al sistema.
@@ -515,6 +535,9 @@ services:
         max-size: "20m"
         max-file: "3"
     profiles: ["desktop"]
+    # ── Memory limits: cline-goosed con contexto grande
+    mem_limit: 2g
+    memswap_limit: 2g
 
   # ─── CLINE Desktop — Telegram gateway para @s_cline_bot ─────────────────────
   # Bot de Telegram independiente que se conecta a cline-goosed.
@@ -550,6 +573,11 @@ services:
         max-size: "10m"
         max-file: "3"
     profiles: ["desktop"]
+    # ── Memory limits: EL CULPABLE del OOM — límite estricto
+    # 512 MB es suficiente para un gateway Telegram normal.
+    # Si hay leak, OOM-kill local (Docker) mata solo este contenedor, no todo el servidor.
+    mem_limit: 512m
+    memswap_limit: 512m
 
   # ─── @s_goose_bot — Gateway para el goosed local (PC de Fede) ────────────
   # Usa host network para alcanzar localhost:42359 (goosed local del usuario).
@@ -582,6 +610,9 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    # ── Memory limits
+    mem_limit: 512m
+    memswap_limit: 512m
 
   # ─── Docker socket proxy (Tecnativa) ────────────────────────────────────────
   # Expone un subconjunto restringido del Docker daemon para que LINA pueda
@@ -614,6 +645,8 @@ services:
       options:
         max-size: "5m"
         max-file: "3"
+    mem_limit: 64m
+    memswap_limit: 64m
 
   # ─── Monitoring Dashboard (Issue #156) ──────────────────────────────────────
   # Dashboard web unificado que muestra bots, sesiones activas, contenedores
@@ -649,6 +682,8 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    mem_limit: 256m
+    memswap_limit: 256m
 
   # ─── Telegram Gateway (Issue #16) ────────────────────────────────────────
   # Servicio Python independiente que reemplaza el gateway embebido en goosed.
@@ -689,6 +724,9 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    # ── Memory limits: gateway de Telegram
+    mem_limit: 512m
+    memswap_limit: 512m
 
 volumes:
   lina-db-data:
@@ -708,4 +746,3 @@ networks:
     # Red interna entre lina-docker-proxy y lina-mcp-shell-policy.
     # Sólo estos dos servicios la comparten — el socket proxy NO está en la red
     # default ni es accesible desde otros contenedores.
-
