@@ -75,6 +75,14 @@ extensions:
     enabled: true
     timeout: 30
 
+  lina-knowledge:
+    name: lina-knowledge
+    display_name: LINA Knowledge
+    type: streamable_http
+    uri: http://127.0.0.1:8112/mcp
+    enabled: true
+    timeout: 30
+
   lina-github:
     name: lina-github
     display_name: LINA GitHub

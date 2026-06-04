@@ -76,6 +76,14 @@ extensions:
     enabled: true
     timeout: 30
 
+  lina-knowledge:
+    name: lina-knowledge
+    display_name: LINA Knowledge
+    type: streamable_http
+    uri: http://lina-mcp-gateway:8112/mcp
+    enabled: true
+    timeout: 30
+
   # ─── MCPs legacy (ports 8107-8110) ──────────────────────────────────────────
 
   lina-github:

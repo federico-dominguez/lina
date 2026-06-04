@@ -55,3 +55,9 @@ waves:
     - name: lina-gitlab
       path: mcps/gitlab
       status: implemented
+    - name: lina-knowledge
+      path: mcps/lina-knowledge
+      status: implemented
+      requires: postgresql
+      container_url: http://localhost:8112/sse
+      container_port: 8112
