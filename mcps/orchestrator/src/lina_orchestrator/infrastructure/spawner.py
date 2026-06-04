@@ -278,6 +278,7 @@ class SpawnerService:
             proc = subprocess.Popen(  # noqa: S603
                 cmd,
                 env=env,
+                preexec_fn=os.setsid,  # crea process group para kill propagación (#89)
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -348,7 +349,7 @@ class SpawnerService:
             pid = row["pid"]
             if pid:
                 try:
-                    os.kill(pid, signal.SIGTERM)
+                    os.killpg(pid, signal.SIGTERM)  # kill propagación (#89)
                 except ProcessLookupError:
                     pass  # proceso ya muerto
         else:
@@ -367,7 +368,7 @@ class SpawnerService:
                 proc.kill()
             elif pid := locals().get("pid"):
                 try:
-                    os.kill(pid, signal.SIGKILL)
+                    os.killpg(pid, signal.SIGKILL)  # kill propagación (#89)
                 except ProcessLookupError:
                     pass
 

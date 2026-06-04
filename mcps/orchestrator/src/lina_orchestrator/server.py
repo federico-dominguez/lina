@@ -30,6 +30,7 @@ from mcp.server.fastmcp import FastMCP
 
 from lina_orchestrator.application.policy_service import PolicyService
 from lina_orchestrator.domain.policy import PolicyStore
+from lina_orchestrator.application.lifecycle import LifecycleService
 from lina_orchestrator.infrastructure.spawner import SpawnerService
 
 logging.basicConfig(
@@ -64,6 +65,7 @@ def _build_service() -> PolicyService:
 mcp = FastMCP("lina-orchestrator", host="0.0.0.0", port=_MCP_HTTP_PORT)  # noqa: S104 — bind 0.0.0.0 intencional para contenedor
 _service: PolicyService | None = None
 _spawner: SpawnerService | None = None
+_lifecycle: LifecycleService | None = None
 
 
 def _svc() -> PolicyService:
@@ -80,6 +82,14 @@ def _spw() -> SpawnerService:
     if _spawner is None:
         _spawner = SpawnerService(_svc())
     return _spawner
+
+
+def _lfc() -> LifecycleService:
+    """Lazy init del LifecycleService."""
+    global _lifecycle
+    if _lifecycle is None:
+        _lifecycle = LifecycleService(_svc())
+    return _lifecycle
 
 
 # ─── Tools ────────────────────────────────────────────────────────────────────
@@ -306,6 +316,37 @@ def send_instruction(agent_id: str, text: str) -> dict:
         return {"error": str(exc)}
 
 
+@mcp.tool()
+def list_dead_letter(limit: int = 20) -> list[dict]:
+    """Lista los sub-agentes en la dead-letter queue.
+
+    Agentes que fallaron >3 veces y no serán reintentados automáticamente.
+    Útil para monitoreo y diagnóstico.
+
+    Argumentos:
+        limit: máximo de resultados (default 20).
+
+    Retorna:
+        Lista de {session_id, role, goal, retry_count, last_error, moved_at}.
+    """
+    return _lfc().list_dead_letter(limit)
+
+
+@mcp.tool()
+def get_lifecycle_status() -> dict:
+    """Estado del watchdog de sub-agentes.
+
+    Retorna:
+        {"watchdog_running": bool, "watchdog_interval": int, "max_retries": int}
+    """
+    return {
+        "watchdog_running": _lfc().is_running,
+        "watchdog_interval": 30,
+        "max_retries": 3,
+        "backoff_intervals": [60, 300, 900],
+    }
+
+
 def main() -> None:
     log.info(
         "starting (transport=%s, policies=%s)",
@@ -314,6 +355,11 @@ def main() -> None:
     )
     # Eager init para fallar rápido si policies.yaml está mal.
     _svc()
+    # Arrancar watchdog de sub-agentes (issue #89)
+    try:
+        _lfc().start()
+    except Exception:  # noqa: BLE001
+        log.exception("failed to start lifecycle watchdog — continuing without it")
     mcp.run(transport=_MCP_TRANSPORT)
 
 
