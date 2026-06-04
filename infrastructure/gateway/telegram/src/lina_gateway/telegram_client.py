@@ -52,6 +52,15 @@ class TelegramCallbackQuery:
         return f"TelegramCallbackQuery(id={self.id!r}, chat_id={self.chat_id}, data={self.data!r})"
 
 
+class TelegramEntity:
+    """Telegram message entity (mention, hashtag, etc.)."""
+    __slots__ = ("type", "offset", "length")
+    def __init__(self, type: str, offset: int, length: int) -> None:
+        self.type = type
+        self.offset = offset
+        self.length = length
+
+
 class TelegramUser:
     """Minimal user representation."""
     __slots__ = ("id", "first_name", "is_bot", "username")
@@ -228,7 +237,7 @@ class TelegramClient:
             document=d.get("document"),
             audio=d.get("audio"),
             caption=d.get("caption"),
-            entities=d.get("entities"),
+            entities=[TelegramEntity(e["type"], e["offset"], e["length"]) for e in (d.get("entities") or [])] if d.get("entities") else None,
             reply_to_message_id=d.get("reply_to_message_id"),
         )
 

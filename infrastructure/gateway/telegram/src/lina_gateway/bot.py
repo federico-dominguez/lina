@@ -126,11 +126,11 @@ class Bot:
         if msg.entities:
             text = (msg.text or "").lower()
             for ent in msg.entities:
-                if ent.type == "mention":
+                if (isinstance(ent, dict) and ent.get("type") == "mention") or (not isinstance(ent, dict) and ent.type == "mention"):
                     mentioned = text[ent.offset : ent.offset + ent.length].lstrip("@")
                     if self._is_this_bot(mentioned):
                         return True
-                elif ent.type == "text_mention":
+                elif (isinstance(ent, dict) and ent.get("type") == "text_mention") or (not isinstance(ent, dict) and ent.type == "text_mention"):
                     # text_mention to a user/bot by ID — assume it's us
                     return True
 
@@ -249,6 +249,45 @@ class Bot:
                 )
             else:
                 await self._pause_agent(chat_id, parts[1].strip())
+            return
+
+        # ── /resumen ── audio summary via TTS ─────────────────────────
+        if text.strip().lower() == "/resumen":
+            cancel_event = asyncio.Event()
+            self._cancels[chat_id] = cancel_event
+            self._busy[chat_id] = True
+            try:
+                session_id = self._session_id(chat_id)
+                try:
+                    session_id, _ = await self._goosed.ensure_session(session_id)
+                except Exception as exc:
+                    logger.warning("Could not ensure session for /resumen: %s", exc)
+                await self._tg.send_message(chat_id, "🎙️ Generando resumen de audio...")
+                prompt = (
+                    "Generá un RESUMEN AUDIO de nuestra conversación reciente en este chat. "
+                    "Incluí SOLO la información importante: decisiones tomadas, conclusiones, "
+                    "hallazgos clave. Ignorá comandos internos, mensajes de sistema y herramientas. "
+                    "Respondé en español neutro, en un formato pensado para ser LEÍDO EN VOZ ALTA "
+                    "por un sistema text-to-speech. Usá frases fluidas y naturales. "
+                    "Máximo 200 palabras. Empezá directamente con el resumen, "
+                    "sin introducciones ni frases como 'Aquí tienes el resumen'."
+                )
+                body_acc = ""
+                async for event in self._goosed.reply_stream(session_id, prompt):
+                    if cancel_event.is_set():
+                        break
+                    if event.event_type == EventType.MESSAGE:
+                        for item in event.contents:
+                            if item.content_type == "text" and item.text:
+                                body_acc += item.text
+                    if event.event_type == EventType.FINISH:
+                        break
+                if body_acc.strip():
+                    await self._tg.send_voice_from_text(chat_id, body_acc.strip())
+                else:
+                    await self._tg.send_message(chat_id, "⚠️ No se pudo generar el resumen.")
+            finally:
+                self._busy[chat_id] = False
             return
 
         # ── /resume <agent_id> ───────────────────────────────────────────
