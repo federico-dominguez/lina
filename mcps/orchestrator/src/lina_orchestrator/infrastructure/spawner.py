@@ -19,11 +19,15 @@ se puede pasar la ruta explícita via LINA_GOOSED_BIN.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import signal
 import subprocess
+import threading
+import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -205,6 +209,136 @@ def _generate_agent_config(session_id: str, role: str, allowed_mcps: list[str]) 
 # ─── SpawnerService ───────────────────────────────────────────────────────────
 
 
+# ─── Watchdog de timeout (issue #113) ──────────────────────────────────────────
+# Thread daemon que cada _WATCHDOG_INTERVAL segundos revisa agentes running
+# y mata los que excedieron max_runtime_minutes de la policy del rol.
+
+_WATCHDOG_INTERVAL = 10  # segundos entre chequeos
+
+
+def _enforce_timeout(
+    session_id: str,
+    role: str,
+    pid: int,
+    started_at: datetime,
+    max_runtime_minutes: int,
+) -> dict | None:
+    """Verifica si un agente excedió su timeout y lo mata.
+
+    Args:
+        session_id: UUID del agente.
+        role: rol del agente.
+        pid: PID del proceso.
+        started_at: timestamp de inicio.
+        max_runtime_minutes: max permitido desde policies.yaml.
+
+    Returns:
+        Dict con resumen del timeout si se aplicó, None si está dentro del límite.
+    """
+    elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
+    max_seconds = max_runtime_minutes * 60
+
+    if elapsed <= max_seconds:
+        return None  # dentro del límite
+
+    # Excedió → kill
+    runtime_min = round(elapsed / 60, 1)
+    log.warning(
+        "TIMEOUT: session=%s role=%s pid=%d runtime=%.1fm max=%dm",
+        session_id, role, pid, runtime_min, max_runtime_minutes,
+    )
+
+    # Matar proceso con killpg (propaga a hijos)
+    try:
+        os.killpg(pid, signal.SIGTERM)
+        time.sleep(2)  # grace period
+        os.killpg(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass  # ya terminó
+    except PermissionError:
+        log.warning("killpg: permiso denegado para pid=%d", pid)
+
+    # Actualizar DB
+    conn = _db_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE agent_sessions
+                   SET status = 'timeout',
+                       ended_at = NOW(),
+                       updated_at = NOW(),
+                       watchdog_note = %s
+                   WHERE id = %s AND status = 'running'""",
+                (f"timeout: excedió {max_runtime_minutes}m (runtime={runtime_min}m)", session_id),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Evento estructurado para el gateway (issue #113)
+    timeout_info = {
+        "session_id": session_id,
+        "role": role,
+        "pid": pid,
+        "runtime_min": runtime_min,
+        "max_min": max_runtime_minutes,
+        "message": f"⌛ Agente {session_id[:8]} timeout tras {runtime_min:.0f}m (max {max_runtime_minutes}m)",
+    }
+    _db_append_event(session_id, "timeout", timeout_info)
+    log.info("TIMEOUT EVENT: %s", timeout_info["message"])
+    return timeout_info
+
+
+def _watchdog_loop(
+    policy_service: Any,  # PolicyService (evita import circular)
+    stop_event: threading.Event,
+) -> None:
+    """Loop del watchdog: cada _WATCHDOG_INTERVAL segundos chequea agentes running."""
+    log.info("watchdog started (interval=%ds)", _WATCHDOG_INTERVAL)
+
+    while not stop_event.is_set():
+        try:
+            conn = _db_conn()
+            try:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute(
+                        """SELECT id, role, pid, started_at
+                           FROM agent_sessions
+                           WHERE status = 'running'
+                             AND pid IS NOT NULL
+                             AND started_at IS NOT NULL
+                           LIMIT 50"""
+                    )
+                    running = cur.fetchall()
+            finally:
+                conn.close()
+
+            for row in running:
+                session_id = row["id"]
+                role = row["role"]
+                pid = row["pid"]
+                started_at = row["started_at"]
+
+                if not pid or not started_at:
+                    continue
+
+                # Obtener max_runtime_minutes de la policy
+                try:
+                    role_policy = policy_service.get_role(role)
+                    max_minutes = role_policy.get("max_runtime_minutes", 120)
+                except (KeyError, AttributeError):
+                    max_minutes = 120  # fallback conservador
+
+                _enforce_timeout(session_id, role, pid, started_at, max_minutes)
+
+        except Exception:  # noqa: BLE001
+            log.exception("watchdog error en ciclo")
+
+        stop_event.wait(_WATCHDOG_INTERVAL)
+
+    log.info("watchdog stopped")
+
+
 class SpawnerService:
     """Gestiona el ciclo de vida de sub-agentes goosed.
 
@@ -223,6 +357,34 @@ class SpawnerService:
         self._policy = policy_service
         # Mapa en memoria: session_id → Popen; para poder hacer kill sin ir a DB
         self._processes: dict[str, subprocess.Popen] = {}
+        # Watchdog thread (issue #113)
+        self._watchdog_stop = threading.Event()
+        self._watchdog_thread: threading.Thread | None = None
+
+    def start_watchdog(self) -> None:
+        """Arranca el watchdog thread de timeout enforcement (issue #113).
+
+        El watchdog monitorea agentes running cada 10s y mata automáticamente
+        los que excedieron max_runtime_minutes. Daemon thread: no bloquea el
+        shutdown del proceso.
+        """
+        if self._watchdog_thread is not None and self._watchdog_thread.is_alive():
+            log.warning("watchdog thread ya está corriendo")
+            return
+        self._watchdog_stop.clear()
+        self._watchdog_thread = threading.Thread(
+            target=_watchdog_loop,
+            args=(self._policy, self._watchdog_stop),
+            name="watchdog-timeout",
+            daemon=True,
+        )
+        self._watchdog_thread.start()
+        log.info("watchdog: thread started (interval=%ds)", _WATCHDOG_INTERVAL)
+
+    def stop_watchdog(self) -> None:
+        """Detiene el watchdog thread."""
+        self._watchdog_stop.set()
+        log.info("watchdog: stop signal sent")
 
     def spawn(self, role: str, goal: str) -> dict:
         """Lanza un sub-agente goosed con la config filtrada para el rol.

@@ -306,6 +306,20 @@ def send_instruction(agent_id: str, text: str) -> dict:
         return {"error": str(exc)}
 
 
+@mcp.tool()
+def get_watchdog_status() -> dict:
+    """Estado del watchdog de timeout enforcement (issue #113).
+
+    Retorna:
+        {"watchdog_running": bool, "watchdog_interval_seconds": int}
+    """
+    spw = _spw()
+    return {
+        "watchdog_running": spw._watchdog_thread is not None and spw._watchdog_thread.is_alive(),
+        "watchdog_interval_seconds": 10,
+    }
+
+
 def main() -> None:
     log.info(
         "starting (transport=%s, policies=%s)",
@@ -314,6 +328,11 @@ def main() -> None:
     )
     # Eager init para fallar rápido si policies.yaml está mal.
     _svc()
+    # Arrancar watchdog de timeout enforcement (issue #113)
+    try:
+        _spw().start_watchdog()
+    except Exception:  # noqa: BLE001
+        log.exception("failed to start watchdog — continuing without it")
     mcp.run(transport=_MCP_TRANSPORT)
 
 
