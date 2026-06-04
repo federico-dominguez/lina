@@ -241,10 +241,10 @@ DECISION: ✅ COMPLETE / 🔄 REITERATE"""
     
     # ── Base steps by label ──
     steps_map = {
-        "bug":       [step("Analyze","lina",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600)],
+        "bug":       [step("Analyze","lina",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600), step("E2E","cline",900)],
                     "memory":    [step("Analyze","lina",900), step("Dev","cline",1800), step("Review","gemma",600), step("Test","cline",600), step("E2E","cline",900), step("Analysis","goose",600), step("Decision","lina",300)],
-        "refactor":  [step("Analyze","lina",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600)],
-        "enhancement": [step("Analyze","lina",600), step("Research","gemma",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600)],
+        "refactor":  [step("Analyze","lina",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600), step("E2E","cline",900)],
+        "enhancement": [step("Analyze","lina",600), step("Research","gemma",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600), step("E2E","cline",900)],
         "docs":      [step("Dev","cline",600), step("Doc","cline",300)],
         "infra":     [step("Analyze","lina",600), step("Dev","cline",1200), step("Test","cline",600)],
         "security":  [step("Analyze","lina",600), step("Research","gemma",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600)],
