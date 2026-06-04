@@ -76,3 +76,11 @@ tests/e2e/telegram/.sessions/daemon/
 limpiza-audit/
 comm/*.session*
 comm/__pycache__/
+
+# ─── Generated / transient files ─────────────────────────────────────────
+.cline_sync_offset
+*.session
+message.txt
+pipeline/
+comm/send_report.py
+bin/goose-official-linux-amd64

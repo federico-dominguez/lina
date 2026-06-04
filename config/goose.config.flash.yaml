@@ -1,0 +1,48 @@
+# Goose Flash — DeepSeek Flash + Google Search MCP
+# DeepSeek razona, decide buscar, y llama al MCP de Google Search (Gemini grounding)
+# DuckDuckGo Search como respaldo
+
+GOOSE_TELEMETRY_ENABLED: "false"
+GOOSE_MAX_TURNS: 100
+GOOSE_GATEWAY_MAX_TURNS: 50
+GOOSE_SUBAGENT_MAX_TURNS: 200
+GOOSE_CONTEXT_STRATEGY: summarize
+GOOSE_DISABLE_AUTO_SESSION_TITLES: "true"
+GOOSE_TOOL_CALL_CUTOFF: 50
+
+extensions:
+  # Google Search MCP — llama directo a Gemini API con googleSearch grounding
+  google-search:
+    name: google-search
+    type: stdio
+    cmd: uv
+    args:
+      - run
+      - --directory
+      - /app/mcps/google-search
+      - python
+      - -m
+      - google_search_mcp.server
+    enabled: true
+    timeout: 60
+
+  # DuckDuckGo Search — respaldo
+  duckduckgo-search:
+    name: duckduckgo-search
+    type: stdio
+    cmd: uvx
+    args:
+      - duckduckgo-mcp-server
+    enabled: true
+    timeout: 300
+
+providers:
+  custom_deepseek:
+    enabled: true
+    model: deepseek-v4-flash
+    configured: true
+active_provider: custom_deepseek
+
+gateway_configs: []
+gateway_pairings: []
+gateway_pending_codes: []
