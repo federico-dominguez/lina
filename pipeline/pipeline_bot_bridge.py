@@ -89,18 +89,38 @@ async def _send(bot_name: str, text: str, timeout: int, last_n: int = 0) -> str:
 
             got_new = False
             for msg in msgs:
-                if msg.id in seen or msg.id <= last_id:
+                if msg.id not in seen and msg.id > last_id:
+                    # New message — process normally
+                    pass
+                elif msg.id in seen and msg.id > last_id:
+                    # Already seen — skip
                     continue
+                elif msg.id <= last_id:
+                    # Already known — skip
+                    continue
+                
+                # Check for edits: message already in seen but text changed
                 sender = msg.sender
                 if not sender or not sender.username:
                     continue
                 if sender.username.lower().lstrip("@") != username.lower().lstrip("@"):
                     continue
-                seen.add(msg.id)
-                got_new = True
+                
                 t = (msg.text or "").strip()
-                messages.append((msg.id, t))
-                print(f"    📥 msg#{msg.id} ({len(t)} chars)")
+                is_edit = msg.id in seen
+                
+                if not is_edit:
+                    seen.add(msg.id)
+                    messages.append((msg.id, t))
+                    got_new = True
+                    print(f"    📥 msg#{msg.id} ({len(t)} chars)")
+                else:
+                    # Edit detected — update text and treat as new
+                    messages = [(mid, mt) for mid, mt in messages if mid != msg.id]
+                    messages.append((msg.id, t))
+                    seen.add(msg.id)
+                    got_new = True
+                    print(f"    📝 msg#{msg.id} EDIT → ({len(t)} chars)")
 
             if got_new:
                 idle_since = None
@@ -109,7 +129,12 @@ async def _send(bot_name: str, text: str, timeout: int, last_n: int = 0) -> str:
                     idle_since = time.time()
                 elif time.time() - idle_since >= SILENCE_TIMEOUT:
                     messages.sort(key=lambda x: x[0])
-                    filtered = messages[-last_n:] if last_n else messages
+                    # Take last_n messages, but prefer non-thinking ones
+                    if last_n:
+                        non_thinking = [m for m in messages if not m[1].startswith(("💭", "Razonando", "razonando"))]
+                        filtered = non_thinking[-last_n:] if len(non_thinking) >= last_n else messages[-last_n:]
+                    else:
+                        filtered = messages
                     total = sum(len(m[1]) for m in messages)
                     print(f"  ✅ @{username} completado ({len(seen)} msgs, {total} chars, last={len(filtered)})")
                     await client.disconnect()
