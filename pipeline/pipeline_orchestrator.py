@@ -2,14 +2,14 @@
 pipeline_orchestrator — Pipeline inteligente sobre issues reales del repo.
 
 Cada paso recibe prompts diseñados para su rol específico.
-Se comunican via comm_messages DB (Comm Bridge) y GitHub Issues (documentación).
+Se comunican via Telegram (visible en el grupo Comm) y GitHub Issues (documentación).
 """
 
 import json, time, os, sys, re, subprocess
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from pipeline_comm_bridge import send as comm_send
+from pipeline_bot_bridge import send as tg_send
 
 REPO = "federico-dominguez/lina"
 WORKSPACE = "/home/user/lina"
@@ -96,11 +96,15 @@ def resolve_steps(issue):
     labels_str = " ".join(labels)
     issue_num = issue.get("number", "?")
     
-    # ── Exclude labels ──
-    for exclude in ["analysis", "design", "architecture", "pipeline-skip"]:
+    # ── Exclude labels (only if they are the ONLY relevant label) ──
+    has_explicit = any(l in labels_str for l in ["bug", "memory", "enhancement", "refactor", "docs", "infra", "security"])
+    for exclude in ["analysis", "design", "pipeline-skip"]:
         if exclude in labels:
             print(f"  ⏭️ Issue con label '{exclude}' — skip pipeline")
             return []
+    if "architecture" in labels and not has_explicit:
+        print(f"  ⏭️ Issue solo con label 'architecture' — skip pipeline")
+        return []
     
     # ── Helper: step factory ──
     def step(name, bot, timeout, extra=""):
@@ -117,10 +121,7 @@ CRÍTICO: 2 archivos máximo. Si ya entendés, producí el plan directo.
 
 Terminá con:
 ---
-RESUMEN: 3 líneas con lo más importante.
-
-⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
-## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
+RESUMEN: 3 líneas con lo más importante.""",
             "Research": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
 Tu rol: RESEARCH ENGINEER. Investigá para la implementación.
 
@@ -131,10 +132,7 @@ Tu rol: RESEARCH ENGINEER. Investigá para la implementación.
 
 Terminá con:
 ---
-RESUMEN: 3 líneas o "Sin hallazgos adicionales".
-
-⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
-## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
+RESUMEN: 3 líneas o "Sin hallazgos adicionales".""",
             "Dev": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
 Tu rol: DEVELOPER. Implementá la solución con estándar profesional.
 
@@ -155,10 +153,7 @@ Pasos:
 
 Terminá con:
 ---
-RESUMEN: branch | archivos | tests pasan (SÍ/NO)
-
-⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
-## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
+RESUMEN: branch | archivos | tests pasan (SÍ/NO)""",
             "Review": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
 Tu rol: CODE REVIEWER. Revisá la implementación de Cline.
 
@@ -170,10 +165,7 @@ Tu rol: CODE REVIEWER. Revisá la implementación de Cline.
 
 Terminá con:
 ---
-RESUMEN: ✅ Aprobado / ❌ Rechazado + razón.
-
-⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
-## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
+RESUMEN: ✅ Aprobado / ❌ Rechazado + razón.""",
             "Test": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
 Tu rol: QA. Validá la implementación rigurosamente.
 
@@ -184,10 +176,7 @@ Tu rol: QA. Validá la implementación rigurosamente.
 
 Terminá con:
 ---
-RESUMEN: ✅ tests OK / ❌ FAIL + cuáles fallaron.
-
-⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
-## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
+RESUMEN: ✅ tests OK / ❌ FAIL + cuáles fallaron.""",
             "Doc": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
 Tu rol: DOCS. Documentá los cambios realizados.
 
@@ -198,10 +187,7 @@ Tu rol: DOCS. Documentá los cambios realizados.
 
 Terminá con:
 ---
-RESUMEN: docs actualizados o "Sin cambios".
-
-⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
-## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
+RESUMEN: docs actualizados o "Sin cambios".""",
             "Analysis": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
 Tu rol: ANALYST. Verificá la calidad general de la implementación.
 
@@ -213,48 +199,55 @@ Tu rol: ANALYST. Verificá la calidad general de la implementación.
 
 Terminá con:
 ---
-RESUMEN: ✅ Aprobado / 🔄 Reiterar + cambios.
+RESUMEN: ✅ Aprobado / 🔄 Reiterar + cambios.""",
+            "E2E": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
+Tu rol: QA E2E. Ejecutá los tests end-to-end reales via Telegram.
 
-⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
-## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
-            "Decision": f"""Revisa el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
-Tu rol: TECH LEAD DECISION. BASADO EN TODOS LOS PASOS PREVIOS.
+📋 Tarea:
+1. Corré los e2e tests: `python3 -m pytest tests/e2e/telegram/scenarios/test_pipeline_e2e.py -v --timeout=600 2>&1`
+2. Corré los e2e tests de knowledge: `python3 -m pytest tests/e2e/telegram/scenarios/test_knowledge_e2e.py -v --timeout=120 2>&1`
+3. Reportá: cuántos tests pasaron, cuántos fallaron, métricas de latencia
 
-CHECKLIST:
-1. El codigo implementa TODO lo que pide el issue? (gh issue view)
-2. Los tests pasan? (gh pr view PR --json mergeable)  
-3. El PR es mergeable?
-4. Codigo limpio y profesional?
+CRÍTICO: Si los e2e tests fallan → reportá exactamente qué test y por qué.
 
-SI TODO OK: EJECUTA:
-  1. gh pr merge PR --squash
-  2. gh issue close #{issue_num}
-  3. DECISION: COMPLETE
-SI FALLA ALGO: DECISION: REITERATE + detallar cambios exactos que faltan.
-
-Termina con:
+Terminá con:
 ---
-DECISION: COMPLETE / REITERATE
-RAZON: ...
-PR: #NUMERO
-MERGE: ✓ (si COMPLETE)
-COMMIT: hash del squash merge
+RESUMEN: ✅ E2E OK (X/Y tests) / ❌ E2E FAIL (detalles)""",
+            "E2E": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
+Tu rol: QA E2E. Ejecutá los tests end-to-end reales via Telegram.
 
-⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
-## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión"""
+📋 Tarea:
+1. Corré los e2e tests: `python3 -m pytest tests/e2e/telegram/scenarios/test_pipeline_e2e.py -v --timeout=600 2>&1`
+2. Corré los e2e tests de knowledge: `python3 -m pytest tests/e2e/telegram/scenarios/test_knowledge_e2e.py -v --timeout=120 2>&1`
+3. Reportá: cuántos tests pasaron, cuántos fallaron, métricas de latencia
+
+CRÍTICO: Si los e2e tests fallan → reportá exactamente qué test y por qué.
+
+Terminá con:
+---
+RESUMEN: ✅ E2E OK (X/Y tests) / ❌ E2E FAIL (detalles)""",
+
+            "Decision": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
+Tu rol: TECH LEAD DECISION. Basado en Analysis, Review y Test:
+✅ COMPLETE → cerrar issue.
+🔄 REITERATE → volver a Dev con cambios específicos.
+
+Decisión final. Terminá con:
+---
+DECISION: ✅ COMPLETE / 🔄 REITERATE"""
         }
         p = prompts.get(name, extra)
         return {"name": name, "bot": bot, "timeout": timeout, "prompt": p}
     
     # ── Base steps by label ──
     steps_map = {
-        "bug":       [step("Analyze","lina",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600), step("Decision","lina",300)],
-        "memory":    [step("Analyze","lina",900), step("Dev","cline",1800), step("Review","gemma",600), step("Test","cline",600), step("Analysis","goose",600), step("Decision","lina",300)],
-        "refactor":  [step("Analyze","lina",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600), step("Decision","lina",300)],
-        "enhancement": [step("Analyze","lina",600), step("Research","gemma",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600), step("Decision","lina",300)],
-        "docs":      [step("Dev","cline",600), step("Doc","cline",300), step("Decision","lina",300)],
-        "infra":     [step("Analyze","lina",600), step("Dev","cline",1200), step("Test","cline",600), step("Decision","lina",300)],
-        "security":  [step("Analyze","lina",600), step("Research","gemma",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600), step("Decision","lina",300)],
+        "bug":       [step("Analyze","lina",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600)],
+                    "memory":    [step("Analyze","lina",900), step("Dev","cline",1800), step("Review","gemma",600), step("Test","cline",600), step("E2E","cline",900), step("Analysis","goose",600), step("Decision","lina",300)],
+        "refactor":  [step("Analyze","lina",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600)],
+        "enhancement": [step("Analyze","lina",600), step("Research","gemma",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600)],
+        "docs":      [step("Dev","cline",600), step("Doc","cline",300)],
+        "infra":     [step("Analyze","lina",600), step("Dev","cline",1200), step("Test","cline",600)],
+        "security":  [step("Analyze","lina",600), step("Research","gemma",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600)],
     }
     
     for label_key, steps in steps_map.items():
@@ -331,7 +324,7 @@ def run_pipeline(feature_or_issue):
             if "analyze" in sname.lower():
                 context += f"\n\nIssue description:\n{issue_body[:500]}"
 
-            resp = comm_send(bot, context, timeout=timeout, last_n=5)
+            resp = tg_send(bot, context, timeout=timeout, last_n=5)
             step_outputs[sname] = resp
 
             log(f"  {sname}: {len(resp)} chars")
@@ -344,18 +337,11 @@ def run_pipeline(feature_or_issue):
             if _check_stop():
                 raise SystemExit("🛑 Detenido por usuario")
 
-        # Determine pass/fail from LINA Decision step
-        decision_out = step_outputs.get("Decision", "")
-        if not decision_out:
-            result["passed"] = False
-        elif "COMPLETE" in decision_out.upper()[:200]:
-            result["passed"] = True
-        elif "REITERATE" in decision_out.upper()[:200]:
-            result["passed"] = False
-            log("🔁 REITERATE — issue quedara abierto para iterar")
-        else:
-            test_out = step_outputs.get("Test", "")
-            result["passed"] = "FAIL" not in test_out.upper()[:200]
+        # Determine pass/fail from test output
+        test_out = step_outputs.get("Test", "")
+        has_pass = "FAIL" not in test_out.upper()[:200]
+        has_fail = "❌ FAIL" in test_out or ("FAIL" in test_out.upper()[:100] and "NO" not in test_out.upper()[:100])
+        result["passed"] = has_pass and not has_fail
 
         # ── Close issue ──
         summary = (
@@ -401,7 +387,7 @@ if __name__ == "__main__":
     else:
         feat = " ".join(args) or "Crear un endpoint /health que verifique PostgreSQL"
     
-    print(f"\n🚀 Pipeline GitHub + Comm Bridge: '{feat}'\n")
+    print(f"\n🚀 Pipeline GitHub + Telegram: '{feat}'\n")
     r = run_pipeline(feat)
     print(f"\n📊 Resultado: {'✅ PASÓ' if r['passed'] else '❌ FALLÓ'} ({r['duration']:.0f}s)")
     print(f"🐙 https://github.com/{REPO}/issues/{r.get('issue', '?')}")
