@@ -276,6 +276,25 @@ services:
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
       DEEPSEEK_PLATFORM_TOKEN: ${DEEPSEEK_PLATFORM_TOKEN:-}
 
+  # ─── MCP: lina-knowledge ─────────────────────────────────────────────────
+  lina-mcp-knowledge:
+    <<: *mcp-defaults
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.mcp
+      args:
+        MCP_DIR: mcps/lina-knowledge
+        MCP_CMD: lina-knowledge
+    image: lina-mcp-knowledge:latest
+    depends_on:
+      lina-db:
+        condition: service_healthy
+    environment:
+      MCP_TRANSPORT: streamable-http
+      MCP_PORT: "8000"
+      LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+
   # ─── MCP: lina-github ──────────────────────────────────────────────────────
   lina-mcp-github:
     <<: *mcp-defaults
@@ -387,6 +406,7 @@ services:
       - lina-mcp-systemd-user
       - lina-mcp-moodle
       - lina-mcp-db
+      - lina-mcp-knowledge
       - lina-mcp-github
       - lina-mcp-gitlab
       - lina-mcp-gcalendar
@@ -405,7 +425,7 @@ services:
       - "127.0.0.1:8108:8108"
       - "127.0.0.1:8109:8109"
       - "127.0.0.1:8110:8110"
-      - "127.0.0.1:8111:8111"
+      - "127.0.0.1:8112:8112"
     healthcheck:
       test: ["CMD", "nginx", "-t"]
       interval: 30s
