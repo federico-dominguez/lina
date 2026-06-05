@@ -14,8 +14,8 @@ Uso:
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 import logging
+from contextlib import suppress
 
 logger = logging.getLogger(__name__)
 
