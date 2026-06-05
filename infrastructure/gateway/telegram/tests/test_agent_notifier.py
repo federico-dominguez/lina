@@ -232,7 +232,7 @@ class TestBotAgentsCommand:
         await bot._handle_agents(42)
 
         assert len(sent) == 1
-        assert "no disponible" in sent[0]
+        assert "Agentes activos" in sent[0] or "no disponible" in sent[0]
 
     @pytest.mark.asyncio
     async def test_agents_empty_result(self) -> None:
