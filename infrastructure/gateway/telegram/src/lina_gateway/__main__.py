@@ -1,8 +1,13 @@
-"""Entry point: python -m lina_gateway."""
+"""Multi-bot gateway entry point: python -m lina_gateway.
+
+Runs N Bot instances in the same process (one per Telegram bot token).
+Each bot connects to its own goosed endpoint and maintains independent state.
+"""
+
+from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import signal
 from contextlib import suppress
 
@@ -11,6 +16,8 @@ from .boot_hook import on_boot, on_shutdown, record_balance_snapshot
 from .bot import Bot
 from .config import Config
 from .observe import create_observer
+
+logger = logging.getLogger(__name__)
 
 
 def main() -> None:
@@ -23,70 +30,83 @@ def main() -> None:
 
 async def _run() -> None:
     cfg = Config()
-    bot = Bot(cfg)
+    shared = cfg.shared
+    bot_configs = cfg.bots
 
-    # ── Boot notification (best-effort) ───────────────────────────────────────
-    await on_boot(bot.tg, cfg.lina_db_url, cfg.notify_chat_ids)
+    logger.info("Multi-bot gateway starting — %d bot(s) configured", len(bot_configs))
 
-    # ── Balance snapshot on startup (best-effort) ─────────────────────────────
-    if cfg.lina_db_url and cfg.deepseek_api_key:
-        asyncio.create_task(
-            record_balance_snapshot(cfg.lina_db_url, cfg.deepseek_api_key, source="startup")
+    # ── Create Bot instances ─────────────────────────────────────────────────
+    bots: list[Bot] = []
+    bot_tasks: list[asyncio.Task] = []
+    notifier_tasks: list[asyncio.Task] = []
+
+    for bot_cfg in bot_configs:
+        bot = Bot(bot_cfg, shared)
+        bots.append(bot)
+
+        # ── Observer per bot (each on a different WS port) ────────────────────
+        agent_name = bot_cfg.name.lower()
+        observer = create_observer(
+            port=bot_cfg.observe_port,
+            db_url=shared.lina_db_url,
+            goosed_url=bot_cfg.goosed_url,
+            agent=agent_name,
         )
+        await observer.start()
+        bot.set_observer(observer)
+        observer.set_bot(bot)
+
+        # ── Fire off the polling loop ────────────────────────────────────────
+        bot_tasks.append(asyncio.create_task(bot.run(), name=f"bot-{agent_name}"))
+
+        # ── Boot notification ────────────────────────────────────────────────
+        await on_boot(bot.tg, shared.lina_db_url, bot_cfg.notify_chat_ids)
+
+        # ── Balance snapshot on startup ──────────────────────────────────────
+        if shared.lina_db_url and shared.deepseek_api_key:
+            asyncio.create_task(
+                record_balance_snapshot(
+                    shared.lina_db_url, shared.deepseek_api_key, source=f"startup-{agent_name}"
+                )
+            )
+
+        # ── Agent notifier (one per bot that has notify_chat_ids) ────────────
+        if shared.lina_db_url and bot_cfg.notify_chat_ids and shared.agent_poll_interval > 0:
+            notifier = AgentNotifier(
+                db_url=shared.lina_db_url,
+                tg=bot.tg,
+                chat_ids=bot_cfg.notify_chat_ids,
+                poll_interval=shared.agent_poll_interval,
+            )
+            notifier_tasks.append(
+                asyncio.create_task(notifier.run(), name=f"notifier-{agent_name}")
+            )
 
     # ── Graceful shutdown via SIGTERM / SIGINT ────────────────────────────────
     loop = asyncio.get_running_loop()
     stop = asyncio.Event()
     loop.add_signal_handler(signal.SIGTERM, stop.set)
     loop.add_signal_handler(signal.SIGINT, stop.set)
+    stop_task = asyncio.create_task(stop.wait(), name="stop")
 
-    observe_port = int(os.environ.get("OBSERVE_PORT", "9090"))
-    agent_name = os.environ.get("GOOSE_AGENT_NAME", "lina")
-    observer = create_observer(
-        port=observe_port,
-        db_url=cfg.lina_db_url,
-        goosed_url=cfg.goosed_url,
-        agent=agent_name,
-    )
-    await observer.start()
-    bot.set_observer(observer)
-    observer.set_bot(bot)
-    bot_task = loop.create_task(bot.run(), name="bot")
-    stop_task = loop.create_task(stop.wait(), name="stop")
+    # ── Wait for any task to complete (or stop signal) ───────────────────────
+    all_tasks = [*bot_tasks, stop_task, *notifier_tasks]
+    done, pending = await asyncio.wait(all_tasks, return_when=asyncio.FIRST_COMPLETED)
 
-    # ── Agent notifier — proactive push of sub-agent status to Telegram ───────
-    notifier_task: asyncio.Task | None = None
-    if cfg.lina_db_url and cfg.notify_chat_ids and cfg.agent_poll_interval > 0:
-        notifier = AgentNotifier(
-            db_url=cfg.lina_db_url,
-            tg=bot.tg,
-            chat_ids=cfg.notify_chat_ids,
-            poll_interval=cfg.agent_poll_interval,
-        )
-        notifier_task = loop.create_task(notifier.run(), name="agent-notifier")
-
-    tasks_to_watch: set[asyncio.Task] = {bot_task, stop_task}
-    if notifier_task is not None:
-        tasks_to_watch.add(notifier_task)
-
-    done, pending = await asyncio.wait(tasks_to_watch, return_when=asyncio.FIRST_COMPLETED)
+    # ── Cancel everything else ───────────────────────────────────────────────
     for t in pending:
         t.cancel()
         with suppress(asyncio.CancelledError):
             await t
 
-    # Consume bot_task result to surface any unhandled exception in logs.
-    if bot_task in done and not bot_task.cancelled():
-        exc = bot_task.exception()
-        if exc is not None:
-            logging.getLogger(__name__).error("Bot task exited with error: %s", exc)
+    # ── Surface any bot errors ───────────────────────────────────────────────
+    for bot_task in bot_tasks:
+        if bot_task in done and not bot_task.cancelled():
+            exc = bot_task.exception()
+            if exc is not None:
+                logger.error("Bot task exited with error: %s", exc)
 
-    # ── Shutdown notification (best-effort) ───────────────────────────────────
-    # Only send "Reiniciándome" when we received an explicit stop signal.
-    # If bot_task ended on its own (unexpected), skip to avoid noise.
+    # ── Shutdown notifications ───────────────────────────────────────────────
     if stop_task in done:
-        await on_shutdown(bot.tg, cfg.lina_db_url, cfg.notify_chat_ids)
-
-
-if __name__ == "__main__":
-    main()
+        for bot in bots:
+            await on_shutdown(bot.tg, shared.lina_db_url, [])

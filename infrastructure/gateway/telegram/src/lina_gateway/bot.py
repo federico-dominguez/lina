@@ -21,7 +21,7 @@ import httpx
 
 from .boot_hook import get_smart_context, save_message, save_token_usage, save_trace
 from .commands.audit import handle_audit
-from .config import Config
+from .config import BotConfig, SharedConfig
 from .formatter import (
     format_tool_status,
     format_with_thinking,
@@ -66,14 +66,22 @@ _GOOSED_RESTART_TIMEOUT = 90.0  # seconds to wait for goosed to come back up
 
 
 class Bot:
-    def __init__(self, cfg: Config) -> None:
-        self._cfg = cfg
-        self._tg = TelegramClient(cfg.bot_token, poll_timeout=cfg.poll_timeout)
+    """A single bot instance: one Telegram client + one goosed endpoint.
+
+    Multiple Bot instances can coexist in the same process (multi-bot gateway),
+    each with its own Telegram bot token and goosed URL.
+    """
+
+    def __init__(self, bot_cfg: BotConfig, shared: SharedConfig) -> None:
+        self._cfg = bot_cfg
+        self._shared = shared
+        self._name = bot_cfg.name
+        self._tg = TelegramClient(bot_cfg.bot_token, poll_timeout=shared.poll_timeout)
         self._goosed = GoosedClient(
-            base_url=cfg.goosed_url,
-            secret=cfg.goosed_secret,
-            connect_timeout=cfg.goosed_connect_timeout,
-            read_timeout=cfg.goosed_read_timeout,
+            base_url=bot_cfg.goosed_url,
+            secret=bot_cfg.goosed_secret,
+            connect_timeout=shared.goosed_connect_timeout,
+            read_timeout=shared.goosed_read_timeout,
         )
         # chat_id → session_id (persistent per chat)
         self._sessions: dict[int, str] = {}
@@ -160,7 +168,7 @@ class Bot:
             "cline": "s_cline_bot",
             "gemma": "s_gemma_bot",
         }
-        my_name = self._cfg.bot_name.lower()
+        my_name = self._name.lower()
         expected = mapping.get(my_name)
         return username.lower() == expected
 
@@ -337,7 +345,7 @@ class Bot:
         # ── /audit ── consulta de acciones recientes ─────────────────────
         if text.strip().lower().startswith("/audit"):
             args = text.strip()[len("/audit") :].strip()
-            await handle_audit(chat_id, args, self._tg, self._cfg.lina_db_url)
+            await handle_audit(chat_id, args, self._tg, self._shared.lina_db_url)
             return
 
         # ── /voz ── respond with voice (TTS) ──────────────────────────
@@ -378,17 +386,17 @@ class Bot:
         if not await self._goosed.is_alive():
             # goosed may be mid-restart — wait briefly before giving up
             status_id = await self._tg.send_message(
-                chat_id, f"⏳ {self._cfg.bot_name} se está reiniciando, un momento..."
+                chat_id, f"⏳ {self._name} se está reiniciando, un momento..."
             )
             recovered = await self._wait_for_goosed()
             if not recovered:
                 await self._tg.edit_message(
                     chat_id,
                     status_id,
-                    f"⚠️ {self._cfg.bot_name} no está disponible. Intentá de nuevo en unos segundos.",
+                    f"⚠️ {self._name} no está disponible. Intentá de nuevo en unos segundos.",
                 )
                 return
-            await self._tg.edit_message(chat_id, status_id, f"✅ {self._cfg.bot_name} de vuelta.")
+            await self._tg.edit_message(chat_id, status_id, f"✅ {self._name} de vuelta.")
 
         # ── Typing indicator ────────────────────────────────────────────
         await self._tg.send_chat_action(chat_id, "typing")
@@ -413,7 +421,7 @@ class Bot:
         try:
             import asyncpg
 
-            conn = await asyncpg.connect(self._cfg.lina_db_url, timeout=5)
+            conn = await asyncpg.connect(self._shared.lina_db_url, timeout=5)
             try:
                 await conn.execute(
                     "UPDATE agent_sessions SET status='killed', ended_at=NOW(), updated_at=NOW()"
@@ -431,7 +439,7 @@ class Bot:
         try:
             import asyncpg
 
-            conn = await asyncpg.connect(self._cfg.lina_db_url, timeout=5)
+            conn = await asyncpg.connect(self._shared.lina_db_url, timeout=5)
             try:
                 await conn.execute(
                     "UPDATE agent_sessions SET status='paused', updated_at=NOW()"
@@ -449,7 +457,7 @@ class Bot:
         try:
             import asyncpg
 
-            conn = await asyncpg.connect(self._cfg.lina_db_url, timeout=5)
+            conn = await asyncpg.connect(self._shared.lina_db_url, timeout=5)
             try:
                 await conn.execute(
                     "UPDATE agent_sessions SET status='running', updated_at=NOW()"
@@ -467,7 +475,7 @@ class Bot:
         try:
             import asyncpg
 
-            conn = await asyncpg.connect(self._cfg.lina_db_url, timeout=5)
+            conn = await asyncpg.connect(self._shared.lina_db_url, timeout=5)
             try:
                 result = await conn.execute(
                     "UPDATE agent_sessions SET goal=$2, updated_at=NOW()"
@@ -554,7 +562,7 @@ class Bot:
 
     async def _handle_cline_status(self, chat_id: int) -> None:
         """Muestra el estado de CLINE — cross-agent status check."""
-        db_url = self._cfg.lina_db_url
+        db_url = self._shared.lina_db_url
         if not db_url:
             await self._tg.send_message(chat_id, "⚠️ lina-db no disponible.")
             return
@@ -601,7 +609,7 @@ class Bot:
 
     async def _handle_lina_status(self, chat_id: int) -> None:
         """Muestra el estado de LINA — cross-agent status check."""
-        db_url = self._cfg.lina_db_url
+        db_url = self._shared.lina_db_url
         if not db_url:
             await self._tg.send_message(chat_id, "⚠️ lina-db no disponible.")
             return
@@ -631,7 +639,7 @@ class Bot:
             return
 
         parts = [
-            f"<b>🩷 Estado de {self._cfg.bot_name}</b>",
+            f"<b>🩷 Estado de {self._name}</b>",
             "",
             f"• Órdenes creadas: <b>{orders['completed'] or 0}</b> completadas, <b>{orders['pending'] or 0}</b> pendientes",
             f"• En ejecución: <b>{orders['running'] or 0}</b>",
@@ -649,7 +657,7 @@ class Bot:
         Sin pasar por goosed — consulta directo a lina-db para velocidad.
         Si *edit_msg_id* se pasa, edita ese mensaje en lugar de crear uno nuevo.
         """
-        db_url = self._cfg.lina_db_url
+        db_url = self._shared.lina_db_url
         if not db_url:
             await self._tg.send_message(chat_id, "⚠️ lina-db no disponible.")
             return
@@ -727,7 +735,7 @@ class Bot:
 
     async def _handle_agent_status(self, chat_id: int, agent_id_prefix: str) -> None:
         """Show detailed status for a single agent, matched by id prefix."""
-        db_url = self._cfg.lina_db_url
+        db_url = self._shared.lina_db_url
         if not db_url:
             await self._tg.send_message(chat_id, "⚠️ lina-db no disponible.")
             return
@@ -786,7 +794,7 @@ class Bot:
 
     async def _handle_agent_events(self, chat_id: int, agent_id_prefix: str) -> None:
         """Show last 10 events for an agent, matched by id prefix."""
-        db_url = self._cfg.lina_db_url
+        db_url = self._shared.lina_db_url
         if not db_url:
             await self._tg.send_message(chat_id, "⚠️ lina-db no disponible.")
             return
@@ -873,7 +881,7 @@ class Bot:
         # First message to this chat in this process lifetime: inject previous context
         if chat_id not in self._sessions_initialized:
             self._sessions_initialized.add(chat_id)
-            if self._cfg.lina_db_url and session_is_new:
+            if self._shared.lina_db_url and session_is_new:
                 await self._maybe_inject_context(chat_id, session_id, cancel_event)
 
         # Accumulators for the current turn
@@ -1007,7 +1015,7 @@ class Bot:
                             if first_send_ts is None:
                                 first_send_ts = time.monotonic()
                             thinking_bubble = StreamingBubble(
-                                tick=self._cfg.pacer_tick,
+                                tick=self._shared.pacer_tick,
                                 edit_fn=_edit_thinking_bubble,
                             )
                             thinking_bubble.start()
@@ -1033,7 +1041,7 @@ class Bot:
                             if first_send_ts is None:
                                 first_send_ts = time.monotonic()
                             body_bubble = StreamingBubble(
-                                tick=self._cfg.pacer_tick,
+                                tick=self._shared.pacer_tick,
                                 edit_fn=_edit_body_bubble,
                             )
                             body_bubble.start()
@@ -1100,22 +1108,22 @@ class Bot:
             if _retry:
                 # Already retried once — give up gracefully
                 await self._tg.send_message(
-                    chat_id, f"⚠️ {self._cfg.bot_name} no está disponible. Intentá de nuevo."
+                    chat_id, f"⚠️ {self._name} no está disponible. Intentá de nuevo."
                 )
                 return
             status_id = await self._tg.send_message(
-                chat_id, f"⏳ {self._cfg.bot_name} se está reiniciando, un momento..."
+                chat_id, f"⏳ {self._name} se está reiniciando, un momento..."
             )
             recovered = await self._wait_for_goosed()
             if not recovered:
                 await self._tg.edit_message(
                     chat_id,
                     status_id,
-                    f"⚠️ {self._cfg.bot_name} no está disponible. Intentá de nuevo.",
+                    f"⚠️ {self._name} no está disponible. Intentá de nuevo.",
                 )
                 return
             await self._tg.edit_message(
-                chat_id, status_id, f"✅ {self._cfg.bot_name} de vuelta. Reprocesando..."
+                chat_id, status_id, f"✅ {self._name} de vuelta. Reprocesando..."
             )
             # Invalidate cached session — force ensure_session to create/resume fresh
             self._sessions.pop(chat_id, None)
@@ -1161,13 +1169,13 @@ class Bot:
             self._last_response[chat_id] = body_acc
 
         # Persist this turn for session recovery across restarts (best-effort)
-        if self._cfg.lina_db_url and text.strip() and body_acc.strip():
+        if self._shared.lina_db_url and text.strip() and body_acc.strip():
             asyncio.create_task(
                 self._persist_turn(session_id, text, body_acc, finish_token_state),
                 name=f"persist-turn-{chat_id}",
             )
         # Persist reasoning trace if thinking content was produced (best-effort, issue #62)
-        if self._cfg.lina_db_url and total_thinking_acc.strip():
+        if self._shared.lina_db_url and total_thinking_acc.strip():
             import hashlib
 
             prompt_hash = hashlib.sha256(text.encode()).hexdigest()
@@ -1186,7 +1194,7 @@ class Bot:
         token_state: TokenState | None = None,
     ) -> None:
         """Save a user+assistant turn to PostgreSQL. Silently swallows errors."""
-        db_url = self._cfg.lina_db_url
+        db_url = self._shared.lina_db_url
         if not db_url:
             return
         try:
@@ -1210,7 +1218,7 @@ class Bot:
         prompt_hash: str | None = None,
     ) -> None:
         """Persist the <think> block for this turn. Silently swallows errors (issue #62)."""
-        db_url = self._cfg.lina_db_url
+        db_url = self._shared.lina_db_url
         if not db_url:
             return
         try:
@@ -1237,7 +1245,7 @@ class Bot:
         once context is ready (or swallows errors silently if DB/goosed is down).
         Only called when ``ensure_session`` confirmed this is a *new* session.
         """
-        db_url = self._cfg.lina_db_url
+        db_url = self._shared.lina_db_url
         if not db_url:
             return
 
@@ -1340,9 +1348,7 @@ class Bot:
         elif action == "approve":
             # User approved a human input request — send approval as follow-up
             await self._tg.answer_callback_query(cq.id, "✅ Aprobado. Enviando respuesta...")
-            await self._tg.send_message(
-                cq.chat_id, f"✅ Aprobado — reenviando a {self._cfg.bot_name}…"
-            )
+            await self._tg.send_message(cq.chat_id, f"✅ Aprobado — reenviando a {self._name}…")
             cancel = self._cancels.get(cq.chat_id) or asyncio.Event()
             # Send "Sí, aprobado" as a new user message to LINA
             asyncio.create_task(
@@ -1360,9 +1366,7 @@ class Bot:
         elif action == "reject":
             # User rejected — send rejection as follow-up
             await self._tg.answer_callback_query(cq.id, "❌ Rechazado.")
-            await self._tg.send_message(
-                cq.chat_id, f"❌ Rechazado — reenviando a {self._cfg.bot_name}…"
-            )
+            await self._tg.send_message(cq.chat_id, f"❌ Rechazado — reenviando a {self._name}…")
             cancel = self._cancels.get(cq.chat_id) or asyncio.Event()
             asyncio.create_task(
                 self._reply(cq.chat_id, None, "No, no aprobado ❌", cancel),

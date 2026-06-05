@@ -539,78 +539,76 @@ services:
     mem_limit: 2g
     memswap_limit: 2g
 
-  # ─── CLINE Desktop — Telegram gateway para @s_cline_bot ─────────────────────
-  # Bot de Telegram independiente que se conecta a cline-goosed.
-  # Usa host network para alcanzar localhost:3001.
-  # Requiere configurar CLINE_BOT_TOKEN y DESKTOP_TRUSTED_USERS en .env
-  cline-gateway:
-    container_name: cline-gateway
+  # ─── Telegram Gateway Unificado — multi-bot (Issue #160) ─────────────────
+  # Un ÚNICO proceso Python que maneja los 3 bots de Telegram:
+  #   @s_lina_bot  → lina-goosed:3000   (Docker network)
+  #   @s_cline_bot → localhost:3001      (host.docker.internal)
+  #   @s_goose_bot → localhost:42359     (host.docker.internal)
+  #
+  # Ventajas: -1 GB RAM (3 × 512 MB → 1 × 512 MB), pool de conexiones compartido,
+  # logging centralizado, observe unificado.
+  #
+  # Cada bot se configura con vars MULTI_BOT_COUNT + BOT_1_*, BOT_2_*, BOT_3_*
+  # (ver config.py para la sintaxis completa).
+  lina-gateway:
+    container_name: lina-gateway
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.gateway
-    image: cline-gateway:latest
+    image: lina-gateway:latest
     restart: unless-stopped
-    network_mode: host
     depends_on:
       lina-db:
         condition: service_healthy
+      lina-goosed:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # alcanzar cline-goosed y goose local
     environment:
-      CLINE_BOT_TOKEN: ${CLINE_BOT_TOKEN:-${DESKTOP_BOT_TOKEN:-}}
-      GOOSED_URL: https://localhost:3001  # cline-goosed
-      LINA_SECRET_KEY: ${LINA_SECRET_KEY:-${GOOSE_SERVER__SECRET_KEY:-}}
-      GOOSE_SERVER_SECRET_KEY: ${LINA_SECRET_KEY:-${GOOSE_SERVER__SECRET_KEY:-}}
-      CLINE_TRUSTED_USERS: ${CLINE_TRUSTED_USERS:-${DESKTOP_TRUSTED_USERS:-}}
-      GATEWAY_BOT_NAME: ${GATEWAY_BOT_NAME:-Cline}
-      GATEWAY_PACER_TICK: "1.5"
-      TELEGRAM_POLL_TIMEOUT: "30"
-      LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@localhost:5432/lina
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
-      CLINE_NOTIFY_CHAT_IDS: ${CLINE_NOTIFY_CHAT_IDS:-${DESKTOP_NOTIFY_CHAT_IDS:-}}
-      OBSERVE_PORT: "9092"
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    profiles: ["desktop"]
-    # ── Memory limits: EL CULPABLE del OOM — límite estricto
-    # 512 MB es suficiente para un gateway Telegram normal.
-    # Si hay leak, OOM-kill local (Docker) mata solo este contenedor, no todo el servidor.
-    mem_limit: 512m
-    memswap_limit: 512m
+      # ── Multi-bot mode: 3 bots ──────────────────────────────────────────────
+      MULTI_BOT_COUNT: "3"
 
-  # ─── @s_goose_bot — Gateway para el goosed local (PC de Fede) ────────────
-  # Usa host network para alcanzar localhost:42359 (goosed local del usuario).
-  goose-gateway:
-    container_name: goose-gateway
-    build:
-      context: ../..
-      dockerfile: deploy/docker/Dockerfile.gateway
-    image: goose-gateway:latest
-    restart: unless-stopped
-    network_mode: host
-    depends_on:
-      lina-db:
-        condition: service_healthy
-    environment:
-      TELEGRAM_BOT_TOKEN: ${GOOSE_BOT_TOKEN:-}
-      GOOSED_URL: ${GOOSED_LOCAL_URL:-https://localhost:42359}
-      GOOSE_SERVER__SECRET_KEY: ${GOOSE_SECRET_KEY:-${GOOSE_BOT_SECRET_KEY:-}}
-      GOOSE_SERVER_SECRET_KEY: ${GOOSE_SECRET_KEY:-${GOOSE_BOT_SECRET_KEY:-}}
-      GOOSE_TRUSTED_USERS: ${GOOSE_TRUSTED_USERS:-${GOOSE_BOT_TRUSTED_USERS:-}}
-      GATEWAY_BOT_NAME: ${GATEWAY_BOT_NAME:-Goose}
+      # Bot 1 — LINA → lina-goosed (Docker network)
+      BOT_1_NAME: "LINA"
+      BOT_1_USERNAME: "s_lina_bot"
+      BOT_1_TOKEN: ${LINA_BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:-}}
+      BOT_1_GOOSED_URL: "https://lina-goosed:3000"
+      BOT_1_GOOSED_SECRET: ${LINA_SECRET_KEY:-${GOOSE_SERVER__SECRET_KEY:-}}
+      BOT_1_TRUSTED_USERS: ${LINA_TRUSTED_USERS:-${GOOSE_GATEWAY_TRUSTED_USERS:-}}
+      BOT_1_NOTIFY_CHAT_IDS: ${LINA_NOTIFY_CHAT_IDS:-${GATEWAY_NOTIFY_CHAT_IDS:-}}
+      BOT_1_OBSERVE_PORT: "9093"
+
+      # Bot 2 — Cline → cline-goosed (host network via host.docker.internal:3001)
+      BOT_2_NAME: "Cline"
+      BOT_2_USERNAME: "s_cline_bot"
+      BOT_2_TOKEN: ${CLINE_BOT_TOKEN:-${DESKTOP_BOT_TOKEN:-}}
+      BOT_2_GOOSED_URL: "https://host.docker.internal:3001"
+      BOT_2_GOOSED_SECRET: ${CLINE_SECRET_KEY:-${GOOSE_SERVER__SECRET_KEY:-}}
+      BOT_2_TRUSTED_USERS: ${CLINE_TRUSTED_USERS:-${DESKTOP_TRUSTED_USERS:-}}
+      BOT_2_NOTIFY_CHAT_IDS: ${CLINE_NOTIFY_CHAT_IDS:-${DESKTOP_NOTIFY_CHAT_IDS:-}}
+      BOT_2_OBSERVE_PORT: "9092"
+
+      # Bot 3 — Goose → goosed local del usuario (host.docker.internal:42359)
+      BOT_3_NAME: "Goose"
+      BOT_3_USERNAME: "s_goose_bot"
+      BOT_3_TOKEN: ${GOOSE_BOT_TOKEN:-}
+      BOT_3_GOOSED_URL: ${GOOSE_LOCAL_URL:-https://host.docker.internal:42359}
+      BOT_3_GOOSED_SECRET: ${GOOSE_SECRET_KEY:-${GOOSE_BOT_SECRET_KEY:-}}
+      BOT_3_TRUSTED_USERS: ${GOOSE_TRUSTED_USERS:-${GOOSE_BOT_TRUSTED_USERS:-}}
+      BOT_3_NOTIFY_CHAT_IDS: ${GOOSE_NOTIFY_CHAT_IDS:-${GOOSE_BOT_NOTIFY_CHAT_IDS:-}}
+      BOT_3_OBSERVE_PORT: "9091"
+
+      # ── Shared settings ─────────────────────────────────────────────────────
+      LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
       GATEWAY_PACER_TICK: "1.5"
       TELEGRAM_POLL_TIMEOUT: "30"
-      LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@localhost:5432/lina
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
-      GOOSE_NOTIFY_CHAT_IDS: ${GOOSE_NOTIFY_CHAT_IDS:-${GOOSE_BOT_NOTIFY_CHAT_IDS:-}}
-      OBSERVE_PORT: "9091"
     logging:
       driver: json-file
       options:
         max-size: "10m"
-        max-file: "3"
-    # ── Memory limits
+        max-file: "5"
+    # ── Memory limits: 1 container para 3 bots = mismo que antes (512 MB)
     mem_limit: 512m
     memswap_limit: 512m
 
@@ -684,49 +682,6 @@ services:
         max-file: "3"
     mem_limit: 256m
     memswap_limit: 256m
-
-  # ─── Telegram Gateway (Issue #16) ────────────────────────────────────────
-  # Servicio Python independiente que reemplaza el gateway embebido en goosed.
-  # Pollea Telegram, reenvía mensajes a goosed /reply (SSE) y muestra
-  # respuestas con efecto typewriter via editMessageText.
-  lina-gateway:
-    container_name: lina-gateway
-    build:
-      context: ../..
-      dockerfile: deploy/docker/Dockerfile.gateway
-    image: lina-gateway:latest
-    restart: unless-stopped
-    depends_on:
-      lina-goosed:
-        condition: service_healthy
-      lina-db:
-        condition: service_healthy
-    volumes:
-      - lina-goosed-sessions:/goosed-sessions:ro
-      - lina-secrets-data:/run/secrets/lina:ro
-    environment:
-      LINA_BOT_TOKEN: ${LINA_BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:-}}
-      GOOSED_URL: https://lina-goosed:3000
-      LINA_SECRET_KEY: ${LINA_SECRET_KEY:-${GOOSE_SERVER__SECRET_KEY:-}}
-      GOOSE_SERVER_SECRET_KEY: ${LINA_SECRET_KEY:-${GOOSE_SERVER__SECRET_KEY:-}}
-      LINA_TRUSTED_USERS: ${LINA_TRUSTED_USERS:-${GOOSE_GATEWAY_TRUSTED_USERS:-}}
-      GATEWAY_BOT_NAME: ${GATEWAY_BOT_NAME:-LINA}
-      GATEWAY_PACER_TICK: "1.5"
-      TELEGRAM_POLL_TIMEOUT: "30"
-      LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
-      LINA_NOTIFY_CHAT_IDS: ${LINA_NOTIFY_CHAT_IDS:-${GATEWAY_NOTIFY_CHAT_IDS:-}}
-    # Observe server (dashboard + WebSocket) — puerto para live stream de eventos
-    ports:
-      - "9093:9093"
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    # ── Memory limits: gateway de Telegram
-    mem_limit: 512m
-    memswap_limit: 512m
 
 volumes:
   lina-db-data:
