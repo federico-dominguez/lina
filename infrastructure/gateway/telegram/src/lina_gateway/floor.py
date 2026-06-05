@@ -20,6 +20,23 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+# Prioridad de bots (menor numero = mayor prioridad)
+_BOT_PRIORITY = {
+    "lina": 1,
+    "cline": 2,
+    "goose": 3,
+    "gemma": 4,
+}
+
+
+def _highest_priority_bot(bots):
+    return min(bots, key=lambda b: _BOT_PRIORITY.get(b, 99))
+
+
+def _is_higher_priority(bot_a, bot_b):
+    return _BOT_PRIORITY.get(bot_a, 99) < _BOT_PRIORITY.get(bot_b, 99)
+
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_FLOOR_TIMEOUT = 30.0  # segundos
@@ -89,6 +106,16 @@ class FloorTokenManager:
 
                 conn = await asyncpg.connect(self._db_url, timeout=5)
                 try:
+                    # Verificar si hay un bot de mayor prioridad esperando en cola
+                    waiting = await conn.fetch(
+                        """SELECT DISTINCT from_bot FROM conversation_messages
+                           WHERE conversation_id = $1 AND processed_at IS NULL""",
+                        conversation_id,
+                    )
+                    for w in waiting:
+                        if _is_higher_priority(w["from_bot"], bot_name):
+                            return FloorToken(False, conversation_id, "higher_priority_queued")
+
                     # Verificar si hay un floor activo
                     active = await conn.fetchrow(
                         """SELECT id, active_bot, expires_at
@@ -103,6 +130,11 @@ class FloorTokenManager:
 
                     if active:
                         # Hay un floor activo
+                        if active["active_bot"] != bot_name:
+                            # Otro bot tiene el floor — verificar prioridad
+                            if _is_higher_priority(active["active_bot"], bot_name):
+                                # Un bot de mayor prioridad ya tiene el floor, ceder
+                                return FloorToken(False, conversation_id, "higher_priority_holds")
                         if active["active_bot"] == bot_name:
                             # El mismo bot ya tiene el token — renovar
                             await conn.execute(

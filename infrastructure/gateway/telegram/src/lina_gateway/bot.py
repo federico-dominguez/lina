@@ -557,11 +557,17 @@ class Bot:
                         decision.reason,
                     )
                     # Encolar para el bot destino via conversation_messages
+                    # Prefijar con @mention para que el bot destino lo detecte
+                    target_mention = (
+                        f"@{decision.target_username}"
+                        if decision.target_username
+                        else f"@{decision.target_bot}"
+                    )
                     await self._floor.enqueue_message(
                         conv_id,
                         from_bot=self._name.lower(),
                         to_bot=decision.target_bot,
-                        message=text,
+                        message=f"{target_mention} {text}",
                     )
                     await self._tg.send_message(
                         chat_id,

@@ -243,6 +243,7 @@ class ObserveServer:
     # ── Lifecycle ──────────────────────────────────────────────────────
 
     async def start(self) -> None:
+        self._start_ts = time.time()
         await self.store.connect()
         self._server = await asyncio.start_server(
             self._handle_connection,
@@ -436,6 +437,8 @@ class ObserveServer:
 
         if method == "GET" and path == "/":
             await self._serve_dashboard(writer)
+        elif method == "GET" and path == "/health/status":
+            await self._serve_health_status(writer)
         elif method == "POST" and path == "/api/comm":
             await self._handle_comm(writer, raw_data)
         elif method == "GET" and path.startswith("/api/"):
@@ -541,9 +544,59 @@ class ObserveServer:
             ).encode(),
         )
 
-    async def _serve_dashboard(self, writer):
-        html = self._dashboard_html()
-        await self._send_http(writer, 200, html.encode(), "text/html; charset=utf-8")
+    async def _serve_health_status(self, writer):
+        """GET /health/status — comprehensive health endpoint.
+
+        Returns JSON with:
+          - status: overall health ("ok" | "degraded")
+          - uptime: seconds since server start
+          - agent: agent name
+          - websocket: rooms and client counts
+          - database: connection pool status
+          - events: total events tracked
+          - sessions: count of active sessions
+          - server: port info
+        """
+        now = time.time()
+        uptime = now - getattr(self, "_start_ts", now)
+
+        ws_rooms = len(self._rooms)
+        ws_clients = sum(len(w) for w in self._rooms.values())
+        total_events = sum(self._event_count.values())
+        db_connected = self.store._pool is not None if self.store else False
+
+        status = "ok"
+        if not db_connected and self.store._db_url:
+            status = "degraded"
+
+        body = json.dumps(
+            {
+                "status": status,
+                "uptime_seconds": round(uptime, 1),
+                "agent": self.agent,
+                "port": self.port,
+                "websocket": {
+                    "rooms": ws_rooms,
+                    "clients": ws_clients,
+                    "rooms_detail": {s: len(w) for s, w in self._rooms.items()},
+                },
+                "database": {
+                    "connected": db_connected,
+                    "configured": self.store._db_url is not None if self.store else False,
+                },
+                "events": {
+                    "total": total_events,
+                    "per_session": dict(self._event_count),
+                },
+                "sessions": {
+                    "active": len(self._event_count),
+                    "agent_mappings": dict(self._agent_sessions),
+                },
+                "timestamp": now,
+            }
+        ).encode()
+
+        await self._send_http(writer, 200, body)
 
     def _dashboard_html(self):
         return """<!DOCTYPE html>

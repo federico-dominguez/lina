@@ -166,9 +166,10 @@ target: "2026-06-11"
 
   - id: 4
     name: Memoria Compartida y Evolución
-    status: in_progress
+    status: completed
     target: "2026-07-23"
     started: "2026-06-05"
+    completed: "2026-06-05"
     dependencies:
       - phase-3
     issues:
@@ -237,3 +238,21 @@ references:
   comm_scripts: "lina/comm/"
   systemd_service: "deploy/systemd/lina-gateway-host.service"
   gnss_analogy: "mcps/gns3/"
+
+  - id: 5
+    name: Hotfix — Prioridad de turno + @mentions
+    status: in_progress
+    target: "2026-06-05"
+    started: "2026-06-05"
+    issues:
+      - "issue: floor-priority — Prioridad LINA > Cline > Goose > Gemma en floor token"
+      - "issue: correct-mentions — Bots enrutan con @s_botname correcto"
+    implementation:
+      floor_changes:
+        - "floor.py: _BOT_PRIORITY dict + _can_override + _is_higher_priority"
+        - "try_acquire: check prioridad antes de tomar floor"
+      bot_changes:
+        - "enqueue_message: prefijar @s_username al delegar a otro bot"
+    tests:
+      - "LINA mencionada con Cline → LINA obtiene floor primero"
+      - "Mensaje enrutado a Cline incluye @s_cline_bot"

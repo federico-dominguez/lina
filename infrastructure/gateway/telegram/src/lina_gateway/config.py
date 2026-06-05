@@ -118,7 +118,7 @@ class Config:
             username = _env(f"{prefix}USERNAME", default="")
             goosed_url = _env(
                 f"{prefix}GOOSED_URL",
-                default=os.environ.get("GOOSED_URL", "http://lina-goosed:3000"),
+                default=os.environ.get("GOOSED_URL", "http://localhost:3000"),
             ).rstrip("/")
             goosed_secret = _env(f"{prefix}GOOSED_SECRET", default="")
             raw_trusted = _env(f"{prefix}TRUSTED_USERS", default="")
