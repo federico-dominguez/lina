@@ -12,6 +12,10 @@ Versioning follows [Semantic Versioning](https://semver.org/) — `MAJOR.MINOR.P
 ## [Unreleased]
 
 ### Added
+- **Migration tracking system**: tabla `schema_migrations`, script `sql/migrations/_migrate.sh`, y comando `just migrate` para aplicar migraciones SQL de forma ordenada y reproducible (#164)
+- **Audit schema (Fase 3 hardening) aplicado**: migración 001 ejecutada en instancia local. Schema `audit` con `audit.tool_calls`, vista `audit.daily_summary`, y vista de compatibilidad `public.audit_logs`. Herramientas `get_audit_logs()` y `get_daily_summary()` del MCP `lina-db` ahora funcionales (#164)
+
+### Added
 - **Fase 3: Hardening a nivel producción** (Issue #11)
   - `x-mcp-defaults` YAML anchor en `docker-compose.yml`: todos los MCPs heredan
     `read_only: true`, `cap_drop: ALL`, `security_opt: no-new-privileges`, `tmpfs: /tmp`,
