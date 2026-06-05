@@ -98,7 +98,7 @@ class TestConversationRouter:
         decision = router.route("implementá un endpoint", current_bot="lina")
         assert decision.should_route is True
         assert decision.target_bot == "cline"
-        assert decision.target_username == "cline_ai_bot"
+        assert decision.target_username == "s_cline_bot"
         assert decision.intent_category == "dev"
 
     def test_route_study_to_lina(self, router: ConversationRouter):
@@ -106,7 +106,7 @@ class TestConversationRouter:
         decision = router.route("estudiá el curso de moodle", current_bot="cline")
         assert decision.should_route is True
         assert decision.target_bot == "lina"
-        assert decision.target_username == "lina_ai_bot"
+        assert decision.target_username == "s_lina_bot"
         assert decision.intent_category == "study"
 
     def test_route_ops_to_goose(self, router: ConversationRouter):
@@ -114,7 +114,7 @@ class TestConversationRouter:
         decision = router.route("docker compose up", current_bot="lina")
         assert decision.should_route is True
         assert decision.target_bot == "goose"
-        assert decision.target_username == "goose_ai_bot"
+        assert decision.target_username == "s_goose_bot"
         assert decision.intent_category == "ops"
 
     def test_route_general_stays(self, router: ConversationRouter):
@@ -148,7 +148,7 @@ class TestCapabilityRegistry:
         cap = registry.get_capability("lina")
         assert cap is not None
         assert cap.name == "lina"
-        assert cap.username == "lina_ai_bot"
+        assert cap.username == "s_lina_bot"
         assert IntentCategory.STUDY in cap.intents
         assert IntentCategory.RESEARCH in cap.intents
         assert IntentCategory.GENERAL in cap.intents
@@ -160,7 +160,7 @@ class TestCapabilityRegistry:
         cap = registry.get_capability("cline")
         assert cap is not None
         assert cap.name == "cline"
-        assert cap.username == "cline_ai_bot"
+        assert cap.username == "s_cline_bot"
         assert IntentCategory.DEV in cap.intents
         assert IntentCategory.STUDY in cap.intents
         assert IntentCategory.OPS not in cap.intents
@@ -170,7 +170,7 @@ class TestCapabilityRegistry:
         cap = registry.get_capability("goose")
         assert cap is not None
         assert cap.name == "goose"
-        assert cap.username == "goose_ai_bot"
+        assert cap.username == "s_goose_bot"
         assert IntentCategory.OPS in cap.intents
         assert IntentCategory.DEV in cap.intents
 
@@ -188,9 +188,9 @@ class TestCapabilityRegistry:
         assert "lina" in desc
         assert "cline" in desc
         assert "goose" in desc
-        assert "lina_ai_bot" in desc
-        assert "cline_ai_bot" in desc
-        assert "goose_ai_bot" in desc
+        assert "s_lina_bot" in desc
+        assert "s_cline_bot" in desc
+        assert "s_goose_bot" in desc
 
     def test_can_handle(self):
         registry = CapabilityRegistry()

@@ -382,19 +382,8 @@ class ConversationRouter:
             )
 
         current = current_bot.lower()
-        text_lower = text.lower()
 
         # Verificar si el bot actual puede manejar esta intención
-        # Si este bot es el PRIMERO mencionado (@s_botname va primero), no rutear
-        import re as _re2
-        _mentioned = _re2.findall(r"@s_([a-z]+)_bot", text_lower)
-        if len(_mentioned) > 1 and _mentioned[0] == current:
-            return RouteDecision(
-                should_route=False,
-                intent_category=intent.category.value if intent else "",
-                reason=f"primary_mention: {current} first in {_mentioned}",
-            )
-
         current_can_handle = self._registry.can_handle(current, intent.category)
 
         if current_can_handle:
