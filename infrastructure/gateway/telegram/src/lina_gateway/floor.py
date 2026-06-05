@@ -18,7 +18,7 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -110,12 +110,12 @@ class FloorTokenManager:
                                 """UPDATE conversation_floor
                                    SET expires_at = $1
                                    WHERE id = $2""",
-                                now + timeout.to_seconds() if hasattr(timeout, 'to_seconds') else now.replace(tzinfo=None) + __import__('datetime').timedelta(seconds=timeout),
+                                now + timedelta(seconds=timeout),
                                 active["id"],
                             )
                             logger.debug(
                                 "Floor renovado: bot=%s conv=%s expires_at=%s",
-                                bot_name, conversation_id, now + __import__('datetime').timedelta(seconds=timeout),
+                                bot_name, conversation_id, now + timedelta(seconds=timeout),
                             )
                             return FloorToken(
                                 granted=True,
@@ -146,7 +146,7 @@ class FloorTokenManager:
                                        RETURNING id""",
                                     bot_name,
                                     conversation_id,
-                                    now + __import__('datetime').timedelta(seconds=timeout),
+                                    now + timedelta(seconds=timeout),
                                 )
                                 logger.info(
                                     "Floor REASIGNADO por timeout: %s → %s conv=%s",
@@ -181,7 +181,7 @@ class FloorTokenManager:
                            RETURNING id""",
                         bot_name,
                         conversation_id,
-                        now + __import__('datetime').timedelta(seconds=timeout),
+                        now + timedelta(seconds=timeout),
                     )
                     logger.debug(
                         "Floor CREADO: bot=%s conv=%s timeout=%.1fs",

@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from collections import defaultdict
 
 import httpx
@@ -389,7 +390,7 @@ class Bot:
 
         # ── Floor token: evitar que varios bots respondan a la vez ──────
         # Solo en grupos/supergrupos donde hay múltiples bots
-        conv_id = str(chat_id)  # cada chat es una "conversación"
+        conv_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"telegram-chat-{chat_id}"))  # UUID determinista por chat
         if msg.chat.chat_type in ("group", "supergroup") and self._floor.is_enabled:
             token = await self._floor.try_acquire(
                 self._name.lower(),
@@ -471,7 +472,7 @@ class Bot:
                 asyncio.create_task(
                     self._floor.release(
                         floor_token_id,
-                        str(chat_id),
+                        conv_id,
                         self._name.lower(),
                         reason="voluntary",
                     ),
