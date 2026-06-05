@@ -102,6 +102,8 @@ class Bot:
         self._floor: FloorTokenManager = FloorTokenManager(shared.lina_db_url)
         # ID del floor token activo (si se adquirió), por chat_id
         self._floor_token_ids: dict[int, int] = {}
+        # Floor timeout configurable por bot (turn-timeout escalado)
+        self._floor_timeout: float = getattr(bot_cfg, "floor_timeout", 30.0)
 
     @property
     def tg(self) -> TelegramClient:
@@ -395,7 +397,7 @@ class Bot:
             token = await self._floor.try_acquire(
                 self._name.lower(),
                 conv_id,
-                timeout=30.0,
+                timeout=self._floor_timeout,
             )
             if not token.granted:
                 # Otro bot tiene el turno — encolamos el mensaje como pendiente
@@ -423,19 +425,27 @@ class Bot:
                 self._name, token.token_id, conv_id,
             )
 
-            # Inyectar contexto acumulativo si hay mensajes previos encolados
-            if token.reason == "ok":
-                context_msgs = await self._floor.get_context_messages(conv_id, limit=5)
-                if context_msgs:
-                    ctx_lines = ["Contexto de la conversación:"]
-                    for cm in context_msgs:
-                        ctx_lines.append(f"  [{cm.from_bot} → {cm.to_bot}]: {cm.message[:200]}")
-                    ctx_text = "\n".join(ctx_lines)
-                    text = f"{text}\n\n{ctx_text}"
-                    logger.debug(
-                        "%s: contexto inyectado (%d mensajes)",
-                        self._name, len(context_msgs),
-                    )
+            # ── Contexto acumulativo: inyectar historial de la conversación ──
+            # Siempre que se adquiere el floor (nuevo o renovado), recuperamos
+            # los últimos mensajes entre bots para mantener coherencia.
+            context_msgs = await self._floor.get_context_messages(conv_id, limit=8)
+            if context_msgs:
+                ctx_lines = ["--- Contexto conversacional ---"]
+                for cm in context_msgs:
+                    label = "Usuario" if cm.from_bot == "user" else cm.from_bot.upper()
+                    preview = cm.message[:300].replace("\n", " ")
+                    ctx_lines.append(f"  {label}: {preview}")
+                ctx_text = "\n".join(ctx_lines)
+                text = f"{text}\n\n{ctx_text}"
+                logger.debug(
+                    "%s: contexto inyectado (%d mensajes previos)",
+                    self._name, len(context_msgs),
+                )
+
+            # Marcar mensajes pendientes como procesados (ACK)
+            pending = await self._floor.get_pending_messages(conv_id, to_bot=self._name.lower())
+            for pm in pending:
+                await self._floor.ack_message(pm["id"])
 
         # ── Goosed health check ─────────────────────────────────────────
         if not await self._goosed.is_alive():

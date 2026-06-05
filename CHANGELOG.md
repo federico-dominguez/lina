@@ -12,6 +12,12 @@ Versioning follows [Semantic Versioning](https://semver.org/) — `MAJOR.MINOR.P
 ## [Unreleased]
 
 ### Added
+- **Phase 1: Protocolo Conversacional** (#166)
+  - `FloorTokenManager` en `floor.py`: adquisición, renovación, liberación y timeout de turno conversacional
+  - Cola FIFO de mensajes entre bots: `enqueue_message()`, `ack_message()`, `get_pending_messages()`
+  - Contexto acumulativo: `get_context_messages()` inyecta últimos N mensajes en prompts
+  - Turn-timeout escalado por bot: LINA=60s, Cline=120s, Goose=45s, Gemma=60s
+  - 15 unit tests para FloorTokenManager (modo bypass sin DB)
 - **Migration tracking system**: tabla `schema_migrations`, script `sql/migrations/_migrate.sh`, y comando `just migrate` para aplicar migraciones SQL de forma ordenada y reproducible (#164)
 - **Audit schema (Fase 3 hardening) aplicado**: migración 001 ejecutada en instancia local. Schema `audit` con `audit.tool_calls`, vista `audit.daily_summary`, y vista de compatibilidad `public.audit_logs`. Herramientas `get_audit_logs()` y `get_daily_summary()` del MCP `lina-db` ahora funcionales (#164)
 

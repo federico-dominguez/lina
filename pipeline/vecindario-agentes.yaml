@@ -49,15 +49,21 @@ phases:
 
   - id: 1
     name: Protocolo Conversacional
-    status: pending
+    status: in_progress
     target: "2026-06-11"
+    started: "2026-06-05"
     dependencies:
       - phase-0
     issues:
-      - "issue: floor-token — Token de turno conversacional"
-      - "issue: message-queue — Cola FIFO de mensajes entre bots"
-      - "issue: turn-timeout — Timeout de turno con escalado"
-      - "issue: context-accumulator — Contexto acumulativo en prompts"
+      - "#166 — Phase 1: Protocolo Conversacional"
+    milestones:
+      - "✅ floor.py: implementación completa (acquire/release/enqueue/ack/context)"
+      - "✅ bot.py: integración del floor token en _handle_message()"
+      - "✅ config.py: floor_timeout configurable por bot"
+      - "✅ Gateway wrappers: timeouts por bot (LINA=60s, Cline=120s, Goose=45s, Gemma=60s)"
+      - "✅ test_floor.py: 15 tests en modo bypass"
+      - "⏳ test_floor.py: tests con DB real (asyncpg mock)"
+      - "⏳ Dashboard: mostrar floor activo y cola de mensajes"
     schema:
       floor_token:
         table: conversation_floor
