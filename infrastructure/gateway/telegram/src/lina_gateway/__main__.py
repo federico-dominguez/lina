@@ -25,7 +25,13 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    asyncio.run(_run())
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:
+        pass
+    except Exception:
+        logger.exception("Fatal error in main loop")
+        raise
 
 
 async def _run() -> None:
@@ -85,13 +91,28 @@ async def _run() -> None:
     # ── Graceful shutdown via SIGTERM / SIGINT ────────────────────────────────
     loop = asyncio.get_running_loop()
     stop = asyncio.Event()
-    loop.add_signal_handler(signal.SIGTERM, stop.set)
-    loop.add_signal_handler(signal.SIGINT, stop.set)
+    try:
+        loop.add_signal_handler(signal.SIGTERM, stop.set)
+        loop.add_signal_handler(signal.SIGINT, stop.set)
+    except (NotImplementedError, RuntimeError) as exc:
+        logger.warning("Signal handlers not available (no TTY?): %s", exc)
     stop_task = asyncio.create_task(stop.wait(), name="stop")
 
     # ── Wait for any task to complete (or stop signal) ───────────────────────
     all_tasks = [*bot_tasks, stop_task, *notifier_tasks]
     done, pending = await asyncio.wait(all_tasks, return_when=asyncio.FIRST_COMPLETED)
+
+    # ── Debug: log which task(s) completed ────────────────────────────────────
+    for t in done:
+        name = t.get_name() if hasattr(t, 'get_name') else str(t)
+        cancelled = t.cancelled()
+        exc = None
+        if not cancelled:
+            try:
+                exc = t.exception()
+            except (asyncio.InvalidStateError, Exception):
+                pass
+        logger.warning("Task '%s' completed: cancelled=%s exception=%s", name, cancelled, exc)
 
     # ── Cancel everything else ───────────────────────────────────────────────
     for t in pending:
