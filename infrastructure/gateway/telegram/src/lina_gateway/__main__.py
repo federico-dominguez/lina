@@ -104,7 +104,7 @@ async def _run() -> None:
 
     # ── Debug: log which task(s) completed ────────────────────────────────────
     for t in done:
-        name = t.get_name() if hasattr(t, 'get_name') else str(t)
+        name = t.get_name() if hasattr(t, "get_name") else str(t)
         cancelled = t.cancelled()
         exc = None
         if not cancelled:

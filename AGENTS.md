@@ -14,6 +14,7 @@
 | Vos (Goose) | `@s_goose_bot` | Ingeniero local de Fede | `send-goose.py <mensaje>` |
 | LINA | `@s_lina_bot` | Jefa / Supervisora | `send-lina.py <mensaje>` |
 | Cline | `@s_cline_bot` | Developer | `send-cline.py <mensaje>` |
+| Gemma | `@s_gemma_bot` | Tester / QA | `send-gemma.py <mensaje>` |
 
 ### Regla única de comunicación
 

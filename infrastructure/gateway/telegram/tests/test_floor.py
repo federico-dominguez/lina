@@ -139,3 +139,153 @@ class TestDeterministicUuid:
         # Debe ser UUID válido
         parsed = uuid.UUID(conv)
         assert str(parsed) == conv
+
+
+class TestFloorWithMockDB:
+    """Tests del FloorTokenManager con asyncpg mockeado.
+
+    Cada test mockea asyncpg.connect() y configura el objeto connection
+    devuelto con los valores esperados para cada escenario.
+    """
+
+    @pytest.fixture
+    def mock_db(self):
+        """Crea un mock de asyncpg.connect() y devuelve la conexión mockeada."""
+        conn = AsyncMock()
+        conn.close = AsyncMock()
+        mock_connect = AsyncMock(return_value=conn)
+        with patch("asyncpg.connect", mock_connect):
+            yield conn
+
+    @pytest.fixture
+    def floor_db(self, mock_db):
+        """FloorTokenManager con DB mockeada."""
+        return FloorTokenManager(db_url="postgresql://fake:5432/lina")
+
+    # ── Helpers para crear valores datetime mock ─────────────────
+
+    def _future(self):
+        """Return a future datetime (2126)."""
+        from datetime import datetime, timezone
+        return datetime(2126, 1, 1, tzinfo=timezone.utc)
+
+    def _past(self):
+        """Return a past datetime (2020)."""
+        from datetime import datetime, timezone
+        return datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+    # ── Tests ────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_acquire_no_active_floor(self, floor_db, mock_db):
+        """Sin floor activo, try_acquire concede el token."""
+        mock_db.fetchrow = AsyncMock(return_value=None)  # No hay floor activo
+        mock_db.fetchval = AsyncMock(return_value=1)     # Nuevo floor id=1
+        token = await floor_db.try_acquire("lina", "conv-1", timeout=30.0)
+        assert token.granted is True
+        assert token.conversation_id == "conv-1"
+        assert token.reason == "ok"
+        assert token.token_id == 1
+        mock_db.fetchrow.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_acquire_same_bot_renews(self, floor_db, mock_db):
+        """Si el mismo bot ya tiene el floor, se renueva el timeout."""
+        mock_db.fetchrow = AsyncMock(return_value={
+            "id": 1, "active_bot": "lina", "expires_at": self._future()
+        })
+        mock_db.fetchval = AsyncMock(return_value=None)  # No INSERT
+        token = await floor_db.try_acquire("lina", "conv-1", timeout=30.0)
+        assert token.granted is True
+        assert token.reason == "renewed"
+        assert token.token_id == 1
+        mock_db.execute.assert_awaited_once()  # UPDATE para renovar
+
+    @pytest.mark.asyncio
+    async def test_acquire_other_bot_denied(self, floor_db, mock_db):
+        """Si otro bot tiene el floor activo, se deniega el turno."""
+        mock_db.fetchrow = AsyncMock(return_value={
+            "id": 1, "active_bot": "goose", "expires_at": self._future()
+        })
+        token = await floor_db.try_acquire("lina", "conv-1", timeout=30.0)
+        assert token.granted is False
+        assert token.reason == "busy"
+        assert token.active_bot == "goose"
+
+    @pytest.mark.asyncio
+    async def test_acquire_timeout_reassigns(self, floor_db, mock_db):
+        """Si el floor expiró, se reasigna al bot que pide."""
+        mock_db.fetchrow = AsyncMock(return_value={
+            "id": 1, "active_bot": "goose", "expires_at": self._past()
+        })
+        mock_db.fetchval = AsyncMock(return_value=99)  # Nuevo floor id
+        token = await floor_db.try_acquire("lina", "conv-1", timeout=30.0)
+        assert token.granted is True
+        assert token.reason == "timeout_reassigned"
+        assert token.token_id == 99
+        # Debe haber hecho UPDATE release + INSERT nuevo
+        assert mock_db.execute.await_count >= 1
+        assert mock_db.fetchval.await_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_release_voluntary(self, floor_db, mock_db):
+        """Liberación voluntaria del token."""
+        mock_db.execute = AsyncMock(return_value="UPDATE 1")
+        await floor_db.release(1, "conv-1", "lina", reason="voluntary")
+        mock_db.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_enqueue_and_ack(self, floor_db, mock_db):
+        """Encolar mensaje y marcarlo como procesado."""
+        mock_db.fetchval = AsyncMock(return_value=42)
+        msg_id = await floor_db.enqueue_message("conv-1", "lina", "goose", "hola")
+        assert msg_id == 42
+
+        # Ack
+        mock_db.execute.reset_mock()
+        mock_db.execute = AsyncMock()
+        await floor_db.ack_message(42)
+        mock_db.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_get_pending_messages(self, floor_db, mock_db):
+        """Obtener mensajes pendientes para un bot."""
+        mock_db.fetch = AsyncMock(return_value=[
+            {"id": 1, "from_bot": "goose", "message": "msg1", "created_at": self._future()},
+            {"id": 2, "from_bot": "goose", "message": "msg2", "created_at": self._future()},
+        ])
+        msgs = await floor_db.get_pending_messages("conv-1", "lina")
+        assert len(msgs) == 2
+        assert msgs[0]["from_bot"] == "goose"
+
+    @pytest.mark.asyncio
+    async def test_context_messages(self, floor_db, mock_db):
+        """Obtener contexto acumulativo de la conversación."""
+        mock_db.fetch = AsyncMock(return_value=[
+            {"from_bot": "lina", "to_bot": "goose", "message": "ping", "created_at": self._future()},
+            {"from_bot": "goose", "to_bot": "lina", "message": "pong", "created_at": self._future()},
+        ])
+        msgs = await floor_db.get_context_messages("conv-1", limit=5)
+        assert len(msgs) == 2
+        assert msgs[0].from_bot == "goose"
+        assert msgs[1].to_bot == "goose"
+
+    @pytest.mark.asyncio
+    async def test_get_active_floor(self, floor_db, mock_db):
+        """Obtener floor activo."""
+        mock_db.fetchrow = AsyncMock(return_value={
+            "id": 1, "active_bot": "lina",
+            "acquired_at": self._past(), "expires_at": self._future(),
+        })
+        result = await floor_db.get_active_floor("conv-1")
+        assert result is not None
+        assert result["active_bot"] == "lina"
+        assert result["id"] == 1
+
+    @pytest.mark.asyncio
+    async def test_db_error_fallback(self, floor_db, mock_db):
+        """Si la DB falla, concede el token como fallback."""
+        mock_db.fetchrow = AsyncMock(side_effect=Exception("connection refused"))
+        token = await floor_db.try_acquire("lina", "conv-1", timeout=30.0)
+        assert token.granted is True  # fallback: concede igual
+        assert "error_fallback" in token.reason

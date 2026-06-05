@@ -220,7 +220,7 @@ class TestBotAgentsCommand:
             cfg = Config()
 
         cfg.lina_db_url = None
-        bot = Bot(cfg)
+        bot = Bot(cfg.bots[0], cfg.shared)
 
         sent = []
 
@@ -252,7 +252,7 @@ class TestBotAgentsCommand:
         ):
             cfg = Config()
 
-        bot = Bot(cfg)
+        bot = Bot(cfg.bots[0], cfg.shared)
 
         sent = []
 
@@ -289,7 +289,7 @@ class TestBotAgentsCommand:
         ):
             cfg = Config()
 
-        bot = Bot(cfg)
+        bot = Bot(cfg.bots[0], cfg.shared)
 
         sent = []
 
@@ -328,7 +328,7 @@ class TestBotInstructExpansion:
         ):
             cfg = Config()
 
-        bot = Bot(cfg)
+        bot = Bot(cfg.bots[0], cfg.shared)
         sent = []
 
         async def fake_send(chat_id, html, **kwargs):
@@ -368,7 +368,7 @@ class TestBotInstructExpansion:
         ):
             cfg = Config()
 
-        bot = Bot(cfg)
+        bot = Bot(cfg.bots[0], cfg.shared)
         sent = []
 
         async def fake_send(chat_id, html, **kwargs):
