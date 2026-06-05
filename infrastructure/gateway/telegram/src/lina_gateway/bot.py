@@ -22,6 +22,7 @@ import httpx
 from .boot_hook import get_smart_context, save_message, save_token_usage, save_trace
 from .commands.audit import handle_audit
 from .config import BotConfig, SharedConfig
+from .floor import FloorTokenManager
 from .formatter import (
     format_tool_status,
     format_with_thinking,
@@ -96,6 +97,10 @@ class Bot:
         self._last_response: dict[int, str] = {}
         # chat_id → True if we should send voice response (voice thread)
         self._voice_mode: dict[int, bool] = {}
+        # Floor token manager for multi-bot conversation turn control
+        self._floor: FloorTokenManager = FloorTokenManager(shared.lina_db_url)
+        # ID del floor token activo (si se adquirió), por chat_id
+        self._floor_token_ids: dict[int, int] = {}
 
     @property
     def tg(self) -> TelegramClient:
@@ -382,6 +387,55 @@ class Bot:
         if not text.strip():
             return
 
+        # ── Floor token: evitar que varios bots respondan a la vez ──────
+        # Solo en grupos/supergrupos donde hay múltiples bots
+        conv_id = str(chat_id)  # cada chat es una "conversación"
+        if msg.chat.chat_type in ("group", "supergroup") and self._floor.is_enabled:
+            token = await self._floor.try_acquire(
+                self._name.lower(),
+                conv_id,
+                timeout=30.0,
+            )
+            if not token.granted:
+                # Otro bot tiene el turno — encolamos el mensaje como pendiente
+                logger.debug(
+                    "%s: floor ocupado por %s, encolando mensaje %s",
+                    self._name, token.active_bot, msg.message_id,
+                )
+                await self._floor.enqueue_message(
+                    conv_id,
+                    from_bot="user",
+                    to_bot=self._name.lower(),
+                    message=text,
+                )
+                await self._tg.send_message(
+                    chat_id,
+                    f"⏳ {self._name} esperando turno… "
+                    f"({token.active_bot} está respondiendo)",
+                )
+                return
+
+            # Token adquirido — guardamos el ID para liberarlo después
+            self._floor_token_ids[chat_id] = token.token_id
+            logger.debug(
+                "%s: floor adquirido (id=%s) conv=%s",
+                self._name, token.token_id, conv_id,
+            )
+
+            # Inyectar contexto acumulativo si hay mensajes previos encolados
+            if token.reason == "ok":
+                context_msgs = await self._floor.get_context_messages(conv_id, limit=5)
+                if context_msgs:
+                    ctx_lines = ["Contexto de la conversación:"]
+                    for cm in context_msgs:
+                        ctx_lines.append(f"  [{cm.from_bot} → {cm.to_bot}]: {cm.message[:200]}")
+                    ctx_text = "\n".join(ctx_lines)
+                    text = f"{text}\n\n{ctx_text}"
+                    logger.debug(
+                        "%s: contexto inyectado (%d mensajes)",
+                        self._name, len(context_msgs),
+                    )
+
         # ── Goosed health check ─────────────────────────────────────────
         if not await self._goosed.is_alive():
             # goosed may be mid-restart — wait briefly before giving up
@@ -411,6 +465,18 @@ class Bot:
             await self._reply(chat_id, msg.message_id, text, cancel_event)
         finally:
             self._busy[chat_id] = False
+            # Liberar floor token si lo habíamos adquirido
+            floor_token_id = self._floor_token_ids.pop(chat_id, None)
+            if floor_token_id is not None:
+                asyncio.create_task(
+                    self._floor.release(
+                        floor_token_id,
+                        str(chat_id),
+                        self._name.lower(),
+                        reason="voluntary",
+                    ),
+                    name=f"floor-release-{chat_id}",
+                )
             # Clear reaction on original message
             await self._tg.set_reaction(chat_id, msg.message_id, "")
 
