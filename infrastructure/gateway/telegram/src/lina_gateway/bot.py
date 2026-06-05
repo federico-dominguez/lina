@@ -21,6 +21,7 @@ from collections import defaultdict
 import httpx
 
 from .boot_hook import get_smart_context, save_message, save_token_usage, save_trace
+from .circuit_breaker import CircuitBreaker
 from .commands.audit import handle_audit
 from .config import BotConfig, SharedConfig
 from .floor import FloorTokenManager
@@ -31,6 +32,7 @@ from .formatter import (
     split_message,
 )
 from .goose_client import EventType, GoosedClient, TokenState
+from .heartbeat import HeartbeatService
 from .observe import ObserveServer
 from .pacer import StreamingBubble
 from .telegram_client import (
@@ -106,6 +108,23 @@ class Bot:
         self._floor_token_ids: dict[int, int] = {}
         # Floor timeout configurable por bot (turn-timeout escalado)
         self._floor_timeout: float = getattr(bot_cfg, "floor_timeout", 30.0)
+        # Heartbeat service
+        self._heartbeat: HeartbeatService | None = None
+        # Circuit breaker
+        self._breaker: CircuitBreaker | None = None
+
+        # Initialize heartbeat and circuit breaker if DB URL is available
+        if shared.lina_db_url:
+            self._heartbeat = HeartbeatService(
+                shared.lina_db_url,
+                self._name,
+                interval=getattr(bot_cfg, "heartbeat_interval", 30.0),
+            )
+            self._breaker = CircuitBreaker(
+                shared.lina_db_url,
+                self._name,
+                threshold=getattr(bot_cfg, "circuit_breaker_threshold", 5),
+            )
 
     @property
     def tg(self) -> TelegramClient:
@@ -1491,15 +1510,37 @@ class Bot:
             logger.warning("Unknown callback: %s", data)
 
     async def run(self) -> None:
-        """Main loop: poll forever."""
+        """Main loop: poll forever with heartbeat and circuit breaker."""
         logger.info("lina-gateway starting (goosed=%s)", self._cfg.goosed_url)
+
+        # Start heartbeat
+        if self._heartbeat:
+            await self._heartbeat.start()
+
         offset: int | None = None
         retry_delay = 1.0
-        while True:
-            try:
-                offset = await self.run_once(offset)
-                retry_delay = 1.0
-            except Exception as exc:
-                logger.error("Poll error (retry in %.0fs): %s", retry_delay, exc)
-                await asyncio.sleep(retry_delay)
-                retry_delay = min(retry_delay * 2, 60.0)
+        try:
+            while True:
+                # Circuit breaker check
+                if self._breaker and await self._breaker.is_open():
+                    logger.warning("%s: circuit open, skipping poll", self._name)
+                    await asyncio.sleep(30)
+                    continue
+
+                try:
+                    offset = await self.run_once(offset)
+                    retry_delay = 1.0
+                    # Record success on connection
+                    if self._breaker:
+                        await self._breaker.record_success()
+                except Exception as exc:
+                    # Record failure
+                    if self._breaker:
+                        await self._breaker.record_failure()
+                    logger.error("Poll error (retry in %.0fs): %s", retry_delay, exc)
+                    await asyncio.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, 60.0)
+        finally:
+            # Stop heartbeat
+            if self._heartbeat:
+                await self._heartbeat.stop()
