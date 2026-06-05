@@ -20,12 +20,12 @@ Usage::
 """
 
 from __future__ import annotations
-from typing import Any
 
 import logging
 import os
 import tempfile
 import uuid
+from typing import Any
 
 import httpx
 
@@ -54,7 +54,9 @@ class TelegramCallbackQuery:
 
 class TelegramEntity:
     """Telegram message entity (mention, hashtag, etc.)."""
+
     __slots__ = ("type", "offset", "length")
+
     def __init__(self, type: str, offset: int, length: int) -> None:
         self.type = type
         self.offset = offset
@@ -63,22 +65,30 @@ class TelegramEntity:
 
 class TelegramUser:
     """Minimal user representation."""
+
     __slots__ = ("id", "first_name", "is_bot", "username")
-    def __init__(self, id: int, first_name: str = "", is_bot: bool = False, username: str = "") -> None:
+
+    def __init__(
+        self, id: int, first_name: str = "", is_bot: bool = False, username: str = ""
+    ) -> None:
         self.id = id
         self.first_name = first_name
         self.is_bot = is_bot
         self.username = username
+
     def __repr__(self) -> str:
         return f"TelegramUser(id={self.id}, name={self.first_name}, bot={self.is_bot})"
 
 
 class TelegramChat:
     """Minimal chat representation."""
+
     __slots__ = ("id", "chat_type")
+
     def __init__(self, id: int, chat_type: str = "private") -> None:
         self.id = id
         self.chat_type = chat_type
+
     def __repr__(self) -> str:
         return f"TelegramChat(id={self.id}, type={self.chat_type})"
 
@@ -187,9 +197,11 @@ class TelegramClient:
     def _url(self, method: str) -> str:
         return f"https://api.telegram.org/bot{self._token}/{method}"
 
-    async def poll(self, offset: int | None) -> list[tuple[int, TelegramMessage | TelegramCallbackQuery]]:
+    async def poll(
+        self, offset: int | None
+    ) -> list[tuple[int, TelegramMessage | TelegramCallbackQuery]]:
         """Fetch updates via long-poll getUpdates.
-    
+
         Returns list of (update_id, message) tuples.
         """
         params: dict = {
@@ -220,7 +232,7 @@ class TelegramClient:
                     )
                 )
         return results
-    
+
     def _parse_message(self, d: dict) -> TelegramMessage:
         """Parse a raw Telegram message dict into a TelegramMessage."""
         # Telegram uses "type" but our code expects "chat_type"
@@ -237,7 +249,12 @@ class TelegramClient:
             document=d.get("document"),
             audio=d.get("audio"),
             caption=d.get("caption"),
-            entities=[TelegramEntity(e["type"], e["offset"], e["length"]) for e in (d.get("entities") or [])] if d.get("entities") else None,
+            entities=[
+                TelegramEntity(e["type"], e["offset"], e["length"])
+                for e in (d.get("entities") or [])
+            ]
+            if d.get("entities")
+            else None,
             reply_to_message_id=d.get("reply_to_message_id"),
         )
 
@@ -391,6 +408,7 @@ class TelegramClient:
         """
         try:
             import os as os_mod
+
             if not os_mod.path.exists(audio_path):
                 logger.warning("send_voice: file not found: %s", audio_path)
                 return None
@@ -427,9 +445,10 @@ class TelegramClient:
             Message ID if sent, None on failure.
         """
         try:
-            from gtts import gTTS
-            import tempfile
             import os as os_mod
+            import tempfile
+
+            from gtts import gTTS
 
             tts = gTTS(text=text, lang=lang, slow=False)
 

@@ -20,6 +20,7 @@ from collections import defaultdict
 import httpx
 
 from .boot_hook import get_smart_context, save_message, save_token_usage, save_trace
+from .commands.audit import handle_audit
 from .config import Config
 from .formatter import (
     format_tool_status,
@@ -30,17 +31,15 @@ from .formatter import (
 from .goose_client import EventType, GoosedClient, TokenState
 from .observe import ObserveServer
 from .pacer import StreamingBubble
-from .transcriber import transcribe_audio
-from .commands.audit import handle_audit
 from .telegram_client import (
-    TelegramUser,
     MAX_VOICE_FILE_SIZE,
     TelegramCallbackQuery,
     TelegramChat,
     TelegramClient,
     TelegramMessage,
-    voice_prompt,
+    TelegramUser,
 )
+from .transcriber import transcribe_audio
 
 logger = logging.getLogger(__name__)
 
@@ -119,19 +118,34 @@ class Bot:
         if msg.chat.chat_type not in ("group", "supergroup"):
             return False  # channel or unknown → no
 
-        # Bot-to-bot
+        # Bot-to-bot: responder SOLO si este bot es mencionado
         if msg.from_user and msg.from_user.is_bot:
-            return True
+            if msg.entities:
+                text_lower = (msg.text or "").lower()
+                for ent in msg.entities:
+                    ent_text = text_lower[
+                        ent.get("offset", 0) : ent.get("offset", 0) + ent.get("length", 0)
+                    ]
+                    if self._is_this_bot(ent_text.lstrip("@")):
+                        return True
+            # Fallback: @mention en texto plano
+            if msg.text and self._is_this_bot((msg.text or "").lstrip("@")):
+                return True
+            return False
 
         # @mention check
         if msg.entities:
             text = (msg.text or "").lower()
             for ent in msg.entities:
-                if (isinstance(ent, dict) and ent.get("type") == "mention") or (not isinstance(ent, dict) and ent.type == "mention"):
+                if (isinstance(ent, dict) and ent.get("type") == "mention") or (
+                    not isinstance(ent, dict) and ent.type == "mention"
+                ):
                     mentioned = text[ent.offset : ent.offset + ent.length].lstrip("@")
                     if self._is_this_bot(mentioned):
                         return True
-                elif (isinstance(ent, dict) and ent.get("type") == "text_mention") or (not isinstance(ent, dict) and ent.type == "text_mention"):
+                elif (isinstance(ent, dict) and ent.get("type") == "text_mention") or (
+                    not isinstance(ent, dict) and ent.type == "text_mention"
+                ):
                     # text_mention to a user/bot by ID — assume it's us
                     return True
 
@@ -144,13 +158,18 @@ class Bot:
             "lina": "s_lina_bot",
             "goose": "s_goose_bot",
             "cline": "s_cline_bot",
+            "gemma": "s_gemma_bot",
         }
         my_name = self._cfg.bot_name.lower()
         expected = mapping.get(my_name)
         return username.lower() == expected
 
     async def _handle(self, msg: TelegramMessage) -> None:
-        chat_id = msg.chat.id
+        # Comm messages (from HTTP bridge) → redirect to real Comm group
+        if msg.from_user and getattr(msg.from_user, "id", None) == 8887121852:
+            chat_id = -5110614353
+        else:
+            chat_id = msg.chat.id
         text = msg.text or ""
 
         # ── Mention filter: skip if not addressed to this bot ──────────────
@@ -317,7 +336,7 @@ class Bot:
 
         # ── /audit ── consulta de acciones recientes ─────────────────────
         if text.strip().lower().startswith("/audit"):
-            args = text.strip()[len("/audit"):].strip()
+            args = text.strip()[len("/audit") :].strip()
             await handle_audit(chat_id, args, self._tg, self._cfg.lina_db_url)
             return
 
@@ -328,7 +347,9 @@ class Bot:
                 await self._tg.send_message(chat_id, "🔊 Convirtiendo a voz...")
                 await self._tg.send_voice_from_text(chat_id, last)
             else:
-                await self._tg.send_message(chat_id, "ℹ️ No hay respuesta previa para convertir a voz.")
+                await self._tg.send_message(
+                    chat_id, "ℹ️ No hay respuesta previa para convertir a voz."
+                )
             return
 
         # ── voice note ─────────────────────────────────────────────────
@@ -1265,23 +1286,29 @@ class Bot:
             else:
                 # Legacy: object with .update_id, .message, .callback_query
                 offset = update.update_id + 1
-                if hasattr(update, 'message') and update.message:
+                if hasattr(update, "message") and update.message:
                     asyncio.create_task(self._handle(update.message))
-                if hasattr(update, 'callback_query') and update.callback_query:
+                if hasattr(update, "callback_query") and update.callback_query:
                     asyncio.create_task(self._handle_callback(update.callback_query))
         # Process comm messages (HTTP bridge from other bots)
         if self._observer:
             for cmd in self._observer.pop_comm_messages():
-                logger.info("Comm: handling from=%s text=%.60s", cmd.get("from","?"), cmd.get("text",""))
+                logger.info(
+                    "Comm: handling from=%s text=%.60s", cmd.get("from", "?"), cmd.get("text", "")
+                )
                 asyncio.create_task(
-                    self._handle(TelegramMessage(
-                        message_id=int(time.time() * 1000) % (2**31),
-                        chat=TelegramChat(id=8887121852, chat_type="private"),
-                        text=cmd.get("text", ""),
-                        from_user=TelegramUser(id=8887121852, first_name="Comm", is_bot=False, username="comm_bot"),
-                        voice=None,
-                    )),
-                    name=f"comm-{cmd.get('id','')}-{int(time.time())}",
+                    self._handle(
+                        TelegramMessage(
+                            message_id=int(time.time() * 1000) % (2**31),
+                            chat=TelegramChat(id=-5110614353, chat_type="group"),
+                            text=cmd.get("text", ""),
+                            from_user=TelegramUser(
+                                id=8887121852, first_name="Comm", is_bot=True, username="comm_bot"
+                            ),
+                            voice=None,
+                        )
+                    ),
+                    name=f"comm-{cmd.get('id', '')}-{int(time.time())}",
                 )
         return offset
 
