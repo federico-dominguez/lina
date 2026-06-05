@@ -100,6 +100,8 @@ class Bot:
         self._voice_mode: dict[int, bool] = {}
         # Floor token manager for multi-bot conversation turn control
         self._floor: FloorTokenManager = FloorTokenManager(shared.lina_db_url)
+        # Orchestrator for intelligent routing (initialized on first _handle with DB)
+        self._orchestrator = None  # Inicializado en _handle si hay DB
         # ID del floor token activo (si se adquirió), por chat_id
         self._floor_token_ids: dict[int, int] = {}
         # Floor timeout configurable por bot (turn-timeout escalado)
@@ -452,6 +454,35 @@ class Bot:
             pending = await self._floor.get_pending_messages(conv_id, to_bot=self._name.lower())
             for pm in pending:
                 await self._floor.ack_message(pm["id"])
+
+            # ── Orchestrator: routing inteligente ──
+            if self._shared.lina_db_url and msg.chat.chat_type in ("group", "supergroup"):
+                if self._orchestrator is None:
+                    from .orchestrator import ConversationRouter
+
+                    self._orchestrator = ConversationRouter()
+
+                decision = self._orchestrator.route(text, self._name.lower())
+                if decision.should_route:
+                    logger.debug(
+                        "%s: redirigiendo a %s (%s)",
+                        self._name,
+                        decision.target_bot,
+                        decision.reason,
+                    )
+                    # Encolar para el bot destino via conversation_messages
+                    await self._floor.enqueue_message(
+                        conv_id,
+                        from_bot=self._name.lower(),
+                        to_bot=decision.target_bot,
+                        message=text,
+                    )
+                    await self._tg.send_message(
+                        chat_id,
+                        f"⏳ Redirigiendo a @{decision.target_username} "
+                        f"(intención: {decision.intent_category})...",
+                    )
+                    return
 
         # ── Goosed health check ─────────────────────────────────────────
         if not await self._goosed.is_alive():
