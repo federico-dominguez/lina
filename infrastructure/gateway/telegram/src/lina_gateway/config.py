@@ -33,6 +33,11 @@ class BotConfig:
     # Useful for the "Goose" personality that bridges a local desktop agent.
     fixed_session_id: str | None = None
 
+    # Floor timeout en segundos — cuánto tiempo puede tener el turno este bot
+    # antes de que expire automáticamente. Valores sugeridos:
+    #   LINA=60, Cline=120, Goose=45, Gemma=60
+    floor_timeout: float = 30.0
+
     def is_trusted(self, chat_id: int) -> bool:
         return f"telegram:{chat_id}" in self.trusted_users
 
@@ -133,6 +138,7 @@ class Config:
                 ]
             observe_port = int(_env(f"{prefix}OBSERVE_PORT", default="9090"))
             fixed_session = _env(f"{prefix}FIXED_SESSION_ID", default=None)
+            floor_timeout = float(_env(f"{prefix}FLOOR_TIMEOUT", default="30"))
             bots.append(
                 BotConfig(
                     name=name,
@@ -144,6 +150,7 @@ class Config:
                     notify_chat_ids=notify,
                     observe_port=observe_port,
                     fixed_session_id=fixed_session,
+                    floor_timeout=floor_timeout,
                 )
             )
         return bots
