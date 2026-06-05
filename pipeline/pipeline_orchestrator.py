@@ -2,14 +2,14 @@
 pipeline_orchestrator — Pipeline inteligente sobre issues reales del repo.
 
 Cada paso recibe prompts diseñados para su rol específico.
-Se comunican via Telegram (visible en el grupo Comm) y GitHub Issues (documentación).
+Se comunican via comm_messages DB (Comm Bridge) y GitHub Issues (documentación).
 """
 
 import json, time, os, sys, re, subprocess
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from pipeline_bot_bridge import send as tg_send
+from pipeline_comm_bridge import send as comm_send
 
 REPO = "federico-dominguez/lina"
 WORKSPACE = "/home/user/lina"
@@ -331,7 +331,7 @@ def run_pipeline(feature_or_issue):
             if "analyze" in sname.lower():
                 context += f"\n\nIssue description:\n{issue_body[:500]}"
 
-            resp = tg_send(bot, context, timeout=timeout, last_n=5)
+            resp = comm_send(bot, context, timeout=timeout, last_n=5)
             step_outputs[sname] = resp
 
             log(f"  {sname}: {len(resp)} chars")
@@ -401,7 +401,7 @@ if __name__ == "__main__":
     else:
         feat = " ".join(args) or "Crear un endpoint /health que verifique PostgreSQL"
     
-    print(f"\n🚀 Pipeline GitHub + Telegram: '{feat}'\n")
+    print(f"\n🚀 Pipeline GitHub + Comm Bridge: '{feat}'\n")
     r = run_pipeline(feat)
     print(f"\n📊 Resultado: {'✅ PASÓ' if r['passed'] else '❌ FALLÓ'} ({r['duration']:.0f}s)")
     print(f"🐙 https://github.com/{REPO}/issues/{r.get('issue', '?')}")
