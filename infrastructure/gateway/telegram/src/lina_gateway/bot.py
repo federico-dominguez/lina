@@ -24,6 +24,8 @@ from .boot_hook import get_smart_context, save_message, save_token_usage, save_t
 from .circuit_breaker import CircuitBreaker
 from .commands.audit import handle_audit
 from .config import BotConfig, SharedConfig
+from .episodic_memory import EpisodicMemory
+from .feedback import FeedbackManager
 from .floor import FloorTokenManager
 from .formatter import (
     format_tool_status,
@@ -35,6 +37,7 @@ from .goose_client import EventType, GoosedClient, TokenState
 from .heartbeat import HeartbeatService
 from .observe import ObserveServer
 from .pacer import StreamingBubble
+from .profiles import BotProfileLoader
 from .telegram_client import (
     MAX_VOICE_FILE_SIZE,
     TelegramCallbackQuery,
@@ -104,6 +107,22 @@ class Bot:
         self._floor: FloorTokenManager = FloorTokenManager(shared.lina_db_url)
         # Orchestrator for intelligent routing (initialized on first _handle with DB)
         self._orchestrator = None  # Inicializado en _handle si hay DB
+        # Fase 4 — Memoria Compartida y Evolución
+        self._memory: EpisodicMemory | None = None
+        self._feedback: FeedbackManager | None = None
+        self._profile_prompt: str = ""
+
+        if shared.lina_db_url:
+            self._memory = EpisodicMemory(shared.lina_db_url)
+            self._feedback = FeedbackManager(shared.lina_db_url)
+            try:
+                profile = BotProfileLoader.load(self._name)
+                self._profile_prompt = BotProfileLoader.format_system_prompt(profile)
+                logger.info(
+                    "%s: loaded profile (%s, %s)", self._name, profile.personality, profile.tone
+                )
+            except Exception as exc:
+                logger.warning("%s: failed to load profile: %s", self._name, exc)
         # ID del floor token activo (si se adquirió), por chat_id
         self._floor_token_ids: dict[int, int] = {}
         # Floor timeout configurable por bot (turn-timeout escalado)
@@ -231,6 +250,54 @@ class Bot:
         # ── /agents ───────────────────────────────────────────────
         if text.strip() == "/agents":
             await self._handle_agents(chat_id)
+            return
+
+        # ── /feedback ──────────────────────────────────────────
+        if text.startswith("/feedback"):
+            parts = text.split()
+            if len(parts) < 2:
+                await self._tg.send_message(
+                    chat_id,
+                    "Uso: /feedback <bot> <rating 1-5> [comentario]\n"
+                    "Ej: /feedback cline 5 Excelente código!",
+                )
+                return
+
+            target = parts[1].lower().replace("@s_", "").replace("_bot", "")
+            try:
+                rating = int(parts[2])
+            except (IndexError, ValueError):
+                await self._tg.send_message(chat_id, "❌ Rating debe ser un número del 1 al 5")
+                return
+
+            comment = " ".join(parts[3:]) if len(parts) > 3 else ""
+
+            fb_conv_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"telegram-chat-{chat_id}"))
+            if self._feedback:
+                success = await self._feedback.submit(
+                    from_bot=self._name.lower(),
+                    to_bot=target,
+                    conversation_id=fb_conv_id,
+                    rating=rating,
+                    comment=comment,
+                )
+                if success:
+                    await self._tg.send_message(
+                        chat_id, f"✅ Feedback registrado: @{target} → ⭐ {rating}/5"
+                    )
+                else:
+                    await self._tg.send_message(chat_id, "❌ Error al guardar feedback")
+            else:
+                await self._tg.send_message(chat_id, "❌ Feedback no disponible (sin DB)")
+            return
+
+        # ── /ratings ──────────────────────────────────────────
+        if text.startswith("/ratings"):
+            if self._feedback:
+                summary = await self._feedback.get_team_summary()
+                await self._tg.send_message(chat_id, summary)
+            else:
+                await self._tg.send_message(chat_id, "❌ Ratings no disponibles (sin DB)")
             return
 
         # ── /cline ── muestra estado de CLINE (cross-agent) ────────────
@@ -528,6 +595,27 @@ class Bot:
         self._cancels[chat_id] = cancel_event
         self._busy[chat_id] = True
 
+        # ── Fase 4: Inyectar contexto de memoria episódica ──
+        episodic_context = ""
+        if self._memory and msg.chat.chat_type in ("group", "supergroup"):
+            try:
+                episodic_context = await self._memory.get_context(
+                    text, limit=2, min_similarity=0.65
+                )
+            except Exception as exc:
+                logger.debug("%s: episodic memory context failed: %s", self._name, exc)
+
+        # Si hay contexto episódico, extender el mensaje
+        if episodic_context:
+            text = f"{text}\n\n[Contexto]\n{episodic_context}"
+            logger.debug(
+                "%s: injected episodic context (%d chars)", self._name, len(episodic_context)
+            )
+
+        # ── Fase 4: Inyectar perfil de personalidad ──
+        if self._profile_prompt and msg.chat.chat_type in ("group", "supergroup"):
+            text = f"[{self._profile_prompt}]\n\n{text}"
+
         try:
             await self._reply(chat_id, msg.message_id, text, cancel_event)
         finally:
@@ -546,6 +634,21 @@ class Bot:
                 )
             # Clear reaction on original message
             await self._tg.set_reaction(chat_id, msg.message_id, "")
+
+        # ── Fase 4: Almacenar en memoria episódica ──
+        if self._memory and msg.chat.chat_type in ("group", "supergroup"):
+            response_text = self._last_response.get(chat_id, "")
+            if response_text:
+                try:
+                    await self._memory.store(
+                        conversation_id=conv_id,
+                        bot_name=self._name.lower(),
+                        summary=response_text[:500],
+                        topics=[],
+                        turn_count=1,
+                    )
+                except Exception as exc:
+                    logger.debug("%s: failed to store conversation memory: %s", self._name, exc)
 
     # ── Agent management actions ─────────────────────────────────────────
 
