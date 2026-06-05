@@ -119,23 +119,29 @@ async def transcribe_audio(audio_path: str) -> str:
     contents = [
         genai_types.Content(
             role="user",
-            parts=[genai_types.Part.from_uri(
-                file_uri=gf.uri,
-                mime_type=gf.mime_type or _AUDIO_MIME_MAP.get(p.suffix.lower(), "audio/ogg")
-            )],
+            parts=[
+                genai_types.Part.from_uri(
+                    file_uri=gf.uri,
+                    mime_type=gf.mime_type or _AUDIO_MIME_MAP.get(p.suffix.lower(), "audio/ogg"),
+                )
+            ],
         ),
         genai_types.Content(
             role="user",
-            parts=[genai_types.Part.from_text(
-                text="Transcribe el audio palabra por palabra en español rioplatense. "
-                     "No agregues nada más que la transcripción."
-            )],
+            parts=[
+                genai_types.Part.from_text(
+                    text="Transcribe el audio palabra por palabra en español rioplatense. "
+                    "No agregues nada más que la transcripción."
+                )
+            ],
         ),
     ]
 
     model = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
     try:
-        response = client.models.generate_content(model=model, contents=contents, config=genai_types.GenerateContentConfig())
+        response = client.models.generate_content(
+            model=model, contents=contents, config=genai_types.GenerateContentConfig()
+        )
     except Exception as e:
         logger.error("Gemini API error: %s", e)
         raise RuntimeError(f"Error en Gemini API: {e}") from e

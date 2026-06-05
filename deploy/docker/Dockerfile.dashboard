@@ -1,0 +1,25 @@
+# LINA — Monitoring Dashboard
+# Standalone HTTP dashboard for LINA ecosystem monitoring.
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir uv==0.4.*
+
+COPY infrastructure/gateway/dashboard/pyproject.toml .
+COPY infrastructure/gateway/dashboard/src ./src
+
+RUN uv venv /app/.venv && \
+    uv pip install --no-cache --python /app/.venv/bin/python .
+
+ENV PATH="/app/.venv/bin:${PATH}"
+
+RUN useradd --no-create-home --uid 1000 dashboard
+USER dashboard
+
+EXPOSE 8090
+
+CMD ["python", "-m", "lina_dashboard", "--port", "8090"]

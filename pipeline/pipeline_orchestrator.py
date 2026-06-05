@@ -117,7 +117,10 @@ CRÍTICO: 2 archivos máximo. Si ya entendés, producí el plan directo.
 
 Terminá con:
 ---
-RESUMEN: 3 líneas con lo más importante.""",
+RESUMEN: 3 líneas con lo más importante.
+
+⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
+## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
             "Research": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
 Tu rol: RESEARCH ENGINEER. Investigá para la implementación.
 
@@ -128,7 +131,10 @@ Tu rol: RESEARCH ENGINEER. Investigá para la implementación.
 
 Terminá con:
 ---
-RESUMEN: 3 líneas o "Sin hallazgos adicionales".""",
+RESUMEN: 3 líneas o "Sin hallazgos adicionales".
+
+⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
+## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
             "Dev": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
 Tu rol: DEVELOPER. Implementá la solución con estándar profesional.
 
@@ -149,7 +155,10 @@ Pasos:
 
 Terminá con:
 ---
-RESUMEN: branch | archivos | tests pasan (SÍ/NO)""",
+RESUMEN: branch | archivos | tests pasan (SÍ/NO)
+
+⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
+## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
             "Review": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
 Tu rol: CODE REVIEWER. Revisá la implementación de Cline.
 
@@ -161,7 +170,10 @@ Tu rol: CODE REVIEWER. Revisá la implementación de Cline.
 
 Terminá con:
 ---
-RESUMEN: ✅ Aprobado / ❌ Rechazado + razón.""",
+RESUMEN: ✅ Aprobado / ❌ Rechazado + razón.
+
+⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
+## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
             "Test": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
 Tu rol: QA. Validá la implementación rigurosamente.
 
@@ -172,7 +184,10 @@ Tu rol: QA. Validá la implementación rigurosamente.
 
 Terminá con:
 ---
-RESUMEN: ✅ tests OK / ❌ FAIL + cuáles fallaron.""",
+RESUMEN: ✅ tests OK / ❌ FAIL + cuáles fallaron.
+
+⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
+## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
             "Doc": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
 Tu rol: DOCS. Documentá los cambios realizados.
 
@@ -183,7 +198,10 @@ Tu rol: DOCS. Documentá los cambios realizados.
 
 Terminá con:
 ---
-RESUMEN: docs actualizados o "Sin cambios".""",
+RESUMEN: docs actualizados o "Sin cambios".
+
+⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
+## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
             "Analysis": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
 Tu rol: ANALYST. Verificá la calidad general de la implementación.
 
@@ -195,28 +213,48 @@ Tu rol: ANALYST. Verificá la calidad general de la implementación.
 
 Terminá con:
 ---
-RESUMEN: ✅ Aprobado / 🔄 Reiterar + cambios.""",
-            "Decision": f"""Revisá el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
-Tu rol: TECH LEAD DECISION. Basado en Analysis, Review y Test:
-✅ COMPLETE → cerrar issue.
-🔄 REITERATE → volver a Dev con cambios específicos.
+RESUMEN: ✅ Aprobado / 🔄 Reiterar + cambios.
 
-Decisión final. Terminá con:
+⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
+## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión""",
+            "Decision": f"""Revisa el issue #{issue_num} en github.com/federico-dominguez/lina/issues/{issue_num}
+Tu rol: TECH LEAD DECISION. BASADO EN TODOS LOS PASOS PREVIOS.
+
+CHECKLIST:
+1. El codigo implementa TODO lo que pide el issue? (gh issue view)
+2. Los tests pasan? (gh pr view PR --json mergeable)  
+3. El PR es mergeable?
+4. Codigo limpio y profesional?
+
+SI TODO OK: EJECUTA:
+  1. gh pr merge PR --squash
+  2. gh issue close #{issue_num}
+  3. DECISION: COMPLETE
+SI FALLA ALGO: DECISION: REITERATE + detallar cambios exactos que faltan.
+
+Termina con:
 ---
-DECISION: ✅ COMPLETE / 🔄 REITERATE"""
+DECISION: COMPLETE / REITERATE
+RAZON: ...
+PR: #NUMERO
+MERGE: ✓ (si COMPLETE)
+COMMIT: hash del squash merge
+
+⚠️ MANDATORIO: gh issue comment con el siguiente template fijo:
+## Paso - Bot | Resumen | Archivos | Tests: pass/fail | PR: #N | Conclusión"""
         }
         p = prompts.get(name, extra)
         return {"name": name, "bot": bot, "timeout": timeout, "prompt": p}
     
     # ── Base steps by label ──
     steps_map = {
-        "bug":       [step("Analyze","lina",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600)],
+        "bug":       [step("Analyze","lina",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600), step("Decision","lina",300)],
         "memory":    [step("Analyze","lina",900), step("Dev","cline",1800), step("Review","gemma",600), step("Test","cline",600), step("Analysis","goose",600), step("Decision","lina",300)],
-        "refactor":  [step("Analyze","lina",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600)],
-        "enhancement": [step("Analyze","lina",600), step("Research","gemma",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600)],
-        "docs":      [step("Dev","cline",600), step("Doc","cline",300)],
-        "infra":     [step("Analyze","lina",600), step("Dev","cline",1200), step("Test","cline",600)],
-        "security":  [step("Analyze","lina",600), step("Research","gemma",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600)],
+        "refactor":  [step("Analyze","lina",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600), step("Decision","lina",300)],
+        "enhancement": [step("Analyze","lina",600), step("Research","gemma",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600), step("Decision","lina",300)],
+        "docs":      [step("Dev","cline",600), step("Doc","cline",300), step("Decision","lina",300)],
+        "infra":     [step("Analyze","lina",600), step("Dev","cline",1200), step("Test","cline",600), step("Decision","lina",300)],
+        "security":  [step("Analyze","lina",600), step("Research","gemma",600), step("Dev","cline",1200), step("Review","gemma",600), step("Test","cline",600), step("Decision","lina",300)],
     }
     
     for label_key, steps in steps_map.items():
@@ -306,11 +344,18 @@ def run_pipeline(feature_or_issue):
             if _check_stop():
                 raise SystemExit("🛑 Detenido por usuario")
 
-        # Determine pass/fail from test output
-        test_out = step_outputs.get("Test", "")
-        has_pass = "FAIL" not in test_out.upper()[:200]
-        has_fail = "❌ FAIL" in test_out or ("FAIL" in test_out.upper()[:100] and "NO" not in test_out.upper()[:100])
-        result["passed"] = has_pass and not has_fail
+        # Determine pass/fail from LINA Decision step
+        decision_out = step_outputs.get("Decision", "")
+        if not decision_out:
+            result["passed"] = False
+        elif "COMPLETE" in decision_out.upper()[:200]:
+            result["passed"] = True
+        elif "REITERATE" in decision_out.upper()[:200]:
+            result["passed"] = False
+            log("🔁 REITERATE — issue quedara abierto para iterar")
+        else:
+            test_out = step_outputs.get("Test", "")
+            result["passed"] = "FAIL" not in test_out.upper()[:200]
 
         # ── Close issue ──
         summary = (

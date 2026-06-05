@@ -27,8 +27,11 @@ BOTS = {
 
 POLL_INTERVAL = 2
 SILENCE_TIMEOUT = 90  # segundos sin mensajes del bot = terminó
-# El gap más largo entre mensajes de un bot fue 40s (Cline, herramienta pesada)
-# Con 45s nos aseguramos de no cortar prematuramente
+# 2026-06-04: SILENCE_TIMEOUT se aplica al idle_since tracker.
+# Se detecta silencio cuando pasan SILENCE_TIMEOUT segundos SIN ningún mensaje nuevo del bot.
+# El gap más largo observado entre mensajes de un bot fue 40s (Cline, herramienta pesada).
+# Con 90s cubrimos operaciones largas sin falsos positivos.
+EDIT_DETECT = True  # detectar mensajes editados y tratarlos como nuevos
 MAX_WAIT = 600
 
 
@@ -89,14 +92,7 @@ async def _send(bot_name: str, text: str, timeout: int, last_n: int = 0) -> str:
 
             got_new = False
             for msg in msgs:
-                if msg.id not in seen and msg.id > last_id:
-                    # New message — process normally
-                    pass
-                elif msg.id in seen and msg.id > last_id:
-                    # Already seen — skip
-                    continue
-                elif msg.id <= last_id:
-                    # Already known — skip
+                if msg.id <= last_id:
                     continue
                 
                 # Check for edits: message already in seen but text changed
