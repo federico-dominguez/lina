@@ -392,19 +392,22 @@ class Bot:
 
         # ── Floor token: evitar que varios bots respondan a la vez ──────
         # Solo en grupos/supergrupos donde hay múltiples bots
-        conv_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"telegram-chat-{chat_id}"))  # UUID determinista por chat
+        conv_id = str(
+            uuid.uuid5(uuid.NAMESPACE_DNS, f"telegram-chat-{chat_id}")
+        )  # UUID determinista por chat
         if msg.chat.chat_type in ("group", "supergroup") and self._floor.is_enabled:
             token = await self._floor.try_acquire(
                 self._name.lower(),
                 conv_id,
-
                 timeout=self._cfg.floor_timeout,
             )
             if not token.granted:
                 # Otro bot tiene el turno — encolamos el mensaje como pendiente
                 logger.debug(
                     "%s: floor ocupado por %s, encolando mensaje %s",
-                    self._name, token.active_bot, msg.message_id,
+                    self._name,
+                    token.active_bot,
+                    msg.message_id,
                 )
                 await self._floor.enqueue_message(
                     conv_id,
@@ -414,8 +417,7 @@ class Bot:
                 )
                 await self._tg.send_message(
                     chat_id,
-                    f"⏳ {self._name} esperando turno… "
-                    f"({token.active_bot} está respondiendo)",
+                    f"⏳ {self._name} esperando turno… ({token.active_bot} está respondiendo)",
                 )
                 return
 
@@ -423,7 +425,9 @@ class Bot:
             self._floor_token_ids[chat_id] = token.token_id
             logger.debug(
                 "%s: floor adquirido (id=%s) conv=%s",
-                self._name, token.token_id, conv_id,
+                self._name,
+                token.token_id,
+                conv_id,
             )
 
             # ── Contexto acumulativo: inyectar historial de la conversación ──
@@ -440,7 +444,8 @@ class Bot:
                 text = f"{text}\n\n{ctx_text}"
                 logger.debug(
                     "%s: contexto inyectado (%d mensajes previos)",
-                    self._name, len(context_msgs),
+                    self._name,
+                    len(context_msgs),
                 )
 
             # Marcar mensajes pendientes como procesados (ACK)

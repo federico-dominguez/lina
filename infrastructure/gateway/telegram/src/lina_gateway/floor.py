@@ -23,18 +23,18 @@ from datetime import UTC, datetime, timedelta
 logger = logging.getLogger(__name__)
 
 _DEFAULT_FLOOR_TIMEOUT = 30.0  # segundos
-_CONTEXT_MESSAGE_LIMIT = 10    # últimos N mensajes para contexto acumulativo
+_CONTEXT_MESSAGE_LIMIT = 10  # últimos N mensajes para contexto acumulativo
 
 
 @dataclass
 class FloorToken:
     """Resultado de adquirir el token de turno."""
 
-    granted: bool                     # True = este bot tiene la palabra
-    conversation_id: str              # UUID de la conversación
+    granted: bool  # True = este bot tiene la palabra
+    conversation_id: str  # UUID de la conversación
     active_bot: str | None = None  # qué bot tiene el token (si no se concedió)
-    reason: str = ""                  # 'ok' | 'busy' | 'error'
-    token_id: int = 0                 # ID del registro en conversation_floor
+    reason: str = ""  # 'ok' | 'busy' | 'error'
+    token_id: int = 0  # ID del registro en conversation_floor
 
 
 @dataclass
@@ -114,7 +114,9 @@ class FloorTokenManager:
                             )
                             logger.debug(
                                 "Floor renovado: bot=%s conv=%s expires_at=%s",
-                                bot_name, conversation_id, now + timedelta(seconds=timeout),
+                                bot_name,
+                                conversation_id,
+                                now + timedelta(seconds=timeout),
                             )
                             return FloorToken(
                                 granted=True,
@@ -149,7 +151,9 @@ class FloorTokenManager:
                                 )
                                 logger.info(
                                     "Floor REASIGNADO por timeout: %s → %s conv=%s",
-                                    active["active_bot"], bot_name, conversation_id,
+                                    active["active_bot"],
+                                    bot_name,
+                                    conversation_id,
                                 )
                                 return FloorToken(
                                     granted=True,
@@ -184,7 +188,9 @@ class FloorTokenManager:
                     )
                     logger.debug(
                         "Floor CREADO: bot=%s conv=%s timeout=%.1fs",
-                        bot_name, conversation_id, timeout,
+                        bot_name,
+                        conversation_id,
+                        timeout,
                     )
                     return FloorToken(
                         granted=True,
@@ -232,7 +238,9 @@ class FloorTokenManager:
                 )
                 logger.debug(
                     "Floor LIBERADO: bot=%s conv=%s reason=%s",
-                    bot_name, conversation_id, reason,
+                    bot_name,
+                    conversation_id,
+                    reason,
                 )
             finally:
                 await conn.close()
@@ -262,11 +270,17 @@ class FloorTokenManager:
                        (conversation_id, from_bot, to_bot, message)
                        VALUES ($1, $2, $3, $4)
                        RETURNING id""",
-                    conversation_id, from_bot, to_bot, message,
+                    conversation_id,
+                    from_bot,
+                    to_bot,
+                    message,
                 )
                 logger.debug(
                     "Mensaje ENCOLADO: %s → %s conv=%s id=%s",
-                    from_bot, to_bot, conversation_id, msg_id,
+                    from_bot,
+                    to_bot,
+                    conversation_id,
+                    msg_id,
                 )
                 return msg_id
             finally:
@@ -323,7 +337,9 @@ class FloorTokenManager:
                          AND processed_at IS NULL
                        ORDER BY created_at ASC
                        LIMIT $3""",
-                    conversation_id, to_bot, limit,
+                    conversation_id,
+                    to_bot,
+                    limit,
                 )
                 return [dict(r) for r in rows]
             finally:
@@ -358,7 +374,8 @@ class FloorTokenManager:
                        WHERE conversation_id = $1
                        ORDER BY created_at DESC
                        LIMIT $2""",
-                    conversation_id, limit,
+                    conversation_id,
+                    limit,
                 )
                 return [
                     ContextMessage(
