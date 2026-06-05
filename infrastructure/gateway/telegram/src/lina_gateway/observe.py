@@ -437,6 +437,8 @@ class ObserveServer:
 
         if method == "GET" and path == "/":
             await self._serve_dashboard(writer)
+        elif method == "GET" and path == "/health":
+            await self._serve_health(writer)
         elif method == "GET" and path == "/health/status":
             await self._serve_health_status(writer)
         elif method == "POST" and path == "/api/comm":
@@ -543,6 +545,10 @@ class ObserveServer:
                 default=str,
             ).encode(),
         )
+
+    async def _serve_health(self, writer):
+        """GET /health — simple health check returning {"status":"ok"}."""
+        await self._send_http(writer, 200, b'{"status":"ok"}')
 
     async def _serve_health_status(self, writer):
         """GET /health/status — comprehensive health endpoint.

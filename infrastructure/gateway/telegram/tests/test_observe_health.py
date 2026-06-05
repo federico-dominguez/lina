@@ -160,6 +160,41 @@ class TestHealthStatusEndpoint:
         await observer.stop()
 
     @pytest.mark.asyncio
+    async def test_simple_health_endpoint(self, observer):
+        """GET /health returns simple JSON {"status":"ok"}."""
+        await observer.start()
+
+        writer = _MockWriter()
+        await observer._serve_health(writer)
+
+        assert writer.status_code == 200
+        data = json.loads(writer.body)
+        assert data == {"status": "ok"}
+
+        await observer.stop()
+
+    @pytest.mark.asyncio
+    async def test_simple_health_route_dispatch(self, observer):
+        """GET /health is correctly routed through _handle_http."""
+        import asyncio
+
+        await observer.start()
+
+        raw_request = b"GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n"
+        reader = asyncio.StreamReader()
+        reader.feed_data(raw_request)
+        reader.feed_eof()
+
+        writer = _MockWriter()
+        await observer._handle_connection(reader, writer)
+
+        assert writer.status_code == 200
+        data = json.loads(writer.body)
+        assert data == {"status": "ok"}
+
+        await observer.stop()
+
+    @pytest.mark.asyncio
     async def test_unknown_route_returns_404(self, observer):
         """Test that unknown routes still return 404."""
         import asyncio

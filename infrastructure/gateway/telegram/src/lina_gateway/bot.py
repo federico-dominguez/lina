@@ -26,7 +26,7 @@ from .commands.audit import handle_audit
 from .config import BotConfig, SharedConfig
 from .episodic_memory import EpisodicMemory
 from .feedback import FeedbackManager
-from .floor import FloorTokenManager
+from .floor import FloorTokenManager, _is_higher_priority
 from .formatter import (
     format_tool_status,
     format_with_thinking,
@@ -198,7 +198,18 @@ class Bot:
                 ):
                     mentioned = text[ent.offset : ent.offset + ent.length].lstrip("@")
                     if self._is_this_bot(mentioned):
-                        return True
+                        import re as _re_mod
+
+                        _prio_mentioned = _re_mod.findall(
+                            r"@s_([a-z]+)_bot", msg.text.lower() if msg.text else ""
+                        )
+                        _my_name = self._name.lower()
+                        if len(_prio_mentioned) > 1 and _my_name in _prio_mentioned:
+                            for _other in _prio_mentioned:
+                                if _other != _my_name and _is_higher_priority(_other, _my_name):
+                                    logger.debug("%s: skipping - %s has priority", _my_name, _other)
+                                    return False
+                    return True
                 elif (isinstance(ent, dict) and ent.get("type") == "text_mention") or (
                     not isinstance(ent, dict) and ent.type == "text_mention"
                 ):
