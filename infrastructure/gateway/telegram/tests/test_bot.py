@@ -32,7 +32,8 @@ def _make_config() -> Config:
 
 
 def _make_bot() -> Bot:
-    return Bot(_make_config())
+    cfg = _make_config()
+    return Bot(cfg.bots[0], cfg.shared)
 
 
 class FakeTg:

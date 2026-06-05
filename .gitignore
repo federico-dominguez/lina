@@ -67,6 +67,11 @@ bin/goosed-linux-amd64
 bin/goosed-*
 deploy/docker/secrets/
 
+# ─── Gateway wrappers (contienen variables de entorno con tokens) ──────
+bin/*-gateway-wrapper.sh
+bin/*-gateway-entrypoint.py
+bin/gemma-*.py
+
 # ─── Telegram E2E testing ───────────────────────────────────────────────
 tests/e2e/telegram/.sessions/
 tests/e2e/telegram/.report.json
@@ -76,3 +81,4 @@ tests/e2e/telegram/.sessions/daemon/
 limpiza-audit/
 comm/*.session*
 comm/__pycache__/
+comm/lib/

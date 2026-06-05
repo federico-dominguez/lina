@@ -24,6 +24,7 @@ BOTS = {
     "lina": {"username": "s_lina_bot", "gateway": "localhost:9093"},
     "cline": {"username": "s_cline_bot", "gateway": "localhost:9092"},
     "goose": {"username": "s_goose_bot", "gateway": "localhost:9091"},
+    "gemma": {"username": "s_gemma_bot", "gateway": "localhost:9094"},
 }
 GROUP_SUBSTR = "Comm"
 

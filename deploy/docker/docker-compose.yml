@@ -539,18 +539,16 @@ services:
     mem_limit: 2g
     memswap_limit: 2g
 
-  # ─── Telegram Gateway Unificado — multi-bot (Issue #160) ─────────────────
-  # Un ÚNICO proceso Python que maneja los 3 bots de Telegram:
-  #   @s_lina_bot  → lina-goosed:3000   (Docker network)
-  #   @s_cline_bot → localhost:3001      (host.docker.internal)
-  #   @s_goose_bot → localhost:42359     (host.docker.internal)
+  # ─── [DEPRECATED] Telegram Gateway Docker — reemplazado por host-native ──
+  # Ya no se usa. Reemplazado por:
+  #   - goose-gateway.service    (systemd, solo @s_goose_bot)
+  #   - lina-gateway-host.service (systemd, LINA + CLINE + Gemma)
   #
-  # Ventajas: -1 GB RAM (3 × 512 MB → 1 × 512 MB), pool de conexiones compartido,
-  # logging centralizado, observe unificado.
-  #
-  # Cada bot se configura con vars MULTI_BOT_COUNT + BOT_1_*, BOT_2_*, BOT_3_*
-  # (ver config.py para la sintaxis completa).
+  # Los gateways host-native evitan el crash sin TTY (signal handler),
+  # eliminan la dependencia de host.docker.internal, y son más resilientes.
+  # Mantener solo como referencia; no arranca por defecto (profile: deprecated).
   lina-gateway:
+    profiles: ["deprecated"]   # No arranca por defecto — usar host-native
     container_name: lina-gateway
     build:
       context: ../..
@@ -565,8 +563,11 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"  # alcanzar cline-goosed y goose local
     environment:
-      # ── Multi-bot mode: 3 bots ──────────────────────────────────────────────
-      MULTI_BOT_COUNT: "3"
+      # ── Multi-bot mode: 4 bots (LINA + CLINE + GOOSE + Gemma) ───────────────
+      # ⚠️  DEPRECATED: El gateway Docker no se usa más.
+      #     Ver lina-gateway-host.service (host-native, 3 bots) y
+      #     goose-gateway.service (host-native, solo goose).
+      MULTI_BOT_COUNT: "4"
 
       # Bot 1 — LINA → lina-goosed (Docker network)
       BOT_1_NAME: "LINA"
@@ -587,6 +588,16 @@ services:
       BOT_2_TRUSTED_USERS: ${CLINE_TRUSTED_USERS:-${DESKTOP_TRUSTED_USERS:-}}
       BOT_2_NOTIFY_CHAT_IDS: ${CLINE_NOTIFY_CHAT_IDS:-${DESKTOP_NOTIFY_CHAT_IDS:-}}
       BOT_2_OBSERVE_PORT: "9092"
+
+      # Bot 4 — Gemma → gemma-goosed (host network via host.docker.internal:3002)
+      BOT_4_NAME: "Gemma"
+      BOT_4_USERNAME: "s_gemma_bot"
+      BOT_4_TOKEN: ${GEMMA_BOT_TOKEN:-}
+      BOT_4_GOOSED_URL: "https://host.docker.internal:3002"
+      BOT_4_GOOSED_SECRET: ${GEMMA_SECRET_KEY:-}
+      BOT_4_TRUSTED_USERS: ${GEMMA_TRUSTED_USERS:-}
+      BOT_4_NOTIFY_CHAT_IDS: ${GEMMA_NOTIFY_CHAT_IDS:-}
+      BOT_4_OBSERVE_PORT: "9094"
 
       # Bot 3 — Goose → goosed local del usuario (host.docker.internal:42359)
       BOT_3_NAME: "Goose"

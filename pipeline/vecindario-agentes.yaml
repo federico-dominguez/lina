@@ -49,8 +49,10 @@ phases:
 
   - id: 1
     name: Protocolo Conversacional
-    status: in_progress
-    target: "2026-06-11"
+
+    status: completed
+    completed: "2026-06-05"
+target: "2026-06-11"
     started: "2026-06-05"
     dependencies:
       - phase-0

@@ -397,7 +397,8 @@ class Bot:
             token = await self._floor.try_acquire(
                 self._name.lower(),
                 conv_id,
-                timeout=self._floor_timeout,
+
+                timeout=self._cfg.floor_timeout,
             )
             if not token.granted:
                 # Otro bot tiene el turno — encolamos el mensaje como pendiente
