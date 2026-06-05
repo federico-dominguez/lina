@@ -1,0 +1,229 @@
+# Pipeline: Vecindario de Agentes — Convergencia Conversacional
+# ADR-0138: https://github.com/federico-dominguez/lina/issues/163
+# Implementación por fases, cada fase = grupo de issues + PRs
+
+metadata:
+  name: vecindario-agentes
+  adr: "0138"
+  version: "1.0"
+  created: "2026-06-04"
+  author: Goose
+
+phases:
+  - id: 0
+    name: Fundación
+    status: completed
+    completed: "2026-06-04"
+    issues:
+      - "#160 — Multi-bot gateway fix"
+      - "#163 — ADR-0138"
+    deliverables:
+      - type: service
+        name: lina-gateway-host
+        path: /home/fede/.config/systemd/user/lina-gateway-host.service
+        description: Gateway nativo del host (systemd user service)
+      - type: script
+        name: lina-gateway-wrapper
+        path: /home/fede/lina/bin/lina-gateway-wrapper.sh
+        description: Wrapper de entorno para el gateway
+      - type: bridge
+        name: socat-3001
+        description: Forward 172.17.0.1:3001 → 127.0.0.1:3001 (CLINE)
+      - type: bridge
+        name: socat-42359
+        description: Forward 172.17.0.1:42359 → 127.0.0.1:42359 (GOOSE)
+      - type: patch
+        name: signal-handler-fix
+        path: /home/fede/lina/infrastructure/gateway/telegram/src/lina_gateway/__main__.py
+        description: Manejo graceful de signal handlers sin TTY
+      - type: patch
+        name: debug-logging
+        path: /home/fede/lina/infrastructure/gateway/telegram/src/lina_gateway/__main__.py
+        description: Logging de tareas completadas en asyncio.wait
+    tests:
+      - "send-lina.py \"ping\" → LINA responde ✅"
+      - "send-cline.py \"ping\" → CLINE responde ✅"
+      - "send-goose.py \"ping\" → Goose recibe ✅"
+      - "LinaDb.writeClineCommand → CLINE status=completed ✅"
+      - "LINA → send-goose.py → Goose responde ✅ (bidireccional)"
+
+  - id: 1
+    name: Protocolo Conversacional
+    status: pending
+    target: "2026-06-11"
+    dependencies:
+      - phase-0
+    issues:
+      - "issue: floor-token — Token de turno conversacional"
+      - "issue: message-queue — Cola FIFO de mensajes entre bots"
+      - "issue: turn-timeout — Timeout de turno con escalado"
+      - "issue: context-accumulator — Contexto acumulativo en prompts"
+    schema:
+      floor_token:
+        table: conversation_floor
+        columns:
+          - id: SERIAL PRIMARY KEY
+          - active_bot: TEXT NOT NULL
+          - conversation_id: UUID NOT NULL
+          - acquired_at: TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          - expires_at: TIMESTAMPTZ NOT NULL
+          - release_reason: TEXT  # 'timeout' | 'voluntary' | 'preempted'
+      message_queue:
+        table: conversation_messages
+        columns:
+          - id: SERIAL PRIMARY KEY
+          - conversation_id: UUID NOT NULL
+          - from_bot: TEXT NOT NULL
+          - to_bot: TEXT NOT NULL
+          - message: TEXT NOT NULL
+          - created_at: TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          - processed_at: TIMESTAMPTZ
+          - ack_at: TIMESTAMPTZ
+    implementation:
+      gateway_changes:
+        - file: infrastructure/gateway/telegram/src/lina_gateway/bot.py
+          changes:
+            - "Agregar verificación de floor_token antes de responder en grupo"
+            - "Agregar cola de mensajes con procesamiento FIFO"
+            - "Agregar timeout y release automático del token"
+        - file: infrastructure/gateway/telegram/src/lina_gateway/__main__.py
+          changes:
+            - "Inicializar gestor de turnos en startup"
+      db_changes:
+        - file: sql/migrations/011-conversation-floor.sql
+          description: "Tabla conversation_floor para token de turno"
+        - file: sql/migrations/012-conversation-messages.sql
+          description: "Tabla conversation_messages para cola FIFO"
+    tests:
+      - "2 bots conversan alternándose sin pisarse"
+      - "Timeout expira → token pasa al siguiente bot"
+      - "Contexto acumulativo incluye últimos N mensajes"
+
+  - id: 2
+    name: Orquestación Inteligente
+    status: pending
+    target: "2026-06-25"
+    dependencies:
+      - phase-1
+    issues:
+      - "issue: orchestrator — Servicio de orquestación conversacional"
+      - "issue: semantic-routing — Enrutamiento semántico de mensajes"
+      - "issue: auto-delegation — Delegación automática entre bots"
+      - "issue: conversation-dashboard — Dashboard de conversaciones"
+    implementation:
+      new_services:
+        - name: lina-orchestrator-conversation
+          port: 8200
+          description: "Orquestador central de conversaciones multi-bot"
+      gateway_changes:
+        - file: infrastructure/gateway/telegram/src/lina_gateway/bot.py
+          changes:
+            - "Modo 'orquestado': pasar control al orquestador"
+            - "Routing de mensajes según capacidad del bot"
+    tests:
+      - "Usuario pide tarea compleja → orquestador descompone y delega"
+      - "Bot A puede pedir ayuda a Bot B durante una tarea"
+      - "Dashboard muestra historial completo de la conversación"
+
+  - id: 3
+    name: Resiliencia y Observabilidad
+    status: pending
+    target: "2026-07-09"
+    dependencies:
+      - phase-2
+    issues:
+      - "issue: heartbeat — Heartbeat de bots (30s)"
+      - "issue: auto-reconnect — Reconexión automática con retoma de contexto"
+      - "issue: circuit-breaker — Circuit breaker por bot"
+      - "issue: audit-log — Logging centralizado de eventos"
+      - "issue: metrics — Métricas de conversación"
+    implementation:
+      db_changes:
+        - description: "Tabla bot_heartbeat con TTL de 60s"
+        - description: "Tabla circuit_breaker con umbrales configurables"
+        - description: "Tabla conversation_metrics con latencia/tokens/turnos"
+      gateway_changes:
+        - file: infrastructure/gateway/telegram/src/lina_gateway/__main__.py
+          changes:
+            - "Loop de heartbeat en segundo plano"
+        - file: infrastructure/gateway/telegram/src/lina_gateway/bot.py
+          changes:
+            - "Reintento con backoff exponencial al reconectar"
+            - "Circuit breaker en inicialización de bot"
+    tests:
+      - "Matar bot → heartbeat detecta falta → reconexión automática"
+      - "Bot falla 5 veces seguidas → circuit breaker aísla"
+      - "Métricas disponibles vía endpoint /metrics"
+
+  - id: 4
+    name: Memoria Compartida y Evolución
+    status: pending
+    target: "2026-07-23"
+    dependencies:
+      - phase-3
+    issues:
+      - "issue: episodic-memory — Memoria episódica con pgvector"
+      - "issue: rag-conversation — RAG conversacional"
+      - "issue: bot-profiles — Perfiles de personalidad por bot"
+      - "issue: feedback-loop — Retroalimentación entre bots"
+    implementation:
+      db_changes:
+        - description: "Tabla conversation_summaries con embedding pgvector"
+        - description: "Tabla bot_profiles con configuración de personalidad"
+        - description: "Tabla feedback_ratings para evaluación entre bots"
+    tests:
+      - "Conversación similar a una anterior → se recupera contexto"
+      - "Bot evalúa respuesta de otro bot → mejora con feedback"
+      - "Perfiles de personalidad afectan tono y estilo de respuesta"
+
+# Scripts de prueba automatizados
+test_scripts:
+  phase_0:
+    - name: e2e-basic-comm
+      path: tests/e2e/telegram/test_phase0_comm.py
+      description: "Verifica que los 3 bots reciben y responden mensajes vía Comm relay"
+  phase_1:
+    - name: e2e-floor-token
+      path: tests/e2e/telegram/test_phase1_floor.py
+      description: "Verifica que 2 bots conversan sin pisarse usando floor token"
+    - name: e2e-message-queue
+      path: tests/e2e/telegram/test_phase1_queue.py
+      description: "Verifica cola FIFO y procesamiento ordenado"
+  phase_2:
+    - name: e2e-orchestrator
+      path: tests/e2e/telegram/test_phase2_orchestrator.py
+      description: "Verifica descomposición y delegación de tareas"
+
+# Monitoreo
+monitoring:
+  metrics:
+    - name: conversation_turns_total
+      type: counter
+      description: "Total de turnos de conversación"
+    - name: conversation_latency_seconds
+      type: histogram
+      description: "Latencia de respuesta por bot"
+    - name: bot_heartbeat_age_seconds
+      type: gauge
+      description: "Segundos desde último heartbeat por bot"
+  alerts:
+    - name: BotDown
+      condition: "bot_heartbeat_age > 60s"
+      severity: warning
+      action: "systemctl --user restart lina-gateway-host"
+    - name: CircuitBreakerOpen
+      condition: "bot_failures > 5 in 10min"
+      severity: critical
+      action: "Notificar a Federico + desactivar bot automáticamente"
+    - name: ConversationStall
+      condition: "No messages in group for > 5min"
+      severity: info
+      action: "Enviar ping de keepalive al grupo"
+
+# Referencias
+references:
+  adr: "docs/architecture/0138-vecindario-agentes.md"
+  gateway_code: "infrastructure/gateway/telegram/"
+  comm_scripts: "lina/comm/"
+  systemd_service: "deploy/systemd/lina-gateway-host.service"
+  gnss_analogy: "mcps/gns3/"

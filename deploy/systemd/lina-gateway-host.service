@@ -1,0 +1,17 @@
+[Unit]
+Description=LINA Multi-Bot Gateway (host native) — LINA, CLINE, Goose
+Documentation=https://github.com/federico-dominguez/lina/issues/163
+After=network-online.target docker.service lina-goosed.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/fede/lina/bin/lina-gateway-wrapper.sh
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
