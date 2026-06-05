@@ -18,8 +18,7 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import datetime, timedelta, UTC
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +32,7 @@ class FloorToken:
 
     granted: bool                     # True = este bot tiene la palabra
     conversation_id: str              # UUID de la conversación
-    active_bot: Optional[str] = None  # qué bot tiene el token (si no se concedió)
+    active_bot: str | None = None  # qué bot tiene el token (si no se concedió)
     reason: str = ""                  # 'ok' | 'busy' | 'error'
     token_id: int = 0                 # ID del registro en conversation_floor
 
@@ -100,7 +99,7 @@ class FloorTokenManager:
                         conversation_id,
                     )
 
-                    now = datetime.now(timezone.utc)
+                    now = datetime.now(UTC)
 
                     if active:
                         # Hay un floor activo
@@ -128,7 +127,7 @@ class FloorTokenManager:
                             # Otro bot tiene el token — ver si expiró
                             expires = active["expires_at"]
                             if expires.tzinfo is None:
-                                expires = expires.replace(tzinfo=timezone.utc)
+                                expires = expires.replace(tzinfo=UTC)
                             if now >= expires:
                                 # Token expirado — reasignar
                                 await conn.execute(
@@ -378,7 +377,7 @@ class FloorTokenManager:
 
     # ── Utilidades ────────────────────────────────────────────────────────────
 
-    async def get_active_floor(self, conversation_id: str) -> Optional[dict]:
+    async def get_active_floor(self, conversation_id: str) -> dict | None:
         """Devuelve información del floor activo, o None si no hay."""
         if not self._enabled:
             return None
