@@ -152,6 +152,15 @@ docker-logs:
 docker-ps:
     docker compose -f "{{COMPOSE_FILE}}" ps
 
+# ─── Migraciones ──────────────────────────────────────────────────────────────
+# Aplica migraciones SQL pendientes contra la base de datos.
+# Uso: just migrate            # aplica pendientes
+#      just migrate --check    # solo muestra pendientes
+DB_URL := env_var_or_default('LINA_DB_URL', 'postgresql://lina:lina_dev@localhost:5432/lina')
+
+migrate args="":
+    @LINA_DB_URL="{{DB_URL}}" "{{LINA_DIR}}/sql/migrations/_migrate.sh" {{args}}
+
 # ─── Tests ───────────────────────────────────────────────────────────────────
 test:
     @for d in secrets fs-safe shell-policy systemd-user moodle lina-db; do \
