@@ -109,7 +109,7 @@ target: "2026-06-11"
 
   - id: 2
     name: Orquestación Inteligente
-    status: pending
+    status: in_progress
     target: "2026-06-25"
     dependencies:
       - phase-1

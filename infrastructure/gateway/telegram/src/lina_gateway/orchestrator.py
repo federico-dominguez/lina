@@ -1,0 +1,421 @@
+"""
+Orquestador inteligente — clasificación de intención y enrutamiento entre bots.
+
+Determina si un mensaje debe ser redirigido a otro bot según su intención
+y las capacidades declaradas de cada bot en el vecindario.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import final
+
+
+class IntentCategory(StrEnum):
+    STUDY = "study"
+    DEV = "dev"
+    RESEARCH = "research"
+    OPS = "ops"
+    GENERAL = "general"
+    COMMAND = "command"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+@dataclass
+class Intent:
+    category: IntentCategory
+    confidence: float
+    matched_keywords: list[str] = field(default_factory=list)
+
+
+@dataclass
+class BotCapability:
+    name: str
+    username: str
+    intents: list[IntentCategory]
+    description: str
+
+
+@dataclass
+class RouteDecision:
+    should_route: bool = False
+    target_bot: str | None = None
+    target_username: str | None = None
+    intent_category: str = ""
+    reason: str = ""
+
+
+@final
+class IntentClassifier:
+    """Clasificador de intención basado en patrones regex de palabras clave."""
+
+    # Patrones organizados por categoría
+    _PATTERNS: dict[IntentCategory, list[re.Pattern]] = {
+        IntentCategory.DEV: [
+            re.compile(r, re.IGNORECASE)
+            for r in [
+                r"implementa",
+                r"implementá",
+                r"crea",
+                r"creá",
+                r"hacé",
+                r"desarroll",
+                r"program",
+                r"codig",
+                r"código",
+                r"script",
+                r"api",
+                r"endpoint",
+                r"bug",
+                r"feature",
+                r"branch",
+                r"commit",
+                r"pr",
+                r"git",
+                r"push",
+                r"deploy",
+                r"función",
+                r"clase",
+                r"método",
+                r"test",
+                r"pytest",
+                r"refactor",
+                r"fix",
+            ]
+        ],
+        IntentCategory.STUDY: [
+            re.compile(r, re.IGNORECASE)
+            for r in [
+                r"estudi",
+                r"moodle",
+                r"curso",
+                r"materi",
+                r"clase",
+                r"profesor",
+                r"quiz",
+                r"examen",
+                r"parcial",
+                r"tarea",
+                r"practic",
+                r"apunt",
+                r"leer",
+                r"repas",
+                r"resum",
+                r"módulo",
+                r"tema",
+            ]
+        ],
+        IntentCategory.RESEARCH: [
+            re.compile(r, re.IGNORECASE)
+            for r in [
+                r"investig",
+                r"busc",
+                r"averigu",
+                r"google",
+                r"internet",
+                r"webs",
+                r"página",
+                r"articul",
+                r"documentación",
+                r"cómo funciona",
+                r"compar",
+                r"alternativ",
+                r"analiz",
+                r"evaluá",
+            ]
+        ],
+        IntentCategory.OPS: [
+            re.compile(r, re.IGNORECASE)
+            for r in [
+                r"docker",
+                r"servicio",
+                r"deploy",
+                r"infra",
+                r"servidor",
+                r"red",
+                r"config",
+                r"instal",
+                r"actualiz",
+                r"monitoreo",
+                r"backup",
+                r"restart",
+                r"reinici",
+                r"systemd",
+                r"nginx",
+                r"proxy",
+                r"puerto",
+                r"container",
+                r"volumen",
+            ]
+        ],
+        IntentCategory.GENERAL: [
+            re.compile(r, re.IGNORECASE)
+            for r in [
+                r"^hola",
+                r"chau",
+                r"gracias",
+                r"quién sos",
+                r"buen día",
+                r"buenas",
+                r"^ok$",
+                r"dale",
+                r"listo",
+                r"perfecto",
+                r"^sí$",
+                r"^si$",
+                r"^no$",
+                r"^bien$",
+                r"vos",
+                r"sos",
+                r"cómo estás",
+                r"bye",
+                r"adiós",
+                r"chat",
+                r"nos vemos",
+            ]
+        ],
+        IntentCategory.COMMAND: [
+            re.compile(r, re.IGNORECASE)
+            for r in [
+                r"^/",
+                r"^!",
+                r"^\.",
+            ]
+        ],
+    }
+
+    _CONFIDENCE_SCORES: dict[IntentCategory, float] = {
+        IntentCategory.COMMAND: 1.0,
+        IntentCategory.DEV: 0.7,
+        IntentCategory.STUDY: 0.7,
+        IntentCategory.RESEARCH: 0.7,
+        IntentCategory.OPS: 0.7,
+        IntentCategory.GENERAL: 0.6,
+    }
+
+    def __init__(self) -> None:
+        self._cache: dict[str, Intent] = {}
+
+    def classify(self, text: str) -> Intent:
+        """Clasifica un texto en una categoría de intención."""
+        if not text or not text.strip():
+            return Intent(category=IntentCategory.GENERAL, confidence=0.5)
+
+        text_stripped = text.strip()
+
+        # Check cache
+        if text_stripped in self._cache:
+            return self._cache[text_stripped]
+
+        best: Intent | None = None
+
+        for category, patterns in self._PATTERNS.items():
+            matched_keywords: list[str] = []
+            for pat in patterns:
+                m = pat.search(text_stripped)
+                if m:
+                    matched_keywords.append(m.group())
+
+            if matched_keywords:
+                confidence = self._CONFIDENCE_SCORES.get(category, 0.6)
+                # Penalizar textos muy cortos para GENERAL
+                if category == IntentCategory.GENERAL and len(text_stripped) < 6:
+                    confidence = min(confidence, 0.6)
+                intent = Intent(
+                    category=category,
+                    confidence=confidence,
+                    matched_keywords=matched_keywords,
+                )
+                if best is None or confidence > best.confidence:
+                    best = intent
+                elif confidence == best.confidence and category == IntentCategory.COMMAND:
+                    best = intent
+
+        if best is None:
+            best = Intent(category=IntentCategory.GENERAL, confidence=0.5)
+
+        self._cache[text_stripped] = best
+        return best
+
+
+class CapabilityRegistry:
+    """Registro singleton de capacidades de bots."""
+
+    _instance: CapabilityRegistry | None = None
+
+    def __new__(cls) -> CapabilityRegistry:
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self) -> None:
+        if getattr(self, "_initialized", False):
+            return
+        self._initialized = True
+        self._capabilities: dict[str, BotCapability] = {
+            "lina": BotCapability(
+                name="lina",
+                username="lina_ai_bot",
+                intents=[
+                    IntentCategory.STUDY,
+                    IntentCategory.RESEARCH,
+                    IntentCategory.GENERAL,
+                    IntentCategory.COMMAND,
+                ],
+                description="Bot educativo orientado a estudio e investigación académica.",
+            ),
+            "cline": BotCapability(
+                name="cline",
+                username="cline_ai_bot",
+                intents=[
+                    IntentCategory.DEV,
+                    IntentCategory.STUDY,
+                ],
+                description="Bot de desarrollo y programación.",
+            ),
+            "goose": BotCapability(
+                name="goose",
+                username="goose_ai_bot",
+                intents=[
+                    IntentCategory.OPS,
+                    IntentCategory.DEV,
+                ],
+                description="Bot de operaciones e infraestructura.",
+            ),
+        }
+
+    def get_capability(self, bot_name: str) -> BotCapability | None:
+        """Obtiene la capacidad de un bot por nombre."""
+        return self._capabilities.get(bot_name.lower())
+
+    def can_handle(self, bot_name: str, category: IntentCategory) -> bool:
+        """Verifica si un bot puede manejar una categoría de intención."""
+        cap = self.get_capability(bot_name)
+        if cap is None:
+            return False
+        return category in cap.intents
+
+    _PRIMARY_BOT: dict[IntentCategory, list[str]] = {
+        IntentCategory.DEV: ["cline", "goose"],
+        IntentCategory.STUDY: ["lina", "cline"],
+        IntentCategory.RESEARCH: ["lina"],
+        IntentCategory.OPS: ["goose"],
+        IntentCategory.GENERAL: ["lina"],
+        IntentCategory.COMMAND: ["lina"],
+    }
+
+    def best_bot_for(self, category: IntentCategory, exclude: str = "") -> BotCapability | None:
+        """Encuentra el mejor bot para una categoría según prioridad, excluyendo opcionalmente uno."""
+        exclude = exclude.lower()
+        priority = self._PRIMARY_BOT.get(category, [])
+        for bot_name in priority:
+            if bot_name == exclude:
+                continue
+            cap = self._capabilities.get(bot_name)
+            if cap and category in cap.intents:
+                return cap
+        # Fallback: cualquier bot que pueda manejar la categoría
+        for cap in self._capabilities.values():
+            if cap.name.lower() == exclude:
+                continue
+            if category in cap.intents:
+                return cap
+        return None
+
+    def describe_capabilities(self) -> str:
+        """Devuelve una descripción legible de todos los bots y sus capacidades."""
+        lines: list[str] = []
+        for cap in self._capabilities.values():
+            intents_str = ", ".join(str(i) for i in cap.intents)
+            lines.append(f"@{cap.username} ({cap.name}): {intents_str} — {cap.description}")
+        return "\n".join(lines)
+
+    @classmethod
+    def reset(cls) -> None:
+        """Reset del singleton (para tests)."""
+        cls._instance = None
+
+
+class ConversationRouter:
+    """Router de conversaciones entre bots según intención y capacidades."""
+
+    _ROUTE_CONFIDENCE_THRESHOLD = 0.55
+
+    def __init__(self) -> None:
+        self._classifier = IntentClassifier()
+        self._registry = CapabilityRegistry()
+
+    @property
+    def classifier(self) -> IntentClassifier:
+        return self._classifier
+
+    @property
+    def registry(self) -> CapabilityRegistry:
+        return self._registry
+
+    def route(self, text: str, current_bot: str) -> RouteDecision:
+        """Determina si un mensaje debe ser redirigido a otro bot."""
+        if not text or not text.strip():
+            return RouteDecision()
+
+        intent = self._classifier.classify(text)
+
+        # Comandos y mensajes generales se quedan en el bot actual
+        if intent.category in (IntentCategory.COMMAND, IntentCategory.GENERAL):
+            return RouteDecision(
+                should_route=False,
+                intent_category=intent.category.value,
+                reason=f"Categoría {intent.category.value} no requiere enrutamiento.",
+            )
+
+        # Si la confianza es baja, no rutear
+        if intent.confidence < self._ROUTE_CONFIDENCE_THRESHOLD:
+            return RouteDecision(
+                should_route=False,
+                intent_category=intent.category.value,
+                reason=f"Confianza baja ({intent.confidence:.2f}) para {intent.category.value}.",
+            )
+
+        current = current_bot.lower()
+
+        # Verificar si el bot actual puede manejar esta intención
+        current_can_handle = self._registry.can_handle(current, intent.category)
+
+        if current_can_handle:
+            # El bot actual puede manejar esto — buscar si hay un bot primario diferente
+            better = self._registry.best_bot_for(intent.category, exclude=current)
+            if better is not None and better.name.lower() != current:
+                return RouteDecision(
+                    should_route=True,
+                    target_bot=better.name,
+                    target_username=better.username,
+                    intent_category=intent.category.value,
+                    reason=f"{current} puede manejarlo pero {better.name} es el bot primario para {intent.category.value}.",
+                )
+            return RouteDecision(
+                should_route=False,
+                intent_category=intent.category.value,
+                reason=f"{current} puede manejar {intent.category.value} y no hay mejor opción.",
+            )
+
+        # El bot actual NO puede manejar esta intención — buscar quien pueda
+        better = self._registry.best_bot_for(intent.category)
+        if better is None:
+            return RouteDecision(
+                should_route=False,
+                intent_category=intent.category.value,
+                reason=f"Ningún bot disponible para {intent.category.value}.",
+            )
+
+        return RouteDecision(
+            should_route=True,
+            target_bot=better.name,
+            target_username=better.username,
+            intent_category=intent.category.value,
+            reason=f"{current} no soporta {intent.category.value}, redirigiendo a {better.name}.",
+        )
