@@ -10,6 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
     "httpx[http2]>=0.27",
     "anyio>=4.4",
+    "psycopg2-binary>=2.9",
 ]
 
 [project.scripts]

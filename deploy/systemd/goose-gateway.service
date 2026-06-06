@@ -1,0 +1,20 @@
+[Unit]
+Description=Goose Gateway — @s_goose_bot → goosed local (port 42359)
+Documentation=https://github.com/federico-dominguez/lina
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fede
+Group=fede
+ExecStart=/home/fede/lina/bin/goose-gateway-wrapper.sh
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+Environment=HOME=/home/fede
+
+[Install]
+WantedBy=default.target

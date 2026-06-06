@@ -1395,7 +1395,127 @@ def get_pending_instructions(session_id: str) -> list[dict]:
     ]
 
 
-# ─── CLINE commands ────────────────────────────────────────────────────────────
+# ─── Comm (nuevo sistema de mensajería DB) ────────────────────────────────────
+
+
+@mcp.tool()
+def comm_send(
+    destination: str,
+    message: str,
+    sender: str = "",
+) -> dict:
+    """Envía un mensaje a otro bot a través del sistema Comm (DB → Telegram).
+
+    El mensaje se guarda en comm_messages con status='sent'. El servicio
+    comm-svc lo detecta y lo entrega al bot destino via Telegram (cuenta Comm).
+
+    Args:
+        destination: bot destino ('goose', 'lina', 'cline', 'gemma', 'fede', 'todos')
+        message:     texto del mensaje
+        sender:      bot que envía (default: auto-detecta por hostname o COMM_SENDER)
+
+    Returns:
+        {"id": int, "sender": str, "destination": str, "status": "sent", "message": str}
+    """
+    import socket
+    hostname = socket.gethostname().lower()
+    sender_map = {"goose": "goose", "lina": "lina", "cline": "cline", "gemma": "gemma"}
+    resolved = sender or os.environ.get("COMM_SENDER") or sender_map.get(hostname, "goose")
+
+    valid = {"goose", "lina", "cline", "gemma", "fede", "todos"}
+    if destination not in valid:
+        raise ValueError(f"destino inválido: {destination}. Válidos: {', '.join(sorted(valid))}")
+
+    row = _execute(
+        "INSERT INTO comm_messages (sender, destination, message) "
+        "VALUES (%s, %s, %s) RETURNING id",
+        (resolved, destination, message),
+        fetch="one",
+    )
+    msg_id = row["id"]
+    _audit(
+        "comm_send",
+        {"sender": resolved, "destination": destination, "message": message[:200]},
+        f"id={msg_id}",
+    )
+    return {
+        "id": msg_id,
+        "sender": resolved,
+        "destination": destination,
+        "status": "sent",
+        "message": message[:200],
+    }
+
+
+@mcp.tool()
+def comm_inbox(
+    bot: str = "",
+    last: int = 5,
+    pending: bool = False,
+) -> list[dict]:
+    """Lee mensajes del sistema Comm dirigidos a un bot.
+
+    Args:
+        bot:     nombre del bot ('goose', 'lina', 'cline', 'gemma', 'fede').
+                 Vacío = todos los bots.
+        last:    últimos N mensajes (1-50, default 5)
+        pending: si True, solo mensajes con status='sent' (no entregados aún)
+
+    Returns:
+        Lista de mensajes con id, sender, destination, message, status, created_at.
+    """
+    if pending:
+        if bot:
+            rows = _execute(
+                "SELECT id, sender, destination, message, status, created_at"
+                " FROM comm_messages"
+                " WHERE status = 'sent' AND destination IN (%s, 'todos')"
+                " ORDER BY created_at DESC LIMIT %s",
+                (bot, min(max(last, 1), 50)),
+                fetch="all",
+            )
+        else:
+            rows = _execute(
+                "SELECT id, sender, destination, message, status, created_at"
+                " FROM comm_messages"
+                " WHERE status = 'sent'"
+                " ORDER BY created_at DESC LIMIT %s",
+                (min(max(last, 1), 50),),
+                fetch="all",
+            )
+    else:
+        if bot:
+            rows = _execute(
+                "SELECT id, sender, destination, message, status, created_at"
+                " FROM comm_messages"
+                " WHERE destination IN (%s, 'todos')"
+                " ORDER BY created_at DESC LIMIT %s",
+                (bot, min(max(last, 1), 50)),
+                fetch="all",
+            )
+        else:
+            rows = _execute(
+                "SELECT id, sender, destination, message, status, created_at"
+                " FROM comm_messages"
+                " ORDER BY created_at DESC LIMIT %s",
+                (min(max(last, 1), 50),),
+                fetch="all",
+            )
+
+    return [
+        {
+            "id": r["id"],
+            "sender": r["sender"],
+            "destination": r["destination"],
+            "message": r["message"][:300],
+            "status": r["status"],
+            "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
+        }
+        for r in rows
+    ]
+
+
+# ─── CLINE commands (legacy) ────────────────────────────────────────────────────
 
 
 @mcp.tool()

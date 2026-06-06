@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""Lee los últimos mensajes del grupo Comm y los muestra formateados."""
+import asyncio, sys, os
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "comm"))
+
+from telethon import TelegramClient
+from telethon.tl.functions.messages import GetDialogsRequest
+from telethon.tl.types import InputPeerEmpty
+
+API_ID = 35434942
+API_HASH = "9f2a614fbf2e8cbfaf844561b7f43294"
+SESSION = str(Path(__file__).resolve().parent.parent / "comm" / "comm_session")
+
+# Bots conocidos por user_id
+BOTS = {
+    "8749962054": "Lina 🩷",
+    "8984281604": "Cline 😎",
+    "8921012511": "Goose 🦢",
+    "8749432958": "Gemma 🔹",
+    "8887121852": "Comm 🏛️",
+}
+
+OWN_UID = "7966401870"  # Fede
+
+async def find_group(client):
+    dialogs = await client(GetDialogsRequest(
+        offset_date=None, offset_id=0, offset_peer=InputPeerEmpty(),
+        limit=200, hash=0,
+    ))
+    for d in dialogs.chats:
+        title = getattr(d, "title", "") or ""
+        if "Comm" in title:
+            return d.id, title
+    return None, None
+
+async def main():
+    n = int(sys.argv[1]) if len(sys.argv) > 1 else 15
+    follow = "--follow" in sys.argv or "-f" in sys.argv
+
+    client = TelegramClient(SESSION, API_ID, API_HASH)
+    client.parse_mode = None
+    await client.start()
+
+    gid, gtitle = await find_group(client)
+    if not gid:
+        print("❌ Grupo Comm no encontrado")
+        await client.disconnect()
+        return
+
+    last_id = 0
+    try:
+        while True:
+            msgs = await client.get_messages(gid, limit=n if not last_id else 10)
+            if last_id:
+                msgs = [m for m in msgs if m.id > last_id]
+                if not msgs:
+                    await asyncio.sleep(5)
+                    continue
+
+            for m in reversed(msgs):
+                if m.id > last_id:
+                    last_id = m.id
+                uid = str(getattr(m.from_id, 'user_id', '') or '')
+                sender = BOTS.get(uid, f"User_{uid[-4:]}")
+                t = m.date.strftime("%H:%M:%S") if m.date else "??:??"
+                txt = (m.text or "")[:280].replace("\n", " | ")
+                emoji = "📤" if m.out else "📩"
+                print(f"  {t} {emoji} {sender}: {txt}")
+
+            if not follow:
+                break
+            await asyncio.sleep(3)
+
+    except KeyboardInterrupt:
+        pass
+    finally:
+        await client.disconnect()
+
+if __name__ == "__main__":
+    asyncio.run(main())

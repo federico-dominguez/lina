@@ -15,6 +15,9 @@ Tools expuestas:
     - list_agents(include_completed?) → [{agent_id, role, goal, status, ...}]
     - send_instruction(agent_id, text) → {command_id, sent_at}
 
+    Watchdog de timeouts (issue #89):
+    - get_watchdog_status() → {running, interval_seconds, max_loop_errors, agents_killed_by_timeout}
+
 Cargado desde:
     - $LINA_POLICIES_FILE o /home/user/lina/config/policies.yaml por defecto.
 """
@@ -30,7 +33,11 @@ from mcp.server.fastmcp import FastMCP
 
 from lina_orchestrator.application.policy_service import PolicyService
 from lina_orchestrator.domain.policy import PolicyStore
-from lina_orchestrator.infrastructure.spawner import SpawnerService
+from lina_orchestrator.infrastructure.spawner import (
+    SpawnerService,
+    _WATCHDOG_INTERVAL,
+    _WATCHDOG_MAX_LOOP_ERRORS,
+)
 
 logging.basicConfig(
     level=os.environ.get("LINA_LOG_LEVEL", "INFO"),
@@ -304,6 +311,32 @@ def send_instruction(agent_id: str, text: str) -> dict:
         }
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
+
+
+@mcp.tool()
+def get_watchdog_status() -> dict:
+    """Devuelve el estado actual del watchdog de timeouts.
+
+    El watchdog corre en un thread daemon dentro del SpawnerService y mata
+    automáticamente los sub-agentes que exceden su max_runtime_minutes.
+
+    Retorna:
+        {
+            "running": bool,
+            "interval_seconds": int,
+            "max_loop_errors": int,
+            "agents_killed_by_timeout": int
+        }
+    """
+    spw = _spw()
+    return {
+        "running": (
+            spw._watchdog_thread is not None and spw._watchdog_thread.is_alive()  # noqa: SLF001
+        ),
+        "interval_seconds": _WATCHDOG_INTERVAL,
+        "max_loop_errors": _WATCHDOG_MAX_LOOP_ERRORS,
+        "agents_killed_by_timeout": spw._timeout_count,
+    }
 
 
 def main() -> None:

@@ -1,0 +1,9 @@
+.sessions/
+*.session
+*.session-journal
+*.session.bad
+*.session.bak
+*.session.locked_backup
+__pycache__/
+*.pyc
+.coverage

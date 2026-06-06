@@ -29,6 +29,19 @@ import httpx
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 
+# ─── Load secrets from ~/.config/goose/secrets.env ──────────────────────────
+_secrets_path = os.path.expanduser("~/.config/goose/secrets.env")
+if os.path.exists(_secrets_path):
+    with open(_secrets_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if not _line or _line.startswith("#") or "=" not in _line:
+                continue
+            _key, _val = _line.split("=", 1)
+            # Only set if not already set in environment
+            if _key not in os.environ:
+                os.environ[_key] = _val
+
 DB_URL = os.environ.get(
     "LINA_DB_URL",
     "postgresql://lina:lina_dev@localhost:5432/lina",
@@ -353,7 +366,7 @@ async def send_to_goosed(
                     except Exception as se:
                         logger.warning("[exec-summary] DeepSeek failed: %s", se)
                     
-                    # Write executive summary to comm_messages
+                    # ── Enviar resumen ejecutivo vía comm (NUNCA Telegram directo) ──
                     if pool:
                         try:
                             async with pool.acquire() as ec:
@@ -362,50 +375,25 @@ async def send_to_goosed(
                                        VALUES ($1, $2, $3, 'sent')""",
                                     "comm", "goose", exec_summary,
                                 )
-                            logger.info("[exec-summary] ✅ Final summary for %s: %s", bot_name, exec_summary[:150])
+                            logger.info("[exec-summary] ✅ Summary for %s via comm: %s", bot_name, exec_summary[:150])
                         except Exception as pe:
                             logger.warning("[exec-summary] Failed to write: %s", pe)
                     
-                    # ── Wake up Goose with Cline's response ─────────────────
-                    # Forward the bot's response to Goose's goosed for review
-                    goose_url = os.environ.get("GOOSE_GOOSED_URL", "https://localhost:42359")
-                    goose_secret = os.environ.get("GOOSE_SERVER__SECRET_KEY", "")
-                    goose_headers = {"Content-Type": "application/json"}
-                    if goose_secret:
-                        goose_headers["x-secret-key"] = goose_secret
-                    
-                    review_msg = (
-                        f"## 📬 {bot_name.upper()} completó una tarea\n\n"
-                        f"### Resumen ejecutivo\n{exec_summary}\n\n"
-                        f"### Respuesta de {bot_name}\n{all_text[:3000]}\n\n"
-                        f"---\n*Revisá el trabajo y decidí si aprobás o pedís cambios.*"
-                    )
-                    
-                    try:
-                        async with httpx.AsyncClient(timeout=30.0, verify=False) as gc:
-                            # Resume or create Goose session
-                            gs = f"comm-review-{bot_name}"
-                            r = await gc.get(f"{goose_url}/sessions/{gs}", headers=goose_headers)
-                            if r.status_code != 200:
-                                await gc.post(f"{goose_url}/agent/start", 
-                                    json={"working_dir": "/tmp"}, headers=goose_headers)
-                                await gc.post(f"{goose_url}/agent/resume", 
-                                    json={"session_id": gs, "load_model_and_extensions": True}, 
-                                    headers=goose_headers)
-                            
-                            # Send the review request
-                            await gc.post(f"{goose_url}/reply", json={
-                                "session_id": gs,
-                                "user_message": {
-                                    "role": "user",
-                                    "created": int(time.time()),
-                                    "content": [{"type": "text", "text": review_msg}],
-                                    "metadata": {"userVisible": True, "agentVisible": True},
-                                },
-                            }, headers=goose_headers)
-                            logger.info("[orchestrator] ✅ Woke up Goose with %s's response", bot_name)
-                    except Exception as ge:
-                        logger.warning("[orchestrator] Failed to wake Goose: %s", ge)
+                    # ── Enviar respuesta completa vía comm (NUNCA Telegram directo) ──
+                    if all_text and pool:
+                        try:
+                            async with pool.acquire() as ec:
+                                await ec.execute(
+                                    """INSERT INTO comm_messages (sender, destination, message, status) 
+                                       VALUES ($1, $2, $3, 'sent')""",
+                                    "comm", "goose",
+                                    f"📬 {bot_name.upper()} completó la tarea\n"
+                                    f"Tiempo: {total_elapsed:.0f}s | Tools: {tool_count}\n\n"
+                                    f"{exec_summary[:400]}\n\n---\n{all_text[:2000]}",
+                                )
+                            logger.info("[orchestrator] ✅ %s result sent via comm (%d chars)", bot_name, len(all_text))
+                        except Exception as pe:
+                            logger.warning("[orchestrator] Failed to send result via comm: %s", pe)
                     
                     break
                 # Collect thinking
@@ -495,23 +483,26 @@ async def process_bot_messages(
                         msg_id,
                     )
 
-                    # Write response back to Goose
+                    # Write response back to the original sender (not hardcoded to goose)
+                    dest = sender if sender else "goose"
                     if response.strip():
                         await conn.execute(
                             """INSERT INTO comm_messages 
                                (sender, destination, message, status) 
-                               VALUES ($1, 'goose', $2, 'sent')""",
+                               VALUES ($1, $2, $3, 'sent')""",
                             bot_name,
+                            dest,
                             response[:10000],  # cap at 10k chars
                         )
-                        logger.info("← %s → goose: %s chars", bot_name, len(response))
+                        logger.info("← %s → %s: %s chars", bot_name, dest, len(response))
                     else:
                         logger.warning("Empty response from %s for msg #%s", bot_name, msg_id)
                         await conn.execute(
                             """INSERT INTO comm_messages 
                                (sender, destination, message, status) 
-                               VALUES ($1, 'goose', $2, 'sent')""",
+                               VALUES ($1, $2, $3, 'sent')""",
                             bot_name,
+                            dest,
                             f"[{bot_name}: processed request #{msg_id} — no text response]",
                         )
 

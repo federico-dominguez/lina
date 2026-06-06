@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from .collectors import DashboardCollector, DashboardSnapshot, BotStatus, ContainerStatus, MCPStatus
+from .collectors import DashboardCollector, DashboardSnapshot, BotStatus, ContainerStatus, MCPStatus, CommStats
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,35 @@ th{{color:#8b949e;font-weight:600;font-size:0.72em;text-transform:uppercase;lett
 .status-bar .live::before{{content:"";width:5px;height:5px;border-radius:50%;background:#3fb950;animation:pulse 2s infinite}}
 @keyframes pulse{{0%{{opacity:1}}50%{{opacity:0.4}}100%{{opacity:1}}}}
 .refresh-btn{{background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:0.78em}}
+
+/* ── Comm Stats ── */
+.comm-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:6px 0}}
+.comm-card{{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:8px;text-align:center}}
+.comm-card .num{{font-size:1.4em;font-weight:700}}
+.comm-card .label{{font-size:0.7em;color:#8b949e;text-transform:uppercase;letter-spacing:.04em}}
+.comm-card.c-delivered .num{{color:#3fb950}}
+.comm-card.c-failed .num{{color:#f85149}}
+.comm-card.c-ignored .num{{color:#d29922}}
+.comm-card.c-sent .num{{color:#58a6ff}}
+.comm-card.c-retrying .num{{color:#db6d28}}
+.comm-total{{font-size:0.82em;color:#8b949e;margin:4px 0 8px}}
+.comm-bar{{height:6px;background:#21262d;border-radius:3px;margin:6px 0 10px;overflow:hidden}}
+.comm-bar-inner{{height:100%;border-radius:3px;transition:width .5s}}
+.comm-bar-inner.delivered{{background:#3fb950}}
+.comm-bar-inner.failed{{background:#f85149}}
+.comm-bar-inner.ignored{{background:#d29922}}
+.comm-bar-inner.sent{{background:#58a6ff}}
+.filter-row{{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:6px 0}}
+.filter-row label{{font-size:0.75em;color:#8b949e}}
+.filter-row input[type=date],.filter-row input[type=time]{{background:#0d1117;border:1px solid #30363d;color:#e6edf3;padding:2px 6px;border-radius:4px;font-size:0.78em}}
+.filter-btn{{background:#1f6feb;border:none;color:#fff;padding:3px 12px;border-radius:4px;cursor:pointer;font-size:0.78em}}
+.filter-btn:hover{{background:#388bfd}}
+.comm-err{{font-size:0.72em;margin:4px 0}}
+.comm-err .row{{display:flex;gap:6px;padding:2px 0;border-bottom:1px solid #21262d}}
+.comm-err .ts{{color:#484f58;flex-shrink:0}}
+.comm-err .txt{{color:#f85149}}
+.comm-err .dest{{color:#8b949e}}
+.comm-db-fallback{{color:#d29922;font-size:0.78em;padding:8px}}
 @media(max-width:1024px){{.bot-grid{{grid-template-columns:repeat(2,1fr)}}}}
 @media(max-width:640px){{.bot-grid{{grid-template-columns:1fr}}}}
 </style>
@@ -98,6 +127,12 @@ th{{color:#8b949e;font-weight:600;font-size:0.72em;text-transform:uppercase;lett
   <tr><td colspan="4" style="color:#484f58">Cargando...</td></tr>
 </tbody>
 </table>
+
+<!-- ── Comm Bridge Stats ── -->
+<div class="section-title" style="margin-top:12px">🔌 Estadísticas de Mensajería (Comm Bridge)</div>
+<div id="commSection">
+  <div style="color:#484f58;font-size:0.82em">Cargando...</div>
+</div>
 
 <div class="status-bar">
   <span class="live">Actualizando</span>
@@ -172,6 +207,69 @@ function renderMcps(mcps){{
   el.innerHTML=h;
 }}
 
+/* ── Comm Stats rendering ── */
+
+function renderCommStats(s){{
+  var el=document.getElementById("commSection");
+  if(!s||!s.db_available){{
+    el.innerHTML='<div class="comm-db-fallback">⚠️ BD no disponible (PostgreSQL no responde)</div>';
+    return;
+  }}
+  var max=Math.max(s.delivered,s.failed,s.ignored,s.sent,s.retrying,1);
+  function pct(v){{return Math.round(v/max*100);}}
+  var h='<div class="filter-row">';
+  h+='<label>📅 Desde</label><input type="date" id="fdFrom">';
+  h+='<label>Hasta</label><input type="date" id="fdTo">';
+  h+='<button class="filter-btn" onclick="fetchCommStats()">Filtrar</button>';
+  h+='<button class="refresh-btn" onclick="fetchCommStats()">⟳</button>';
+  if(s.date_from)h+='<span style="color:#8b949e;font-size:0.78em">Filtro: '+esc(s.date_from)+' → '+(s.date_to||'ahora')+'</span>';
+  h+='</div>';
+  h+='<div class="comm-grid">';
+  h+='<div class="comm-card c-delivered"><div class="num">'+s.delivered+'</div><div class="label">✅ Entregados</div></div>';
+  h+='<div class="comm-card c-failed"><div class="num">'+s.failed+'</div><div class="label">❌ Failed</div></div>';
+  h+='<div class="comm-card c-ignored"><div class="num">'+s.ignored+'</div><div class="label">⚠️ Ignorados</div></div>';
+  h+='<div class="comm-card c-sent"><div class="num">'+s.sent+'</div><div class="label">📤 Enviados</div></div>';
+  if(s.retrying>0)h+='<div class="comm-card c-retrying"><div class="num">'+s.retrying+'</div><div class="label">🔄 Reintentando</div></div>';
+  h+='</div>';
+  h+='<div class="comm-total">Total: <b>'+s.total+'</b> mensajes';
+  if(s.by_sender&&Object.keys(s.by_sender).length>0){{
+    var parts=[];
+    for(var k in s.by_sender)parts.push('<b>'+esc(k)+'</b>: '+s.by_sender[k]);
+    h+=' · Por sender: '+parts.join(' · ');
+  }}
+  h+='</div>';
+  // Latest errors
+  if(s.latest_errors&&s.latest_errors.length>0){{
+    h+='<div class="comm-err"><b style="color:#f85149">Últimos errores:</b>';
+    for(var e of s.latest_errors){{
+      h+='<div class="row"><span class="ts">'+(e.created_at?e.created_at.slice(11,19):"")+'</span><span class="dest">['+esc(e.destination)+']</span><span class="txt">'+esc(e.error)+'</span></div>';
+    }}
+    h+='</div>';
+  }}
+  el.innerHTML=h;
+  // Set date inputs from current values
+  if(s.date_from)document.getElementById("fdFrom").value=s.date_from;
+  if(s.date_to)document.getElementById("fdTo").value=s.date_to;
+}}
+
+async function fetchCommStats(){{
+  var from=document.getElementById("fdFrom")?document.getElementById("fdFrom").value:"";
+  var to=document.getElementById("fdTo")?document.getElementById("fdTo").value:"";
+  var url="/api/comm-stats";
+  var q=[];
+  if(from)q.push("from="+encodeURIComponent(from));
+  if(to)q.push("to="+encodeURIComponent(to));
+  if(q.length)url+="?"+q.join("&");
+  try{{
+    var r=await fetch(url);
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    var s=await r.json();
+    renderCommStats(s);
+  }}catch(e){{
+    document.getElementById("commSection").innerHTML='<div class="comm-db-fallback">⚠️ Error: '+esc(e.message)+'</div>';
+  }}
+}}
+
 async function fetchData(){{
   try{{
     var r=await fetch("/api/json");
@@ -181,11 +279,13 @@ async function fetchData(){{
     renderBotGrid(data.bots,data.sessions);
     renderContainers(data.containers);
     renderMcps(data.mcps);
+    renderCommStats(data.comm_stats);
   }}catch(e){{document.getElementById("updateTime").textContent="Error: "+e.message;}}
 }}
 
 fetchData();
 setInterval(fetchData,30000);
+fetchCommStats();
 </script>
 </body>
 </html>
@@ -239,6 +339,32 @@ class DashboardServer:
             if path == "/api/json":
                 snapshot = await self._get_snapshot()
                 body = json.dumps(snapshot.to_dict(), default=str).encode()
+                headers = (
+                    b"HTTP/1.1 200 OK\r\n"
+                    b"Content-Type: application/json\r\n"
+                    b"Access-Control-Allow-Origin: *\r\n"
+                    b"Cache-Control: no-cache\r\n"
+                )
+                resp = headers + b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body
+                writer.write(resp)
+                await writer.drain()
+            elif path.startswith("/api/comm-stats"):
+                # Parse query params: ?from=2026-06-05&to=2026-06-06
+                from_str = None
+                to_str = None
+                if "?" in path:
+                    qs = path.split("?", 1)[1]
+                    for part in qs.split("&"):
+                        if "=" in part:
+                            k, v = part.split("=", 1)
+                            if k == "from":
+                                from_str = v
+                            elif k == "to":
+                                to_str = v
+                comm_stats = await self.collector.collect_comm_stats(
+                    date_from=from_str, date_to=to_str,
+                )
+                body = json.dumps(comm_stats.to_dict(), default=str).encode()
                 headers = (
                     b"HTTP/1.1 200 OK\r\n"
                     b"Content-Type: application/json\r\n"

@@ -415,3 +415,415 @@ class TestServerSpawnTool:
             result = srv.send_instruction("agent-abc", "nueva instrucción")
 
         assert "error" in result
+
+
+# ─── Watchdog timeout tests ─────────────────────────────────────────────────
+
+
+class TestWatchdog:
+    """Tests para el watchdog de timeouts (issue #89).
+
+    Estrategia:
+      - Se mockea _db_conn para que devuelva agentes en estado 'running' con
+        elapsed_seconds conocidos.
+      - Se mockea subprocess.Popen y os.kill para evitar efectos laterales.
+      - _enforce_timeouts() se llama directamente (sin el thread loop) para
+        poder verificar el comportamiento sincrónicamente.
+    """
+
+    def _make_spawner(
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        auto_start_watchdog: bool = False,
+    ):
+        """Crea SpawnerService sin watchdog para tests sincrónicos."""
+        monkeypatch.setenv("LINA_BASE_GOOSE_CONFIG", str(tmp_base_config))
+        monkeypatch.setenv("LINA_AGENT_CONFIG_DIR", str(tmp_path / "agents"))
+
+        import lina_orchestrator.infrastructure.spawner as spawner_mod
+        importlib.reload(spawner_mod)
+
+        from lina_orchestrator.application.policy_service import PolicyService
+        from lina_orchestrator.domain.policy import PolicyStore
+
+        store = PolicyStore.from_yaml(tmp_policies)
+        service = PolicyService(store)
+        return spawner_mod.SpawnerService(service, auto_start_watchdog=auto_start_watchdog), spawner_mod
+
+    # ─── helpers para mockear DB ──────────────────────────────────────────
+
+    @staticmethod
+    def _make_db_running_agents(agents: list[dict]) -> MagicMock:
+        """Crea un mock de conexión DB que devuelve agentes en 'running'.
+
+        Cada agente debe tener: id, role, pid, elapsed_seconds.
+        """
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+
+        # Simular RealDictCursor: cada fila es un dict convertible
+        def fetchall() -> list[dict]:
+            return agents
+
+        mock_cursor.fetchall.side_effect = fetchall
+        mock_cursor.__iter__ = MagicMock(return_value=iter(agents))
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        mock_conn.cursor.return_value = mock_cursor
+        return mock_conn
+
+    # ─── _enforce_timeouts ────────────────────────────────────────────────
+
+    def test_enforce_kills_overdue_agent(
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Agente con elapsed >> max_runtime_minutes debe ser matado."""
+        spawner, spawner_mod = self._make_spawner(
+            tmp_policies, tmp_base_config, tmp_path, monkeypatch
+        )
+
+        # dev tiene max_runtime_minutes=30 → 1800s
+        mock_db = self._make_db_running_agents([
+            {"id": "agent-overdue", "role": "dev", "pid": 12345, "elapsed_seconds": 99999},
+        ])
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 12345
+        mock_proc.wait.return_value = None
+        spawner._processes["agent-overdue"] = mock_proc
+
+        with (
+            patch.object(spawner_mod, "_db_conn", return_value=mock_db),
+            patch.object(spawner_mod, "_db_update_status") as mock_update,
+            patch.object(spawner_mod, "_db_append_event") as mock_event,
+        ):
+            timed_out = spawner._enforce_timeouts()
+
+        assert len(timed_out) == 1
+        assert timed_out[0]["agent_id"] == "agent-overdue"
+        assert timed_out[0]["role"] == "dev"
+        assert timed_out[0]["max_runtime_minutes"] == 30
+        assert "agent-overdue" not in spawner._processes
+
+        # Verificar que se llamó a DB con status='timeout'
+        mock_update.assert_called_once_with(
+            "agent-overdue", "timeout", result_summary=mock_update.call_args[1]["result_summary"]
+        )
+        assert "timeout" in mock_update.call_args[0][1]
+        # Verificar que se logueó el evento
+        mock_event.assert_called_once()
+        assert mock_event.call_args[0][1] == "timeout"
+
+    def test_enforce_skips_agent_within_limit(
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Agente con elapsed < max_runtime_minutes no debe ser molestado."""
+        spawner, spawner_mod = self._make_spawner(
+            tmp_policies, tmp_base_config, tmp_path, monkeypatch
+        )
+
+        # dev tiene max_runtime_minutes=30 → 1800s, elapsed=100s OK
+        mock_db = self._make_db_running_agents([
+            {"id": "agent-ok", "role": "dev", "pid": 12345, "elapsed_seconds": 100},
+        ])
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 12345
+        spawner._processes["agent-ok"] = mock_proc
+
+        with (
+            patch.object(spawner_mod, "_db_conn", return_value=mock_db),
+            patch.object(spawner_mod, "_db_update_status") as mock_update,
+            patch.object(spawner_mod, "_db_append_event") as mock_event,
+        ):
+            timed_out = spawner._enforce_timeouts()
+
+        assert timed_out == []
+        mock_update.assert_not_called()
+        mock_event.assert_not_called()
+        mock_proc.terminate.assert_not_called()
+        assert "agent-ok" in spawner._processes
+
+    def test_enforce_respects_different_role_limits(
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Roles distintos tienen límites distintos — verificar ambos."""
+        spawner, spawner_mod = self._make_spawner(
+            tmp_policies, tmp_base_config, tmp_path, monkeypatch
+        )
+
+        # dev max=30min(1800s), research max=15min(900s)
+        mock_db = self._make_db_running_agents([
+            {"id": "dev-agent", "role": "dev", "pid": 111, "elapsed_seconds": 1000},
+            # 1000s > 900s → research DEBE timeout
+            {"id": "research-agent", "role": "research", "pid": 222, "elapsed_seconds": 1000},
+        ])
+
+        mock_proc_dev = MagicMock()
+        mock_proc_dev.pid = 111
+        mock_proc_dev.wait.return_value = None
+        spawner._processes["dev-agent"] = mock_proc_dev
+
+        mock_proc_research = MagicMock()
+        mock_proc_research.pid = 222
+        mock_proc_research.wait.return_value = None
+        spawner._processes["research-agent"] = mock_proc_research
+
+        with (
+            patch.object(spawner_mod, "_db_conn", return_value=mock_db),
+            patch.object(spawner_mod, "_db_update_status"),
+            patch.object(spawner_mod, "_db_append_event"),
+        ):
+            timed_out = spawner._enforce_timeouts()
+
+        # Dev: 1000s < 1800s → OK. Research: 1000s > 900s → TIMEOUT
+        timed_out_ids = [t["agent_id"] for t in timed_out]
+        assert "dev-agent" not in timed_out_ids
+        assert "research-agent" in timed_out_ids
+        assert len(timed_out) == 1
+
+    def test_enforce_skips_unknown_role(
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Agente con rol que ya no existe no debe crashear."""
+        spawner, spawner_mod = self._make_spawner(
+            tmp_policies, tmp_base_config, tmp_path, monkeypatch
+        )
+
+        mock_db = self._make_db_running_agents([
+            {"id": "agent-ghost", "role": "deleted_role", "pid": 999, "elapsed_seconds": 99999},
+        ])
+
+        with (
+            patch.object(spawner_mod, "_db_conn", return_value=mock_db),
+            patch.object(spawner_mod, "_db_update_status") as mock_update,
+            patch.object(spawner_mod, "_db_append_event") as mock_event,
+        ):
+            timed_out = spawner._enforce_timeouts()
+
+        assert timed_out == []
+        mock_update.assert_not_called()
+        mock_event.assert_not_called()
+
+    def test_enforce_kills_process_in_memory(
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verificar que terminate() y wait() se llaman en el Popen correcto."""
+        spawner, spawner_mod = self._make_spawner(
+            tmp_policies, tmp_base_config, tmp_path, monkeypatch
+        )
+
+        mock_db = self._make_db_running_agents([
+            {"id": "agent-killmem", "role": "research", "pid": 42, "elapsed_seconds": 9999},
+        ])
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 42
+        mock_proc.wait.return_value = None
+        spawner._processes["agent-killmem"] = mock_proc
+
+        with (
+            patch.object(spawner_mod, "_db_conn", return_value=mock_db),
+            patch.object(spawner_mod, "_db_update_status"),
+            patch.object(spawner_mod, "_db_append_event"),
+        ):
+            spawner._enforce_timeouts()
+
+        mock_proc.terminate.assert_called_once()
+        mock_proc.wait.assert_called_once()
+        assert "agent-killmem" not in spawner._processes
+
+    # ─── Thread lifecycle ─────────────────────────────────────────────────
+
+    def test_start_watchdog_starts_thread(
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """start_watchdog() debe arrancar un thread daemon."""
+        spawner, _ = self._make_spawner(
+            tmp_policies, tmp_base_config, tmp_path, monkeypatch,
+            auto_start_watchdog=False,
+        )
+
+        assert spawner._watchdog_thread is None
+
+        spawner._start_watchdog()
+
+        assert spawner._watchdog_thread is not None
+        assert spawner._watchdog_thread.is_alive()
+        assert spawner._watchdog_thread.daemon is True
+        assert spawner._watchdog_thread.name == "lina-watchdog"
+
+        spawner.stop_watchdog()
+
+    def test_stop_watchdog_joins_thread(
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """stop_watchdog() debe señalar y esperar al thread."""
+        spawner, _ = self._make_spawner(
+            tmp_policies, tmp_base_config, tmp_path, monkeypatch,
+            auto_start_watchdog=False,
+        )
+
+        spawner._start_watchdog()
+        assert spawner._watchdog_thread.is_alive()
+
+        spawner.stop_watchdog()
+        assert not spawner._watchdog_thread.is_alive()
+
+    def test_auto_start_on_init(
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """SpawnerService debe arrancar el watchdog automáticamente por defecto."""
+        spawner, _ = self._make_spawner(
+            tmp_policies, tmp_base_config, tmp_path, monkeypatch,
+            auto_start_watchdog=True,
+        )
+
+        assert spawner._watchdog_thread is not None
+        assert spawner._watchdog_thread.is_alive()
+
+        spawner.stop_watchdog()
+
+    def test_start_watchdog_idempotent(
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Llamar _start_watchdog() dos veces no debe crear dos threads."""
+        spawner, _ = self._make_spawner(
+            tmp_policies, tmp_base_config, tmp_path, monkeypatch,
+            auto_start_watchdog=False,
+        )
+
+        spawner._start_watchdog()
+        thread1 = spawner._watchdog_thread
+
+        spawner._start_watchdog()
+        thread2 = spawner._watchdog_thread
+
+        assert thread1 is thread2  # Misma referencia
+
+        spawner.stop_watchdog()
+
+    # ─── Contador de timeouts ─────────────────────────────────────────────
+
+    def test_timeout_count_increments(
+        self,
+        tmp_policies: Path,
+        tmp_base_config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """El contador _timeout_count debe incrementarse con cada timeout."""
+        spawner, spawner_mod = self._make_spawner(
+            tmp_policies, tmp_base_config, tmp_path, monkeypatch
+        )
+
+        assert spawner._timeout_count == 0
+
+        # Primera ronda: matar 2 agentes
+        mock_db1 = self._make_db_running_agents([
+            {"id": "a1", "role": "research", "pid": 1, "elapsed_seconds": 9999},
+            {"id": "a2", "role": "research", "pid": 2, "elapsed_seconds": 9999},
+        ])
+        mock_proc1 = MagicMock()
+        mock_proc1.pid = 1
+        mock_proc1.wait.return_value = None
+        mock_proc2 = MagicMock()
+        mock_proc2.pid = 2
+        mock_proc2.wait.return_value = None
+        spawner._processes["a1"] = mock_proc1
+        spawner._processes["a2"] = mock_proc2
+
+        with (
+            patch.object(spawner_mod, "_db_conn", return_value=mock_db1),
+            patch.object(spawner_mod, "_db_update_status"),
+            patch.object(spawner_mod, "_db_append_event"),
+        ):
+            spawner._enforce_timeouts()
+
+        assert spawner._timeout_count == 2
+
+        # Segunda ronda: no hay agentes overdue
+        mock_db2 = self._make_db_running_agents([
+            {"id": "a3", "role": "research", "pid": 3, "elapsed_seconds": 10},
+        ])
+        with (
+            patch.object(spawner_mod, "_db_conn", return_value=mock_db2),
+            patch.object(spawner_mod, "_db_update_status"),
+            patch.object(spawner_mod, "_db_append_event"),
+        ):
+            spawner._enforce_timeouts()
+
+        assert spawner._timeout_count == 2  # No cambió
+
+
+class TestServerWatchdogTool:
+    """Tests para get_watchdog_status() en server.py."""
+
+    def test_get_watchdog_status_returns_running(
+        self, reloaded_server_with_spawner: types.ModuleType
+    ) -> None:
+        """get_watchdog_status() debe devolver estado del watchdog."""
+        srv = reloaded_server_with_spawner
+        result = srv.get_watchdog_status()
+
+        assert "running" in result
+        assert "interval_seconds" in result
+        assert "max_loop_errors" in result
+        assert "agents_killed_by_timeout" in result
+        assert result["agents_killed_by_timeout"] == 0
+
+    def test_get_watchdog_status_after_timeout(
+        self, reloaded_server_with_spawner: types.ModuleType
+    ) -> None:
+        """get_watchdog_status() debe reflejar el contador de timeouts."""
+        srv = reloaded_server_with_spawner
+
+        import lina_orchestrator.infrastructure.spawner as spawner_mod
+
+        # Simular que se mataron 3 agentes
+        srv._spw()._timeout_count = 3
+
+        result = srv.get_watchdog_status()
+        assert result["agents_killed_by_timeout"] == 3

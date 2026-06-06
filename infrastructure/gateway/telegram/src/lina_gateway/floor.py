@@ -106,16 +106,6 @@ class FloorTokenManager:
 
                 conn = await asyncpg.connect(self._db_url, timeout=5)
                 try:
-                    # Verificar si hay un bot de mayor prioridad esperando en cola
-                    waiting = await conn.fetch(
-                        """SELECT DISTINCT from_bot FROM conversation_messages
-                           WHERE conversation_id = $1 AND processed_at IS NULL""",
-                        conversation_id,
-                    )
-                    for w in waiting:
-                        if _is_higher_priority(w["from_bot"], bot_name):
-                            return FloorToken(False, conversation_id, "higher_priority_queued")
-
                     # Verificar si hay un floor activo
                     active = await conn.fetchrow(
                         """SELECT id, active_bot, expires_at
@@ -134,7 +124,7 @@ class FloorTokenManager:
                             # Otro bot tiene el floor — verificar prioridad
                             if _is_higher_priority(active["active_bot"], bot_name):
                                 # Un bot de mayor prioridad ya tiene el floor, ceder
-                                return FloorToken(False, conversation_id, "higher_priority_holds")
+                                return FloorToken(False, conversation_id, active["active_bot"], "higher_priority_holds")
                         if active["active_bot"] == bot_name:
                             # El mismo bot ya tiene el token — renovar
                             await conn.execute(

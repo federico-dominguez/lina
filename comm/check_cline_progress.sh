@@ -1,0 +1,2 @@
+#!/bin/bash
+cd /home/fede/lina &&     echo "=== BRANCHES ===" &&     git branch -a | grep pipeline &&     echo "=== LAST COMMITS ===" &&     git log --oneline -10 &&     echo "=== UNCOMMITTED ===" &&     git status --short | head -20

@@ -1,0 +1,26 @@
+# comm-svc.service — Servicio de mensajería entre bots vía DB + Comm Telegram
+#
+# Pollea comm_messages en PostgreSQL y envía al grupo Comm via Telethon.
+#
+# Instalación:
+#   cp comm-svc.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now comm-svc
+
+[Unit]
+Description=Comm — mensajería entre bots vía DB + Telegram
+Documentation=https://github.com/federico-dominguez/lina/issues/178
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/fede/lina/comm/comm-svc.py
+WorkingDirectory=/home/fede/lina/comm
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+Environment=LINA_DB_URL=postgresql://lina:lina_dev@localhost:5432/lina
+
+[Install]
+WantedBy=default.target

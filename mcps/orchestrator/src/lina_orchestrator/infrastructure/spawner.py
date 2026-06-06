@@ -23,6 +23,7 @@ import logging
 import os
 import signal
 import subprocess
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
@@ -57,6 +58,10 @@ _AGENT_CONFIG_DIR = Path(os.environ.get("LINA_AGENT_CONFIG_DIR", "/tmp/lina-agen
 
 # Segundos de gracia entre SIGTERM y SIGKILL
 _KILL_GRACE_SECONDS = int(os.environ.get("LINA_KILL_GRACE_SECONDS", "5"))
+
+# Watchdog de timeouts — periodicidad y tolerancia a errores
+_WATCHDOG_INTERVAL = int(os.environ.get("LINA_WATCHDOG_INTERVAL", "30"))
+_WATCHDOG_MAX_LOOP_ERRORS = int(os.environ.get("LINA_WATCHDOG_MAX_ERRORS", "5"))
 
 # MCPs built-in que siempre se incluyen (independiente del rol)
 _BUILTIN_EXTENSIONS = {
@@ -215,14 +220,22 @@ class SpawnerService:
         spawner.kill(session["agent_id"])
     """
 
-    def __init__(self, policy_service: Any) -> None:
+    def __init__(self, policy_service: Any, *, auto_start_watchdog: bool = True) -> None:
         """
         Args:
             policy_service: instancia de PolicyService (para leer allowed_mcps).
+            auto_start_watchdog: si True (default), arranca el watchdog de timeouts
+                                 en un thread daemon al inicializar.
         """
         self._policy = policy_service
         # Mapa en memoria: session_id → Popen; para poder hacer kill sin ir a DB
         self._processes: dict[str, subprocess.Popen] = {}
+        # Watchdog de timeouts
+        self._watchdog_thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
+        self._timeout_count = 0
+        if auto_start_watchdog:
+            self._start_watchdog()
 
     def spawn(self, role: str, goal: str) -> dict:
         """Lanza un sub-agente goosed con la config filtrada para el rol.
@@ -431,6 +444,154 @@ class SpawnerService:
             result["started_at"] = result["started_at"].isoformat()
 
         return result
+
+    # ── Watchdog de timeouts ─────────────────────────────────────────────────
+
+    def _enforce_timeouts(self) -> list[dict]:
+        """Verifica agentes en estado 'running' y mata los que exceden max_runtime_minutes.
+
+        Corre periódicamente desde el watchdog thread.
+        Retorna lista de dicts con los agentes matados por timeout.
+        """
+        conn = _db_conn()
+        timed_out: list[dict] = []
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    """SELECT id, role, pid,
+                              EXTRACT(EPOCH FROM (NOW() - started_at))::INT AS elapsed_seconds
+                       FROM agent_sessions
+                       WHERE status = 'running'
+                         AND started_at IS NOT NULL"""
+                )
+                running = [dict(r) for r in cur.fetchall()]
+        finally:
+            conn.close()
+
+        for agent in running:
+            agent_id = agent["id"]
+            role = agent["role"]
+            elapsed = agent["elapsed_seconds"]
+
+            # Obtener max_runtime_minutes desde la política del rol
+            try:
+                policy = self._policy.get_role(role)
+            except KeyError:
+                log.warning("timeout skip: role %r ya no existe para agent %s", role, agent_id[:8])
+                continue
+
+            max_seconds = policy["max_runtime_minutes"] * 60
+
+            if elapsed <= max_seconds:
+                continue
+
+            log.warning(
+                "timeout: agent %s (role=%s) running for %ds > %dmin limit",
+                agent_id[:8], role, elapsed, policy["max_runtime_minutes"],
+            )
+
+            # Matar proceso en memoria
+            proc = self._processes.get(agent_id)
+            if proc is not None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=_KILL_GRACE_SECONDS)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                del self._processes[agent_id]
+            elif pid := agent.get("pid"):
+                # Proceso no registrado en memoria (p.ej. tras restart del orquestador)
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+
+            # Actualizar DB
+            summary = (
+                f"timeout: exceeded {policy['max_runtime_minutes']}min limit "
+                f"(elapsed={elapsed}s)"
+            )
+            _db_update_status(agent_id, "timeout", result_summary=summary)
+            _db_append_event(agent_id, "timeout", {
+                "elapsed_seconds": elapsed,
+                "max_runtime_minutes": policy["max_runtime_minutes"],
+            })
+            self._cleanup_config(agent_id)
+
+            self._timeout_count += 1
+            timed_out.append({
+                "agent_id": agent_id,
+                "role": role,
+                "elapsed_seconds": elapsed,
+                "max_runtime_minutes": policy["max_runtime_minutes"],
+            })
+
+        if timed_out:
+            log.warning(
+                "watchdog killed %d agent(s): %s",
+                len(timed_out),
+                [t["agent_id"][:8] for t in timed_out],
+            )
+
+        return timed_out
+
+    def _watchdog_loop(self) -> None:
+        """Loop principal del watchdog. Corre en un thread daemon.
+
+        Cada _WATCHDOG_INTERVAL segundos:
+          1. Llama a _enforce_timeouts()
+          2. Si hay errores consecutivos, frena (fail-stop tras _WATCHDOG_MAX_LOOP_ERRORS).
+        """
+        log.info("watchdog started (interval=%ds, max_errors=%d)", _WATCHDOG_INTERVAL, _WATCHDOG_MAX_LOOP_ERRORS)  # noqa: E501
+        consecutive_errors = 0
+
+        while not self._stop_event.is_set():
+            try:
+                self._enforce_timeouts()
+                consecutive_errors = 0
+            except Exception as exc:  # noqa: BLE001 — capturar todo para no romper el loop
+                consecutive_errors += 1
+                log.error(
+                    "watchdog error (%d/%d): %s: %s",
+                    consecutive_errors,
+                    _WATCHDOG_MAX_LOOP_ERRORS,
+                    type(exc).__name__,
+                    exc,
+                )
+                if consecutive_errors >= _WATCHDOG_MAX_LOOP_ERRORS:
+                    log.critical(
+                        "watchdog stopping after %d consecutive errors",
+                        _WATCHDOG_MAX_LOOP_ERRORS,
+                    )
+                    break
+
+            self._stop_event.wait(_WATCHDOG_INTERVAL)
+
+        log.info("watchdog stopped")
+
+    def _start_watchdog(self) -> None:
+        """Arranca el thread watchdog (idempotente)."""
+        if self._watchdog_thread is not None and self._watchdog_thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._watchdog_thread = threading.Thread(
+            target=self._watchdog_loop,
+            name="lina-watchdog",
+            daemon=True,
+        )
+        self._watchdog_thread.start()
+        log.info("watchdog thread started")
+
+    def stop_watchdog(self, timeout: float = 5.0) -> None:
+        """Señala al watchdog que termine y espera que el thread finalice.
+
+        Args:
+            timeout: segundos máximos de espera (default 5).
+        """
+        self._stop_event.set()
+        if self._watchdog_thread is not None and self._watchdog_thread.is_alive():
+            self._watchdog_thread.join(timeout=timeout)
+            log.info("watchdog thread joined")
 
     @staticmethod
     def _cleanup_config(agent_id: str) -> None:

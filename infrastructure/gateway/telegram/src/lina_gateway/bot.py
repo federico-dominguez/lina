@@ -174,6 +174,10 @@ class Bot:
         if msg.chat.chat_type not in ("group", "supergroup"):
             return False  # channel or unknown → no
 
+        # Comm bridge (HTTP) → siempre responder (mensaje directo a este bot)
+        if msg.from_user and msg.from_user.id == 8887121852:
+            return True
+
         # Bot-to-bot: responder SOLO si este bot es mencionado
         if msg.from_user and msg.from_user.is_bot:
             if msg.entities:
@@ -216,6 +220,14 @@ class Bot:
                     # text_mention to a user/bot by ID — assume it's us
                     return True
 
+        # ── Fallback: detectar @s_botname en texto aunque no haya entities ──
+        if msg.text:
+            import re
+            _mentions = re.findall(r'@s_([a-z]+)_bot', msg.text.lower())
+            for _m in _mentions:
+                if self._is_this_bot(_m):
+                    return True
+        
         return False
 
     def _is_this_bot(self, username: str) -> bool:
@@ -233,10 +245,12 @@ class Bot:
 
     async def _handle(self, msg: TelegramMessage) -> None:
         # Comm messages (from HTTP bridge) → redirect to real Comm group
-        if msg.from_user and getattr(msg.from_user, "id", None) == 8887121852 and getattr(msg.from_user, "is_bot", False):
+        if msg.from_user and getattr(msg.from_user, "id", None) == 8887121852:
             chat_id = -5110614353
+            is_comm_msg = True
         else:
             chat_id = msg.chat.id
+            is_comm_msg = False
         text = msg.text or ""
 
         # ── Mention filter: skip if not addressed to this bot ──────────────
@@ -489,19 +503,15 @@ class Bot:
         if not text.strip():
             return
 
-        # ── Filtro: solo responder si este bot es mencionado ──────────
-        import re as _re_mention2
-        if msg and msg.chat.chat_type in ("group", "supergroup") and (not msg.from_user or not getattr(msg.from_user, "is_bot", False)):
-            _mentions2 = _re_mention2.findall(r"@s_([a-z]+)_bot", (msg.text or "").lower())
-            if _mentions2 and not any(b == self._name.lower() for b in _mentions2):
-                return
-
         # ── Floor token: evitar que varios bots respondan a la vez ──────
         # Solo en grupos/supergrupos donde hay múltiples bots
         conv_id = str(
             uuid.uuid5(uuid.NAMESPACE_DNS, f"telegram-chat-{chat_id}")
         )  # UUID determinista por chat
-        if False:  # floor deshabilitado — los bots responden sin turno
+        # Comm bridge: saltar floor token, contexto, orchestrador — es un relay de sistema, no conversación
+        if is_comm_msg:
+            logger.debug("Comm bridge: modo relay — sin floor, sin contexto, sin grupo")
+        elif msg.chat.chat_type in ("group", "supergroup") and self._floor.is_enabled:
             token = await self._floor.try_acquire(
                 self._name.lower(),
                 conv_id,
@@ -574,6 +584,18 @@ class Bot:
                         decision.target_bot,
                         decision.reason,
                     )
+                    # Liberar floor antes de redirigir
+                    floor_token_id = self._floor_token_ids.pop(chat_id, None)
+                    if floor_token_id is not None:
+                        asyncio.create_task(
+                            self._floor.release(
+                                floor_token_id,
+                                conv_id,
+                                self._name.lower(),
+                                reason="routing",
+                            ),
+                            name=f"floor-release-{chat_id}",
+                        )
                     # Encolar para el bot destino via conversation_messages
                     # Prefijar con @mention para que el bot destino lo detecte
                     target_mention = (
@@ -589,8 +611,7 @@ class Bot:
                     )
                     await self._tg.send_message(
                         chat_id,
-                        f"⏳ Redirigiendo a @{decision.target_username} "
-                        f"(intención: {decision.intent_category})...",
+                        f"@{decision.target_username} {text}",
                     )
                     return
 
@@ -607,12 +628,25 @@ class Bot:
                     status_id,
                     f"⚠️ {self._name} no está disponible. Intentá de nuevo en unos segundos.",
                 )
+                # Liberar floor ante fallo de goosed
+                floor_token_id = self._floor_token_ids.pop(chat_id, None)
+                if floor_token_id is not None:
+                    asyncio.create_task(
+                        self._floor.release(
+                            floor_token_id,
+                            conv_id,
+                            self._name.lower(),
+                            reason="goosed_unavailable",
+                        ),
+                        name=f"floor-release-{chat_id}",
+                    )
                 return
             await self._tg.edit_message(chat_id, status_id, f"✅ {self._name} de vuelta.")
 
         # ── Typing indicator ────────────────────────────────────────────
-        await self._tg.send_chat_action(chat_id, "typing")
-        await self._tg.set_reaction(chat_id, msg.message_id, "⚡")
+        if not is_comm_msg:
+            await self._tg.send_chat_action(chat_id, "typing")
+            await self._tg.set_reaction(chat_id, msg.message_id, "⚡")
 
         # ── Reset cancel token ──────────────────────────────────────────
         cancel_event = asyncio.Event()
@@ -641,7 +675,7 @@ class Bot:
             text = f"[{self._profile_prompt}]\n\n{text}"
 
         try:
-            await self._reply(chat_id, msg.message_id, text, cancel_event)
+            await self._reply(chat_id, msg.message_id, text, cancel_event, is_comm_msg=is_comm_msg)
         finally:
             self._busy[chat_id] = False
             # Liberar floor token si lo habíamos adquirido
@@ -1123,6 +1157,7 @@ class Bot:
         cancel_event: asyncio.Event,
         *,
         _retry: bool = False,
+        is_comm_msg: bool = False,
     ) -> None:
         session_id = self._session_id(chat_id)
         reply_start = time.monotonic()
@@ -1139,7 +1174,8 @@ class Bot:
             logger.warning("Could not ensure session for chat %s: %s", chat_id, exc)
 
         # First message to this chat in this process lifetime: inject previous context
-        if chat_id not in self._sessions_initialized:
+        # Comm bridge: NO inyectar contexto de sesiones previas (contiene @mentions basura)
+        if chat_id not in self._sessions_initialized and not is_comm_msg:
             self._sessions_initialized.add(chat_id)
             if self._shared.lina_db_url and session_is_new:
                 await self._maybe_inject_context(chat_id, session_id, cancel_event)
@@ -1238,7 +1274,8 @@ class Bot:
                     if self._observer:
                         self._observer.push_event(session_id, "error", event.error)
                     await _seal_all()
-                    await self._tg.send_message(chat_id, f"⚠️ Error: <code>{event.error}</code>")
+                    if not is_comm_msg:
+                        await self._tg.send_message(chat_id, f"⚠️ Error: <code>{event.error}</code>")
                     return
 
                 if event.event_type == EventType.FINISH:
@@ -1288,7 +1325,27 @@ class Bot:
                         if self._observer:
                             self._observer.push_event(session_id, "text", item.text)
                         body_acc += item.text
-                        if body_bubble_msg_id is None:
+                        import logging as __lg
+                        __lg.getLogger(__name__).info("COMM_CHATID: chat_id=%s target=%s eq=%s", chat_id, -5110614353, chat_id == -5110614353)
+                        if chat_id == -5110614353 and not is_comm_msg:
+                            # Mensaje de USUARIO REAL en grupo Comm: relay via Comm account
+                            if body_bubble_msg_id is None and body_acc.strip():
+                                asyncio.create_task(
+                                    self._send_to_group(body_acc.strip()),
+                                    name=f"comm-text-{chat_id}",
+                                )
+                            if thinking_bubble:
+                                await thinking_bubble.seal()
+                                thinking_bubble = None
+                            if body_bubble_msg_id is None:
+                                body_bubble_msg_id = -1  # marcado como "manejado por Comm"
+                        elif chat_id == -5110614353 and is_comm_msg:
+                            # Comm bridge: NO publicar en el grupo (la respuesta va por DB)
+                            if thinking_bubble:
+                                await thinking_bubble.seal()
+                                thinking_bubble = None
+                            body_bubble_msg_id = -1  # marcado como "manejado por Comm"
+                        elif body_bubble_msg_id is None:
                             # Seal thinking bubble first (marks it as collapsed/expandable)
                             if thinking_bubble:
                                 await thinking_bubble.seal()
@@ -1324,7 +1381,8 @@ class Bot:
                         html = format_tool_status(
                             item.tool_name, item.args_preview, False, None, ""
                         )
-                        tool_msg_id = await self._tg.send_message(chat_id, html)
+                        if not is_comm_msg:
+                            tool_msg_id = await self._tg.send_message(chat_id, html)
                         if tool_msg_id is not None:
                             active_tools[item.tool_name] = (
                                 item.tool_name,
@@ -1351,7 +1409,7 @@ class Bot:
                             self._observer.push_event(session_id, "tool_response", item)
                         # Update the matching tool status card
                         tool_entry = active_tools.pop(item.tool_name, None)
-                        if tool_entry:
+                        if tool_entry and not is_comm_msg:
                             tool_name, args_preview, tmsg_id = tool_entry
                             html = format_tool_status(
                                 tool_name, args_preview, True, item.success, item.result_preview
@@ -1365,6 +1423,13 @@ class Bot:
             # Never surface raw transport errors to the user.
             logger.warning("goosed connection lost (likely restart): %s", exc)
             await _seal_all()
+            if is_comm_msg:
+                # Comm bridge: no mostrar errores en el grupo; reintentar silenciosamente
+                if not _retry:
+                    self._sessions.pop(chat_id, None)
+                    await asyncio.sleep(1.0)
+                    await self._reply(chat_id, user_msg_id, text, cancel_event, _retry=True)
+                return
             if _retry:
                 # Already retried once — give up gracefully
                 await self._tg.send_message(
@@ -1393,10 +1458,11 @@ class Bot:
         except Exception as exc:
             logger.exception("Unexpected error during reply: %s", exc)
             await _seal_all()
-            # Expose only the error type, not the full message (may contain internals)
-            await self._tg.send_message(
-                chat_id, f"⚠️ Error inesperado (<code>{type(exc).__name__}</code>). Revisá los logs."
-            )
+            if not is_comm_msg:
+                # Expose only the error type, not the full message (may contain internals)
+                await self._tg.send_message(
+                    chat_id, f"⚠️ Error inesperado (<code>{type(exc).__name__}</code>). Revisá los logs."
+                )
             return
 
         # Final seal of whichever bubble is still active
@@ -1415,13 +1481,13 @@ class Bot:
         )
 
         # ── HumanInputRequest: attach approval buttons if LINA asks ──
-        if body_acc and body_bubble_msg_id is not None:
+        if body_acc and body_bubble_msg_id is not None and body_bubble_msg_id > 0:
             await self._maybe_attach_approval_buttons(
                 chat_id, body_bubble_msg_id, body_acc, session_id, text
             )
 
         # Belt-and-suspenders: body arrived but no bubble was created somehow
-        if body_acc and body_bubble_msg_id is None and thinking_bubble_msg_id is None:
+        if not is_comm_msg and body_acc and body_bubble_msg_id is None and thinking_bubble_msg_id is None:
             await self._tg.send_message(chat_id, markdown_to_telegram_html(body_acc))
 
         # Save response for /voz command
@@ -1445,6 +1511,47 @@ class Bot:
             )
 
     # ─── Session persistence helpers ─────────────────────────────────────────
+
+    async def _send_to_group(self, text: str) -> None:
+        """Send a message to the Comm group via Telethon (Comm phone relay).
+
+        This makes the message appear as a USER message (from Comm), not a bot message.
+        Other bots can detect @mentions in this message.
+        No @mention is added (this is a response, not a call to another bot).
+        """
+        try:
+            from telethon import TelegramClient
+            from telethon.tl.functions.messages import GetDialogsRequest
+            from telethon.tl.types import InputPeerEmpty
+
+            session_path = "/home/fede/lina/comm/comm_session.session"
+            api_id = 35434942
+            api_hash = "9f2a614fbf2e8cbfaf844561b7f43294"
+
+            client = TelegramClient(session_path, api_id, api_hash)
+            client.parse_mode = None
+            await client.start()
+
+            dialogs = await client(GetDialogsRequest(
+                offset_date=None, offset_id=0, offset_peer=InputPeerEmpty(),
+                limit=200, hash=0,
+            ))
+            gid = None
+            for d in dialogs.chats:
+                title = getattr(d, "title", "") or ""
+                if "Comm" in title:
+                    gid = d.id
+                    break
+
+            if gid:
+                await client.send_message(gid, text)
+                logger.info("Comm reply sent to group (user message, %d chars)", len(text))
+            else:
+                logger.warning("Comm group not found for _send_to_group")
+
+            await client.disconnect()
+        except Exception as exc:
+            logger.warning("_send_to_group failed: %s", exc)
 
     async def _persist_turn(
         self,
@@ -1570,6 +1677,7 @@ class Bot:
                             message_id=int(time.time() * 1000) % (2**31),
                             chat=TelegramChat(id=-5110614353, chat_type="group"),
                             text=cmd.get("text", ""),
+                            entities=[{"offset": 0, "length": 0, "type": "mention"}],
                             from_user=TelegramUser(
                                 id=8887121852, first_name="Comm", is_bot=True, username="comm_bot"
                             ),

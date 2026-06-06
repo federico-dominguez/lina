@@ -444,6 +444,26 @@ class ObserveServer:
             writer.close()
             return
 
+        # ── Content-Length: read remaining body if split across packets ──
+        content_length = 0
+        for h in lines[1:]:
+            if h.lower().startswith("content-length:"):
+                try:
+                    content_length = int(h.split(":", 1)[1].strip())
+                except ValueError:
+                    pass
+                break
+
+        body_start = raw_data.find(b"\r\n\r\n")
+        if body_start >= 0:
+            body_received = len(raw_data) - body_start - 4
+            if body_received < content_length:
+                remaining = content_length - body_received
+                more = await reader.readexactly(remaining)
+                raw_data += more
+                request = raw_data.decode("utf-8", errors="replace")
+                lines = request.split("\r\n")
+
         if method == "GET" and path == "/":
             await self._serve_dashboard(writer)
         elif method == "GET" and path == "/health":
