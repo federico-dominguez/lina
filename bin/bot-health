@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+"""CLI wrapper para bin/bot_health.py — Bot Health Dashboard."""
+import sys
+import os
+
+# Ensure we can import from the bin directory
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from bot_health import run
+
+if __name__ == "__main__":
+    run()
