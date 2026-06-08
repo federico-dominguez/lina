@@ -10,16 +10,34 @@ YAML_DIR = BASE / "config" / "pipelines"
 
 DB_DSN = os.environ.get("LINA_DB_URL", "postgresql://lina:lina_dev@localhost:5432/lina")
 POLL_INTERVAL = 0.5
-POLL_TIMEOUT = 600  # 10 minutos — tareas de Moodle pueden ser largas
+POLL_TIMEOUT = 600  # 10 min — tareas Moodle pueden ser largas
 
 DEFAULT_STEPS = [
     {"bot": "lina", "msg": "hola", "notify": "✅ Lina saludo completo."},
     {"bot": "cline", "msg": "decime el uso de CPU y memoria del servidor", "notify": "✅ Cline sysinfo completo."},
 ]
 
-BOT_AGENT = {
-    "lina": "lina", "cline": "cline", "goose": "goose", "gemma": "gemma",
-}
+BOT_AGENT = {"lina": "lina", "cline": "cline", "goose": "goose", "gemma": "gemma"}
+
+# ─── Pipeline run tracking ──────────────────────────────────────
+PIPELINE_RUNS_FILE = "/tmp/pipeline-runs.jsonl"
+
+
+def track_run(name, status, steps_data, started_at=None):
+    """Guarda un registro de ejecución de pipeline."""
+    import json
+    record = {
+        "name": name,
+        "status": status,
+        "started_at": started_at or (time.time() - 10),
+        "completed_at": time.time(),
+        "steps": steps_data,
+    }
+    try:
+        with open(PIPELINE_RUNS_FILE, "a") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as e:
+        log(f"⚠️ track: {e}")
 
 
 def log(msg: str):
@@ -44,10 +62,7 @@ def tg_send(target: str, message: str) -> bool:
 
 async def tg_notify_plain(text: str):
     try:
-        subprocess.run(
-            [sys.executable, SEND_BOT, "--plain", text],
-            capture_output=True, text=True, timeout=30,
-        )
+        subprocess.run([sys.executable, SEND_BOT, "--plain", text], capture_output=True, text=True, timeout=30)
         log(f"📤 (plain): {text}")
     except Exception as e:
         log(f"⚠️ notify: {e}")
@@ -55,10 +70,7 @@ async def tg_notify_plain(text: str):
 
 async def wait_for_finish(agent: str) -> dict:
     """Espera el ULTIMO evento 'finish' en session_events (DB) para un agente.
-
-    Si encuentra un Finish, espera un cooldown de 3s para verificar que no
-    hay otro más reciente (evita Finishes de sub-agentes/herramientas).
-    Timeout configurable via POLL_TIMEOUT (default 600s = 10 min).
+    Usa cooldown de 3s para evitar Finishes de sub-agentes.
     """
     last_id = 0
     try:
@@ -66,16 +78,13 @@ async def wait_for_finish(agent: str) -> dict:
         conn = await asyncpg.connect(DB_DSN, timeout=5)
         try:
             last_id = await conn.fetchval(
-                "SELECT COALESCE(MAX(id),0) FROM session_events WHERE event_type='finish' AND agent=$1",
-                agent,
-            )
+                "SELECT COALESCE(MAX(id),0) FROM session_events WHERE event_type='finish' AND agent=$1", agent)
         finally:
             await conn.close()
     except:
         pass
-    
-    log(f"⏳ Finish (last #{last_id})...")
 
+    log(f"⏳ Finish (last #{last_id})...")
     found_finish = None
     deadline = time.time() + POLL_TIMEOUT
     while time.time() < deadline:
@@ -93,14 +102,9 @@ async def wait_for_finish(agent: str) -> dict:
                     reason = p.get("reason", "stop")
                     tokens = p.get("tokens", 0)
                     log(f"🏁 #{row['id']} session={row['session_id']} reason={reason} tokens={tokens}")
-                    found_finish = {
-                        "session_id": row["session_id"],
-                        "reason": reason,
-                        "tokens": tokens,
-                        "id": row["id"],
-                    }
+                    found_finish = {"session_id": row["session_id"], "reason": reason, "tokens": tokens, "id": row["id"]}
                     last_id = row["id"]
-                    continue  # esperar cooldown para ver si es el último
+                    continue  # cooldown
             finally:
                 await conn2.close()
         except Exception as e:
@@ -108,7 +112,6 @@ async def wait_for_finish(agent: str) -> dict:
             last_id += 1
 
         if found_finish:
-            # Cooldown: esperar 3s sin nuevos Finishes para confirmar
             await asyncio.sleep(3)
             try:
                 import asyncpg
@@ -126,9 +129,9 @@ async def wait_for_finish(agent: str) -> dict:
                     last_id = found_finish["id"]
                     found_finish = None
                     continue
-            except Exception as e:
-                log(f"⚠️ DB error en cooldown: {e}")
-            log(f"🏁 Fin CONFIRMADO (cooldown): reason={found_finish['reason']}")
+            except:
+                pass
+            log(f"🏁 Fin CONFIRMADO: reason={found_finish['reason']}")
             return found_finish
 
         await asyncio.sleep(POLL_INTERVAL)
@@ -162,6 +165,7 @@ async def run_step(step: dict) -> bool:
 
 
 async def main():
+    started_at = time.time()
     steps = DEFAULT_STEPS
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     flags = [a for a in sys.argv[1:] if a.startswith("--")]
@@ -182,6 +186,8 @@ async def main():
     log(f"   {'  →  '.join(descs)}")
 
     results = {}
+    step_records = []
+
     if parallel:
         log(f"⚡ Modo paralelo: ejecutando {len(steps)} paso(s) simultáneamente")
         async def run_all():
@@ -191,18 +197,25 @@ async def main():
         for i, ok in enumerate(ok_list):
             s = steps[i]
             results[f"@{s['bot']}: {s['msg'][:30]}"] = ok
+            step_records.append({"bot": s["bot"], "msg": s["msg"], "status": "done" if ok else "error", "tokens": 0, "cost": 0})
     else:
         for i, step in enumerate(steps):
             log(f"\n─── Paso {i+1}/{len(steps)} ───")
             ok = await run_step(step)
             results[f"@{step['bot']}: {step['msg'][:30]}"] = ok
+            step_records.append({"bot": step["bot"], "msg": step["msg"], "status": "done" if ok else "error", "tokens": 0, "cost": 0})
 
     log("\n" + "═" * 50)
     log("📊 RESUMEN:")
     for desc, ok in results.items():
         log(f"   {'✅' if ok else '❌'} {desc}")
 
-    if all(results.values()):
+    # Tracking
+    pipeline_name = Path(args[0]).stem if args else "default"
+    all_ok = all(results.values())
+    track_run(pipeline_name, "done" if all_ok else "error", step_records, started_at)
+
+    if all_ok:
         log("✅ Pipeline completado exitosamente")
         sys.exit(0)
     else:
