@@ -2,9 +2,6 @@
 """
 pipeline-listener.py — Escucha comandos /pipeline en el grupo "Comms" via Comm.
 
-Corre como daemon systemd. Cuando alguien escribe /pipeline en el grupo,
-ejecuta el comando y responde.
-
 Uso directo:
   python3 bin/pipeline-listener.py
 
@@ -26,7 +23,7 @@ SESSION = str(COMM_DIR / "comm_session")
 API_ID = 12663248
 API_HASH = "57a7b9ec3cd607e64b73dbae1240af24"
 
-PIPELINE_PATTERN = re.compile(r"^/pipeline\s+(\w+)?\s*(\S+)?\s*(-p|--parallel)?")
+GROUP = None
 
 
 def log(msg):
@@ -41,11 +38,12 @@ async def get_group(client):
     for d in dialogs.chats:
         title = getattr(d, "title", "") or ""
         if "Comm" in title:
-            return d
-    return None
+            return d.id, d
+    return None, None
 
 
-async def run_pipeline(subcmd, name="", parallel=False):
+def run_pipeline_sync(subcmd, name="", parallel=False):
+    """Ejecuta pipeline CLI como subproceso (síncrono)."""
     cmd = [sys.executable, str(BIN_PIPELINE), subcmd]
     if name:
         cmd.append(name)
@@ -63,8 +61,10 @@ async def run_pipeline(subcmd, name="", parallel=False):
         return f"Error: {e}", 1
 
 
-async def handle_command(client, group, text, sender_name):
-    m = PIPELINE_PATTERN.match(text.strip())
+async def handle_command(client, gid_entity, text, sender_name):
+    global GROUP
+
+    m = re.match(r"^/pipeline\s+(\w+)?\s*(\S+)?\s*(-p|--parallel)?", text.strip())
     if not m:
         return
     subcmd = m.group(1) or "help"
@@ -74,64 +74,74 @@ async def handle_command(client, group, text, sender_name):
     log(f"📥 /pipeline {subcmd} {name} (from @{sender_name})")
 
     if subcmd == "help":
-        await client.send_message(group,
-            "📋 Pipeline Manager\n"
-            "Uso:\n"
-            "  /pipeline list          — listar\n"
-            "  /pipeline run <nombre>  — ejecutar\n"
-            "  /pipeline run <nombre> -p — paralelo\n"
-            "  /pipeline info <nombre> — info\n"
-            "Ej: /pipeline run duo"
-        )
+        await client.send_message(gid_entity,
+            "📋 Pipeline Manager\nUso:\n  /pipeline list\n  /pipeline run <nombre> [-p]\n  /pipeline info <nombre>\nEj: /pipeline run duo")
         return
 
-    if subcmd == "list":
-        out, _ = await run_pipeline("list")
-        await client.send_message(group, f"📂 Pipelines:\n<code>{out}</code>")
+    if subcmd in ("list", "info"):
+        out, _ = run_pipeline_sync(subcmd, name)
+        prefix = "📂 Pipelines:" if subcmd == "list" else f"📋 Info '{name}':"
+        await client.send_message(gid_entity, f"{prefix}\n<code>{out}</code>")
         return
 
     if subcmd == "run":
         if not name:
-            await client.send_message(group, "❌ Usa: /pipeline run <nombre>")
+            await client.send_message(gid_entity, "❌ Usa: /pipeline run <nombre>")
             return
-        await client.send_message(group, f"🚀 Ejecutando pipeline '{name}'...")
-        out, code = await run_pipeline("run", name, parallel)
-        status = "✅ Completado" if code == 0 else "⚠️ Con errores"
-        await client.send_message(group, f"{status}:\n<code>{out}</code>")
-        return
+        await client.send_message(gid_entity, f"🚀 Ejecutando pipeline '{name}'...")
+        await asyncio.sleep(2)
 
-    if subcmd == "info":
-        if not name:
-            await client.send_message(group, "❌ Usa: /pipeline info <nombre>")
-            return
-        out, _ = await run_pipeline("info", name)
-        await client.send_message(group, f"📋 Info:\n<code>{out}</code>")
-        return
+        # Guardar ID del grupo y cerrar sesión
+        gid = gid_entity.id if hasattr(gid_entity, "id") else int(gid_entity)
+        await client.disconnect()
+        # La sesión de Telethon ahora está libre para send-bot.py
 
-    await client.send_message(group, f"❌ Comando desconocido: /pipeline {subcmd}")
+        # Ejecutar pipeline (síncrono, no necesita event loop de Telethon)
+        out, code = run_pipeline_sync("run", name, parallel)
+
+        # Reconectar con cliente nuevo y enviar resultado
+        new_c = TelegramClient(SESSION, API_ID, API_HASH)
+        new_c.parse_mode = None
+        await new_c.start()
+        try:
+            g_e = await new_c.get_entity(gid)
+            status = "✅ Completado" if code == 0 else "⚠️ Con errores"
+            await new_c.send_message(g_e, f"{status}:\n<code>{out}</code>")
+        except Exception as e:
+            log(f"⚠️ Error al notificar resultado: {e}")
+        await new_c.disconnect()
+
+        # Salir — systemd reinicia el listener automáticamente
+        log("🔄 Reiniciando listener...")
+        sys.exit(0)
+
+    await client.send_message(gid_entity, f"❌ Comando desconocido: /pipeline {subcmd}")
 
 
 async def main():
+    global GROUP
+
     client = TelegramClient(SESSION, API_ID, API_HASH)
     client.parse_mode = None
     await client.start()
     log("✅ pipeline-listener conectado")
 
-    group = await get_group(client)
-    if not group:
+    gid, gid_entity = await get_group(client)
+    if not gid:
         log("❌ No se encontró grupo Comm")
         return
+    GROUP = gid
+    log(f"👂 Escuchando /pipeline en '{getattr(gid_entity, 'title', '?')}'")
 
-    log(f"👂 Escuchando /pipeline en '{getattr(group, 'title', '?')}'")
-
-    @client.on(events.NewMessage(chats=group.id))
+    @client.on(events.NewMessage(chats=GROUP))
     async def handler(event):
         text = (event.message.text or "").strip()
         if not text.startswith("/pipeline"):
             return
+        e = await client.get_entity(GROUP)
         sender = await event.get_sender()
         name = getattr(sender, "first_name", "") or getattr(sender, "username", str(sender.id))
-        await handle_command(client, group, text, name)
+        await handle_command(client, e, text, name)
 
     await client.run_until_disconnected()
 
