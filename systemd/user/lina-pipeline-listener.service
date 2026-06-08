@@ -1,0 +1,12 @@
+[Unit]
+Description=LINA Pipeline — Telegram listener (Comm)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/fede/lina/bin/pipeline-listener.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
