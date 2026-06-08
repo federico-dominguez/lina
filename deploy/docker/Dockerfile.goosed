@@ -64,9 +64,9 @@ RUN chmod +x /usr/local/bin/goosed
 EXPOSE 3000
 ENV LINA_ENV=docker
 
-# Health check vía el endpoint HTTP de goosed (si está disponible)
+# Health check vía el endpoint HTTP de goosed (usa GOOSE_PORT si está definida, default 3000)
 HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=3 \
-    CMD curl -sfk -H "x-secret-key: ${GOOSE_SERVER__SECRET_KEY:-}" https://localhost:3000/status || exit 1
+    CMD curl -sfk -H "x-secret-key: ${GOOSE_SERVER__SECRET_KEY:-}" "https://localhost:${GOOSE_PORT:-3000}/status" || exit 1
 
 # Solo el servidor HTTP. El gateway Telegram corre en lina-gateway (Docker separado).
 CMD ["/usr/local/bin/goosed", "agent"]

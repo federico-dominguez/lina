@@ -489,6 +489,13 @@ class Bot:
         if not text.strip():
             return
 
+        # ── Filtro: solo responder si este bot es mencionado ──────────
+        import re as _re_mention2
+        if msg and msg.chat.chat_type in ("group", "supergroup") and (not msg.from_user or not getattr(msg.from_user, "is_bot", False)):
+            _mentions2 = _re_mention2.findall(r"@s_([a-z]+)_bot", (msg.text or "").lower())
+            if _mentions2 and not any(b == self._name.lower() for b in _mentions2):
+                return
+
         # ── Floor token: evitar que varios bots respondan a la vez ──────
         # Solo en grupos/supergrupos donde hay múltiples bots
         conv_id = str(
