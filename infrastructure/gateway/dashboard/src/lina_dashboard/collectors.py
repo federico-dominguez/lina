@@ -162,11 +162,13 @@ class DashboardCollector:
         bot_ports: list[int] | None = None,
         docker_url: str = "http://localhost:2375",
         mcp_host: str = "localhost",
+        bot_host: str = "localhost",
         timeout: float = 5.0,
     ):
         self.bot_ports = bot_ports or [m["port"] for m in BOT_METADATA]
         self.docker_url = docker_url
         self.mcp_host = mcp_host
+        self.bot_host = bot_host
         self.timeout = timeout
         self._client: httpx.AsyncClient | None = None
 
@@ -202,7 +204,7 @@ class DashboardCollector:
 
             try:
                 # Get sessions list
-                resp = await client.get(f"http://localhost:{port}/api/sessions")
+                resp = await client.get(f"http://{self.bot_host}:{port}/api/sessions")
                 if resp.status_code == 200:
                     sessions = resp.json()
                     bot.online = True
@@ -227,7 +229,7 @@ class DashboardCollector:
 
             # Try status endpoint (optional)
             try:
-                resp2 = await client.get(f"http://localhost:{port}/api/status")
+                resp2 = await client.get(f"http://{self.bot_host}:{port}/api/status")
                 if resp2.status_code == 200:
                     data = resp2.json()
                     bot.clients = data.get("clients", 0)

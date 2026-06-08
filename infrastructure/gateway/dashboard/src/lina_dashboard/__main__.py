@@ -24,8 +24,13 @@ def main() -> None:
         "--bot-ports",
         type=int,
         nargs="*",
-        default=[9091, 9092, 9093],
-        help="Observe ports for Goose, CLINE, LINA",
+        default=[9090, 9091, 9092, 9093],
+        help="Observe ports for Goose(9091), CLINE(9092), LINA(9093), Gemma(9090)",
+    )
+    parser.add_argument(
+        "--bot-host",
+        default=os.environ.get("BOT_HOST", "localhost"),
+        help="Hostname for bot observe endpoints (use host.docker.internal when in container)",
     )
     parser.add_argument(
         "--docker-url",
@@ -47,6 +52,7 @@ async def _run(args: argparse.Namespace) -> None:
         bot_ports=args.bot_ports,
         docker_url=args.docker_url,
         mcp_host=args.mcp_host,
+        bot_host=args.bot_host,
     )
     server = DashboardServer(collector, host=args.host, port=args.port)
 
