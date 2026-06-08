@@ -1,0 +1,10 @@
+_name: duo
+description: "Pipeline dual: LINA saluda + Cline sistema"
+_schedule: ""
+steps:
+- bot: lina
+  msg: hola
+  notify: "\u2705 Lina saludo."
+- bot: cline
+  msg: "decime CPU y memoria"
+  notify: "\u2705 Cline sysinfo."
