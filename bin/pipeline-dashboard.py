@@ -221,7 +221,7 @@ async function load(){
 
 function render(){
   const el=document.getElementById('timeline');
-  const filtered=filterRuns();
+  const filtered=getFiltered();
   if(!filtered.length){
     el.innerHTML='<div class="empty-state"><div class="icon">🚀</div><h2>Sin ejecuciones</h2><p>Corré un pipeline con @s_pipelines_bot y aparecerá acá.</p></div>';
     return;
@@ -285,21 +285,21 @@ function updateStats(){
   document.getElementById('totalCost').textContent='$'+cost(tTok);
 }
 
-function filterRuns(){
-  const q=document.getElementById('searchInput').value.toLowerCase();
-  const filtered=allRuns.filter(r=>{
+function getFiltered(){
+  const q=(document.getElementById('searchInput')||{}).value||'';
+  return allRuns.filter(r=>{
     if(currentFilter!=='all' && r.status!==currentFilter)return false;
     if(q && !(r.name||'').toLowerCase().includes(q))return false;
     return true;
   });
-  render(); // re-render with filtered
-  return filtered;
 }
+
+function filterRuns(){render()}
 
 function setFilter(f){
   currentFilter=f;
   document.querySelectorAll('.filter-bar .btn[data-filter]').forEach(b=>b.classList.toggle('active',b.dataset.filter===f));
-  filterRuns();
+  render();
 }
 
 function addLog(line,type){
