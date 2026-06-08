@@ -1,0 +1,12 @@
+[Unit]
+Description=Pipeline Bot — @s_pipelines_bot
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/fede/lina/bin/pipeline-bot.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

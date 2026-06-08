@@ -1,0 +1,14 @@
+[Unit]
+Description=LINA Pipeline Dashboard (port 9097)
+After=network.target lina-pipeline-listener.service
+BindsTo=lina-pipeline-listener.service
+
+[Service]
+Type=simple
+ExecStart=/home/fede/lina/bin/pipeline-dashboard.py
+Restart=on-failure
+RestartSec=5
+Environment="LINA_DB_URL=postgresql://lina:lina_dev@localhost:5432/lina"
+
+[Install]
+WantedBy=default.target

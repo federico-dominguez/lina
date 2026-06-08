@@ -1,0 +1,16 @@
+_name: moodle-complete
+description: 'Creado via wizard: 2 paso(s)'
+steps:
+- bot: lina
+  msg: Resuelve el ultimo cuestionario pendiente de programación Backend, responde
+    todas las preguntas correctamente y guatda las preguntas y opciones en un documentos
+    para revision. Luego guarda todas las respuestas y guarda el cuestionario, y luego
+    dale submit. Obten el score. Si hay algun problema guarda un documentos con tus
+    problemas para ser revisados
+  notify: ✅ Lina completo.
+- bot: cline
+  msg: Revisa si hubo algun problema en la carpeta document o si lina fue capaz de
+    responder el ultimo cuestionario. Si fue capaz de responder obten el puntaje.
+    Su cuestionario debe de ser reciente (no mas de 10 min). Arregla cualquier problema
+    para una nueva iteracion
+  notify: ✅ Cline completo.

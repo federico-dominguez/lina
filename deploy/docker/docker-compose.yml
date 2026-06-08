@@ -76,6 +76,10 @@ services:
     image: lina-goosed:latest
     container_name: lina-goosed
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     depends_on:
       lina-db:
         condition: service_healthy
@@ -413,6 +417,10 @@ services:
   lina-mcp-gateway:
     image: nginx:1.27-alpine
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     depends_on:
       - lina-mcp-secrets
       - lina-mcp-fs-safe
@@ -461,6 +469,10 @@ services:
   lina-backup:
     image: postgres:16-alpine
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     depends_on:
       lina-db:
         condition: service_healthy
@@ -555,6 +567,10 @@ services:
       dockerfile: deploy/docker/Dockerfile.gateway
     image: lina-gateway:latest
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     depends_on:
       lina-db:
         condition: service_healthy
@@ -668,6 +684,10 @@ services:
     image: lina-dashboard:latest
     container_name: lina-dashboard
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     depends_on:
       lina-mcp-gateway:
         condition: service_started
