@@ -1,0 +1,10 @@
+# systemd/user/lina-pipeline-healthcheck.timer
+[Unit]
+Description=LINA Pipeline — Healthcheck horario (cada hora)
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+# systemd/user/lina-pipeline-healthcheck.service
+[Unit]
+Description=LINA Pipeline — Healthcheck horario
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/lina/bin/pipeline-scheduler.sh %h/lina/config/pipelines/healthcheck-hourly.yaml
+StandardOutput=journal
+StandardError=journal

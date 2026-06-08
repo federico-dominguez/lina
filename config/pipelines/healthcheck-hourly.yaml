@@ -1,0 +1,6 @@
+# config/pipelines/healthcheck-hourly.yaml
+# Se ejecuta cada hora
+steps:
+  - bot: cline
+    msg: "Check rápido: servidor responde? CPU < 80%? Memoria suficiente?"
+    notify: "🕐 Healthcheck horario: servidor OK"

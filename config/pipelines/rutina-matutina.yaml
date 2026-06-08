@@ -1,0 +1,9 @@
+# config/pipelines/rutina-matutina.yaml
+# Se ejecuta cada mañana a las 9:00
+steps:
+  - bot: lina
+    msg: "Buenos días! Dame un resumen del estado del servidor: uptime, CPU, memoria, disco"
+    notify: "🌅 Buenos días, Fede! acá el resumen matutino de Lina y Cline:"
+  - bot: cline
+    msg: "Revisá si hay updates pendientes y si el sistema está saludable"
+    notify: "✅ Resumen matutino completo. Que tengas buen día!"

@@ -1,0 +1,11 @@
+# systemd/user/lina-pipeline-rutina.service
+[Unit]
+Description=LINA Pipeline — Rutina matutina
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/lina/bin/pipeline-scheduler.sh %h/lina/config/pipelines/rutina-matutina.yaml
+StandardOutput=journal
+StandardError=journal
