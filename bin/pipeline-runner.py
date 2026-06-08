@@ -218,8 +218,11 @@ async def run_step(step: dict) -> bool:
 async def main():
     # Cargar pasos: desde YAML file o usar defaults
     steps = DEFAULT_STEPS
-    if len(sys.argv) > 1:
-        yaml_path = sys.argv[1]
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    flags = [a for a in sys.argv[1:] if a.startswith("--")]
+    parallel = "--parallel" in flags or os.environ.get("PIPELINE_PARALLEL", "") == "1"
+    if args:
+        yaml_path = args[0]
         try:
             import yaml
             with open(yaml_path) as f:
@@ -235,10 +238,20 @@ async def main():
     log(f"   {'  →  '.join(descs)}")
 
     results = {}
-    for i, step in enumerate(steps):
-        log(f"\n─── Paso {i+1}/{len(steps)} ───")
-        ok = await run_step(step)
-        results[f"@{step['bot']}: {step['msg'][:30]}"] = ok
+    if parallel:
+        log(f"⚡ Modo paralelo: ejecutando {len(steps)} paso(s) simultáneamente")
+        async def run_all():
+            tasks = [run_step(s) for s in steps]
+            return await asyncio.gather(*tasks)
+        ok_list = await run_all()
+        for i, ok in enumerate(ok_list):
+            s = steps[i]
+            results[f"@{s['bot']}: {s['msg'][:30]}"] = ok
+    else:
+        for i, step in enumerate(steps):
+            log(f"\n─── Paso {i+1}/{len(steps)} ───")
+            ok = await run_step(step)
+            results[f"@{step['bot']}: {step['msg'][:30]}"] = ok
 
     log("\n" + "═" * 50)
     log("📊 RESUMEN:")
