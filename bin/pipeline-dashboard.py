@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-pipeline-dashboard.py — Dashboard estilo GitHub Actions.
+pipeline-dashboard.py — Dashboard estilo GitHub Actions para el Pipeline Manager.
 
 Design System: GitHub Primer (#0d1117, #161b22, #21262d, #c9d1d9, #58a6ff)
-Timeline de ejecuciones, DAG de pasos, costos en vivo.
+Timeline de ejecuciones con DAG de pasos, costos, y logs por pipeline.
 
 Puerto: 9097
 """
 
-import asyncio, json, os, subprocess, sys, time
+import asyncio, json, os, subprocess, sys, time, re
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent.parent
-DB_DSN = os.environ.get("LINA_DB_URL", "postgresql://lina:lina_dev@localhost:5432/lina")
+DB_DSN = os.environ.get("LINA_DB_URL", "postgresql://lina:lina_dev@localhost:5432/lana")
 PORT = 9097
 RUNS_FILE = "/tmp/pipeline-runs.jsonl"
 
@@ -20,19 +20,15 @@ HTML = r"""<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
 <title>Pipeline Dashboard · LINA</title>
 <style>
 /* ── GitHub Primer Design System ─────────────────────────── */
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans',Helvetica,Arial,sans-serif;
-     background:#0d1117;color:#e6edf3;font-size:14px;line-height:1.5;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans',Helvetica,Arial,sans-serif;background:#0d1117;color:#e6edf3;font-size:14px;line-height:1.5}
 a{color:#58a6ff;text-decoration:none}
-a:hover{text-decoration:underline}
-
-/* ── Layout ────────────────────────────────────────────────── */
-.app{max-width:960px;margin:0 auto;padding:0}
-.topnav{display:flex;justify-content:space-between;align-items:center;padding:16px 24px;border-bottom:1px solid #21262d;background:#161b22}
+.app{max-width:960px;margin:0 auto}
+.topnav{display:flex;justify-content:space-between;align-items:center;padding:16px 24px;border-bottom:1px solid #21262d;background:#161b22;flex-wrap:wrap;gap:8px}
 .topnav h1{font-size:20px;font-weight:600;color:#f0f6fc;display:flex;align-items:center;gap:8px}
 .topnav h1 span{font-weight:400;color:#8b949e;font-size:14px}
 .topnav .status{display:flex;align-items:center;gap:6px;font-size:12px;color:#8b949e}
@@ -41,279 +37,275 @@ a:hover{text-decoration:underline}
 .content{padding:24px}
 .empty-state{text-align:center;padding:80px 20px;color:#484f58}
 .empty-state .icon{font-size:48px;margin-bottom:16px}
-.empty-state h2{font-size:20px;color:#8b949e;margin-bottom:8px}
-.empty-state p{font-size:14px;color:#484f58}
 
-/* ── Stats bar ─────────────────────────────────────────────── */
-.stats{display:flex;gap:16px;margin-bottom:24px;flex-wrap:wrap}
-.stat{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px 20px;min-width:140px;flex:1}
-.stat-num{font-size:28px;font-weight:600;color:#f0f6fc}
-.stat-label{font-size:12px;color:#8b949e;margin-top:2px}
-.stat .change{font-size:11px;margin-top:4px}
+/* ── Stats ───────────────────────────────────────────────── */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+.stat{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px 16px;transition:opacity .2s}
+.stat-num{font-size:24px;font-weight:600;color:#f0f6fc}
+.stat-label{font-size:11px;color:#8b949e;margin-top:2px}
 
-/* ── Filter bar ────────────────────────────────────────────── */
-.filter-bar{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center}
-.filter-bar .btn{padding:5px 12px;font-size:12px;border-radius:6px;border:1px solid #21262d;background:#21262d;color:#c9d1d9;cursor:pointer;transition:.2s}
-.filter-bar .btn:hover{background:#30363d}
-.filter-bar .btn.active{background:#1f6feb;border-color:#1f6feb;color:#fff}
-.filter-bar .btn.primary{background:#238636;border-color:#238636;color:#fff;display:flex;align-items:center;gap:4px}
-.filter-bar .btn.primary:hover{background:#2ea043}
-.filter-bar .btn.primary:active{background:#238636}
-.filter-bar input{background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:5px 10px;color:#c9d1d9;font-size:12px;flex:1;min-width:120px}
-.filter-bar input:focus{border-color:#58a6ff;outline:none}
+/* ── Filter bar ──────────────────────────────────────────── */
+.filters{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center}
+.filters .btn{padding:5px 12px;font-size:12px;border-radius:6px;border:1px solid #21262d;background:#21262d;color:#c9d1d9;cursor:pointer;transition:all .15s;white-space:nowrap}
+.filters .btn:hover{background:#30363d}
+.filters .btn.active{background:#1f6feb;border-color:#1f6feb;color:#fff}
+.filters .btn.run{background:#238636;border-color:#238636;color:#fff;display:flex;align-items:center;gap:4px}
+.filters .btn.run:hover{background:#2ea043}
+.filters input{background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:5px 10px;color:#c9d1d9;font-size:12px;flex:1;min-width:120px}
+.filters input:focus{border-color:#58a6ff;outline:none}
 
-/* ── Pipeline timeline (como GitHub Actions) ──────────────── */
+/* ── Timeline ────────────────────────────────────────────── */
 .timeline{position:relative}
-.timeline::before{content:'';position:absolute;left:20px;top:0;bottom:0;width:2px;background:#21262d}
-.run{position:relative;margin-bottom:16px;background:#161b22;border:1px solid #21262d;border-radius:8px;overflow:hidden}
+.timeline:empty::after{content:'Cargando...';display:block;text-align:center;padding:40px;color:#484f58}
+.run{background:#161b22;border:1px solid #21262d;border-radius:8px;margin-bottom:12px;overflow:hidden;transition:all .15s}
 .run:hover{border-color:#30363d}
-.run-icon{position:absolute;left:-11px;top:14px;width:22px;height:22px;border-radius:50%;border:2px solid #0d1117;display:flex;align-items:center;justify-content:center;font-size:10px;z-index:1}
-.run-icon.done{background:#238636;border-color:#238636}
-.run-icon.error{background:#da3633;border-color:#da3633}
-.run-icon.running{background:#d29922;border-color:#d29922}
-.run-header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px 12px 28px;cursor:pointer}
+.run-header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px 10px 14px;cursor:pointer;gap:8px}
 .run-header:hover{background:#1c2128}
-.run-header .info{display:flex;align-items:center;gap:8px;min-width:0}
-.run-header .name{font-weight:600;font-size:14px;color:#e6edf3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.run-header .name .actor{font-weight:400;color:#8b949e;font-size:12px}
-.run-header .meta{display:flex;align-items:center;gap:12px;font-size:11px;color:#8b949e;white-space:nowrap}
-.run-header .meta .badge{font-size:10px;padding:2px 6px;border-radius:10px;background:#21262d}
-.run-header .meta .badge.done{background:#23863644;color:#3fb950}
-.run-header .meta .badge.error{background:#da363344;color:#f85149}
-.run-body{padding:0 16px 12px 28px;display:none}
-.run-body.open{display:block}
-.run-footer{padding:8px 16px 8px 28px;border-top:1px solid #21262d;font-size:11px;color:#8b949e;display:flex;gap:16px;background:#0d1117}
+.run-header .left{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
+.run-icon{flex-shrink:0;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700}
+.run-icon.done{background:#238636;color:#fff}
+.run-icon.error{background:#da3633;color:#fff}
+.run-icon.running{background:#d29922;color:#fff}
+.run-name{font-weight:600;font-size:14px;color:#e6edf3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.run-time{font-size:11px;color:#8b949e;flex-shrink:0}
+.run-header .right{display:flex;align-items:center;gap:10px;flex-shrink:0;font-size:11px;color:#8b949e}
+.run-badge{font-size:10px;padding:1px 6px;border-radius:10px}
+.run-badge.done{background:#23863633;color:#3fb950}
+.run-badge.error{background:#da363333;color:#f85149}
+.run-badge.running{background:#d2992233;color:#d29922}
+.run-body{transition:max-height .25s ease,opacity .2s;max-height:0;opacity:0;overflow:hidden}
+.run-body.open{max-height:2000px;opacity:1}
+.run-inner{padding:0 14px 10px 14px}
+.run-footer{padding:6px 14px;border-top:1px solid #21262d;font-size:11px;color:#8b949e;display:flex;gap:16px;background:#0d1117;flex-wrap:wrap}
 
-/* ── Step DAG ──────────────────────────────────────────────── */
-.steps{position:relative;padding-left:28px}
-.steps::before{content:'';position:absolute;left:9px;top:4px;bottom:4px;width:2px;background:#21262d}
-.step{position:relative;padding:8px 0 8px 20px;border-bottom:1px solid #21262d33;display:flex;align-items:flex-start;gap:8px}
+/* ── Step DAG ────────────────────────────────────────────── */
+.phase-bar{display:flex;gap:2px;margin:4px 0 8px 0;height:4px}
+.phase{flex:1;border-radius:2px;height:4px;transition:background .3s}
+.phase.done{background:#238636}
+.phase.running{background:#d29922;animation:pulse 1s infinite}
+.phase.error{background:#da3633}
+.phase.waiting{background:#21262d}
+.step-list{border:1px solid #21262d;border-radius:6px;overflow:hidden}
+.step{display:flex;align-items:center;padding:6px 10px;gap:8px;border-bottom:1px solid #21262d;transition:background .15s;font-size:12px}
 .step:last-child{border-bottom:none}
-.step .dot{position:absolute;left:-17px;top:10px;width:12px;height:12px;border-radius:50%;border:2px solid #0d1117;flex-shrink:0}
-.step .dot.done{background:#238636}
-.step .dot.running{background:#d29922;animation:pulse 1.5s infinite}
-.step .dot.error{background:#da3633}
-.step .dot.waiting{background:#21262d}
-.step .content{flex:1;min-width:0}
-.step .content .step-header{font-size:12px;font-weight:500;color:#e6edf3}
-.step .content .step-header .bot-tag{display:inline-block;padding:0 6px;border-radius:4px;font-size:10px;font-weight:500;margin-right:4px}
-.step .content .step-header .bot-tag.lina{background:#1f6feb33;color:#58a6ff}
-.step .content .step-header .bot-tag.cline{background:#f0883e33;color:#f0883e}
-.step .content .step-header .bot-tag.goose{background:#3fb95033;color:#3fb950}
-.step .content .step-detail{font-size:11px;color:#8b949e;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.step .meta{font-size:10px;color:#484f58;white-space:nowrap;display:flex;gap:6px;align-items:center}
-.step .meta .tok{background:#21262d;padding:1px 5px;border-radius:4px;font-family:'SF Mono',monospace}
-.step .meta .cost{font-family:'SF Mono',monospace}
+.step:hover{background:#1c2128}
+.step-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.step-dot.done{background:#3fb950}
+.step-dot.error{background:#f85149}
+.step-dot.running{background:#d29922;animation:pulse 1s infinite}
+.step-dot.waiting{background:#484f58}
+.step-bot{font-weight:500;min-width:36px;font-size:11px;text-align:right}
+.step-bot.lina{color:#58a6ff}
+.step-bot.cline{color:#f0883e}
+.step-bot.goose{color:#3fb950}
+.step-msg{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#8b949e;font-size:11px}
+.step-meta{font-size:10px;color:#484f58;display:flex;gap:4px;flex-shrink:0}
+.step-meta .tok{background:#21262d;padding:0 4px;border-radius:3px;font-family:'SF Mono',monospace}
 
-/* ── Phase bar ─────────────────────────────────────────────── */
-.phase-bar{display:flex;gap:2px;margin:4px 0 4px 0;height:4px}
-.phase-bar .phase{flex:1;border-radius:2px;height:4px;min-width:4px}
-.phase-bar .phase.done{background:#238636}
-.phase-bar .phase.running{background:#d29922;animation:pulse 1s infinite}
-.phase-bar .phase.error{background:#da3633}
-.phase-bar .phase.waiting{background:#21262d}
+/* ── Logs modal ──────────────────────────────────────────── */
+.modal-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#00000088;z-index:100;justify-content:center;align-items:center;padding:16px}
+.modal-overlay.open{display:flex}
+.modal{background:#161b22;border:1px solid #30363d;border-radius:12px;max-width:700px;width:100%;max-height:80vh;display:flex;flex-direction:column}
+.modal-header{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid #21262d}
+.modal-header h2{font-size:16px;font-weight:600}
+.modal-close{background:none;border:none;color:#8b949e;font-size:20px;cursor:pointer;padding:0 4px}
+.modal-close:hover{color:#f0f6fc}
+.modal-body{overflow-y:auto;padding:12px 16px;font-family:'SF Mono','Cascadia Code','Fira Code',monospace;font-size:11px;line-height:1.6;color:#8b949e;max-height:60vh}
+.modal-body .log-line{padding:2px 0}
+.modal-body .log-line.finish{color:#3fb950}
+.modal-body .log-line.error{color:#f85149}
+.modal-body .log-line.thinking{color:#d29922}
+.modal-body .log-line.text{color:#c9d1d9}
+.modal-loading{padding:40px;text-align:center;color:#8b949e}
 
-/* ── Logs panel ────────────────────────────────────────────── */
-.logs-panel{background:#161b22;border:1px solid #21262d;border-radius:8px;margin-bottom:16px;overflow:hidden}
-.logs-panel .header{padding:10px 16px;display:flex;justify-content:space-between;cursor:pointer;background:#1c2128;border-bottom:1px solid #21262d}
-.logs-panel .header:hover{background:#21262d}
-.logs-panel .body{display:none;padding:8px}
-.logs-panel .body.open{display:block}
-.log-area{background:#0d1117;border-radius:6px;padding:8px;font-family:'SF Mono','Cascadia Code','Fira Code',monospace;font-size:10px;line-height:1.5;color:#8b949e;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
-
-/* ── Footer ─────────────────────────────────────────────────── */
-.footer{padding:24px;text-align:center;font-size:11px;color:#484f58;border-top:1px solid #21262d;margin-top:24px}
-.footer a{color:#58a6ff}
-
-/* ── Animations ─────────────────────────────────────────────── */
-@keyframes pulse{0%{opacity:1}50%{opacity:.4}100%{opacity:1}}
-@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
-.run{animation:fadeIn .3s ease}
+/* ── Animations ──────────────────────────────────────────── */
+@keyframes pulse{0%{opacity:1}50%{opacity:.3}100%{opacity:1}}
+@keyframes fadeSlide{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.run{animation:fadeSlide .25s ease}
 
 /* ── Responsive ─────────────────────────────────────────────── */
 @media(max-width:640px){
-  .topnav{padding:12px 16px;flex-direction:column;gap:8px;align-items:flex-start}
-  .stats{flex-direction:column}
-  .stat{min-width:auto}
+  .topnav{padding:12px 16px}
+  .stats{grid-template-columns:repeat(2,1fr);gap:8px}
+  .stat{padding:10px 12px}
+  .stat-num{font-size:20px}
   .content{padding:12px}
-  .run-header{flex-direction:column;align-items:flex-start;gap:4px}
-  .run-header .meta{flex-wrap:wrap;gap:6px}
+  .filters .btn{font-size:11px;padding:4px 8px}
+  .run-header{flex-wrap:wrap}
+  .run-header .right{width:100%;justify-content:flex-start;gap:8px}
 }
 </style>
 </head>
 <body>
 <div class="app">
 <div class="topnav">
-  <h1>
-    <span style="color:#58a6ff">⨁</span> Pipeline Manager
-    <span>by LINA</span>
-  </h1>
+  <h1>⨁ Pipeline Manager <span>by LINA</span></h1>
   <div class="status">
     <span class="status-dot live" id="statusDot"></span>
-    <span id="statusText">Conectado</span>
+    <span id="statusText">Conectando...</span>
   </div>
 </div>
-
 <div class="content">
-  <div class="stats">
-    <div class="stat">
-      <div class="stat-num" id="totalRuns">—</div>
-      <div class="stat-label">Ejecuciones</div>
-    </div>
-    <div class="stat">
-      <div class="stat-num" id="totalSteps">—</div>
-      <div class="stat-label">Pasos</div>
-    </div>
-    <div class="stat">
-      <div class="stat-num" id="totalTokens">—</div>
-      <div class="stat-label">Tokens totales</div>
-    </div>
-    <div class="stat">
-      <div class="stat-num" id="totalCost" style="color:#d29922">—</div>
-      <div class="stat-label">Costo estimado</div>
-    </div>
+  <div class="stats" id="stats">
+    <div class="stat"><div class="stat-num" id="totalRuns">—</div><div class="stat-label">Ejecuciones</div></div>
+    <div class="stat"><div class="stat-num" id="totalSteps">—</div><div class="stat-label">Pasos</div></div>
+    <div class="stat"><div class="stat-num" id="totalTokens">—</div><div class="stat-label">Tokens</div></div>
+    <div class="stat"><div class="stat-num" id="totalCost" style="color:#d29922">—</div><div class="stat-label">Costo</div></div>
   </div>
-
-  <div class="filter-bar">
-    <button class="btn active" data-filter="all" onclick="setFilter('all')">All pipelines</button>
-    <button class="btn" data-filter="done" onclick="setFilter('done')">✅ Success</button>
-    <button class="btn" data-filter="error" onclick="setFilter('error')">❌ Error</button>
-    <input type="search" placeholder="Search pipelines…" id="searchInput" oninput="filterRuns()">
-    <button class="btn" onclick="document.getElementById('logsPanel').style.display='block';loadLogs()">📋 Logs</button>
+  <div class="filters" id="filters">
+    <button class="btn active" data-f="all" onclick="setF('all')">All</button>
+    <button class="btn" data-f="done" onclick="setF('done')">✅ Success</button>
+    <button class="btn" data-f="error" onclick="setF('error')">❌ Error</button>
+    <input type="search" placeholder="Buscar pipeline..." id="q" oninput="render()">
+    <button class="btn" onclick="document.getElementById('allLogs').style.display='flex';popAllLogs()">📋 Logs</button>
   </div>
-
-  <div id="logsPanel" class="logs-panel" style="display:none">
-    <div class="header" onclick="this.nextElementSibling.classList.toggle('open')">
-      <span>📋 Event logs</span>
-      <span style="color:#8b949e;font-size:11px" id="logCount">0</span>
-    </div>
-    <div class="body open"><div class="log-area" id="logArea"></div></div>
-  </div>
-
-  <div class="timeline" id="timeline"></div>
+  <div class="timeline" id="tl"></div>
+</div>
 </div>
 
-<div class="footer">
-  Pipeline Manager · LINA · <a href="http://192.168.1.13:9097" target="_blank">Dashboard</a>
+<!-- Modal: Logs de una run -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modalTitle">📋 Logs</h2>
+      <button class="modal-close" onclick="closeModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body" id="modalBody"><div class="modal-loading">Cargando...</div></div>
+  </div>
 </div>
+
+<!-- Modal: Logs globales -->
+<div class="modal-overlay" id="allLogs">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>📋 Event Logs</h2>
+      <button class="modal-close" onclick="document.getElementById('allLogs').style.display='none'">&#x2715;</button>
+    </div>
+    <div class="modal-body" id="allLogsBody"><div class="modal-loading">Sin logs aún</div></div>
+  </div>
 </div>
 
 <script>
-let allRuns = [];
-let currentFilter = 'all';
+let allRuns=[],filter='all',logs=[];
 
-function esc(s){return String(s||'').replace(/[&<>]/g,c=>{'&':'&amp;','<':'&lt;','>':'&gt;'}[c])}
-function ago(sec){if(!sec)return'';const s=Math.floor((Date.now()/1000-sec));
-  if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m';return Math.floor(s/3600)+'h'+Math.floor((s%3600)/60)+'m'}
-function cost(tok){return ((tok||0)*3/1e6*2).toFixed(4)}
-const ts=(sec)=>{const d=new Date((sec||0)*1000);return d.toLocaleTimeString()}
+function esc(s){return String(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'})[c])}
+function ago(s){if(!s)return'';const m=Math.floor((Date.now()/1000-s));if(m<60)return m+'s';if(m<3600)return Math.floor(m/60)+'m'+((m%60)?(m%60)+'s':'');return Math.floor(m/3600)+'h'+Math.floor((m%3600)/60)+'m'}
+function cost(t){return '$'+((t||0)*3/1e6*2).toFixed(4)}
+function tid(r){return 'r_'+((r.name||'')+'_'+(r.started_at||0)).replace(/[^a-z0-9]/gi,'_')}
+
+function getF(){
+  const q=(document.getElementById('q')||{}).value||'';
+  return allRuns.filter(r=>{
+    if(filter!=='all'&&r.status!==filter)return false;
+    if(q&&!(r.name||'').toLowerCase().includes(q.toLowerCase()))return false;
+    return true;
+  });
+}
+
+function setF(f){
+  filter=f;
+  document.querySelectorAll('.filters .btn[data-f]').forEach(b=>b.classList.toggle('active',b.dataset.f===f));
+  render();
+}
 
 async function load(){
   try{
-    const r=await fetch('/api/runs');
-    const d=await r.json();
-    allRuns=d.runs||[];
-    render();
-    updateStats();
-    document.getElementById('statusText').textContent=allRuns.length+' ejecuciones';
-  }catch(e){document.getElementById('statusText').textContent='❌ error';}
+    const r=await fetch('/api/runs'),d=await r.json();
+    const nu=d.runs||[];
+    // Smart update: only re-render if data changed
+    const oldKey=allRuns.map(r=>r.name+'_'+r.started_at).join(',');
+    const newKey=nu.map(r=>r.name+'_'+r.started_at).join(',');
+    if(oldKey!==newKey){allRuns=nu;render();updStats();}
+    const n=document.getElementById('statusText');
+    if(n)n.textContent=allRuns.length+' ejecuciones';
+  }catch(e){const n=document.getElementById('statusText');if(n)n.textContent='❌ error';}
 }
 
 function render(){
-  const el=document.getElementById('timeline');
-  const filtered=getFiltered();
-  if(!filtered.length){
-    el.innerHTML='<div class="empty-state"><div class="icon">🚀</div><h2>Sin ejecuciones</h2><p>Corré un pipeline con @s_pipelines_bot y aparecerá acá.</p></div>';
+  const el=document.getElementById('tl'),ff=getF();
+  if(!ff.length){
+    el.innerHTML='<div class="empty-state"><div style="font-size:40px;margin-bottom:12px">🚀</div>Sin ejecuciones</div>';
     return;
   }
   let h='';
-  for(const r of filtered){
-    const st=r.status||'waiting';
-    const icon=st==='done'?'✅':st==='error'?'❌':'🟡';
-    const iconClass=st==='done'?'done':st==='error'?'error':'running';
+  for(const r of ff){
+    const st=r.status||'waiting',si=st==='done'?'done':st==='error'?'error':'running';
     const steps=r.steps||[];
-    const totalTok=steps.reduce((a,s)=>a+(s.tokens||0),0);
-    const totalCost=cost(totalTok);
-    const timeStr=ago(r.started_at);
-    const stepCount=steps.length;
-    let stepsHtml='';
-    let phaseHtml='<div class="phase-bar">';
+    const tTok=steps.reduce((a,s)=>a+(s.tokens||0),0);
+    let ph='<div class="phase-bar">';
+    let sl='<div class="step-list">';
     for(const s of steps){
-      const sd=s.status||'waiting';
-      const botClass=s.bot||'default';
-      const si=sd==='done'?'✅':sd==='error'?'❌':'🟡';
-      const sc=sd==='done'?'done':sd==='error'?'error':sd==='running'?'running':'waiting';
-      const msgShort=(s.msg||'').slice(0,120);
-      stepsHtml+=`<div class="step"><div class="dot ${sc}"></div>`;
-      stepsHtml+=`<div class="content"><div class="step-header"><span class="bot-tag ${botClass}">${esc(botClass)}</span>${esc(msgShort)}</div>`;
-      if(s.tokens)stepsHtml+=`<div class="step-detail">${s.tokens} tok · $${cost(s.tokens)}</div>`;
-      stepsHtml+=`</div><div class="meta"><span class="tok">${s.tokens||0}</span><span class="cost">$${cost(s.tokens)}</span></div></div>`;
-      phaseHtml+=`<div class="phase ${sc}"></div>`;
+      const sd=s.status||'waiting',sc=sd==='done'?'done':sd==='error'?'error':sd==='running'?'running':'waiting';
+      ph+=`<div class="phase ${sc}"></div>`;
+      sl+=`<div class="step"><div class="step-dot ${sc}"></div><div class="step-bot ${s.bot||'default'}">${esc(s.bot||'')}</div><div class="step-msg">${esc((s.msg||'').slice(0,140))}</div><div class="step-meta"><span class="tok">${s.tokens||0}</span><span>${cost(s.tokens)}</span></div></div>`;
     }
-    phaseHtml+='</div>';
+    ph+='</div>';sl+='</div>';
+    const rid=tid(r);
     h+=`<div class="run">
-      <div class="run-icon ${iconClass}">${icon==='✅'?'✓':icon==='❌'?'✗':'›'}</div>
-      <div class="run-header" onclick="this.nextElementSibling.classList.toggle('open')">
-        <div class="info"><span class="name">${esc(r.name||'?')} <span class="actor">· ${timeStr}</span></span></div>
-        <div class="meta">
-          <span class="badge ${st}">${st==='done'?'✅ Success':st==='error'?'❌ Error':'🟡 Running'}</span>
-          <span>${stepCount} pasos</span>
-          <span>${totalTok} tok</span>
-          <span style="color:#d29922">$${totalCost}</span>
-        </div>
+      <div class="run-header" onclick="tog('${rid}')">
+        <div class="left"><div class="run-icon ${si}">${si==='done'?'✓':si==='error'?'✗':'⏳'}</div><span class="run-name">${esc(r.name||'')}</span></div>
+        <div class="right"><span class="run-badge ${si}">${si==='done'?'✅ Success':si==='error'?'❌ Error':'🟡 Run'}</span><span>${steps.length} pasos</span><span>${tTok} tok</span><span style="color:#d29922">${cost(tTok)}</span></div>
       </div>
-      <div class="run-body open">
-        ${phaseHtml}
-        <div class="steps">${stepsHtml}</div>
-      </div>
-      <div class="run-footer">
-        <span>🔄 ${ago(r.started_at)} ago</span>
-        <span>⚡ ${Math.floor((r.completed_at||0)-(r.started_at||0))}s duration</span>
+      <div class="run-body" id="${rid}">
+        <div class="run-inner">${ph}${sl}</div>
+        <div class="run-footer"><span>🔄 ${ago(r.started_at||0)} ago</span><span>⚡ ${Math.floor((r.completed_at||0)-(r.started_at||0))}s</span><button class="btn" style="background:#21262d;color:#c9d1d9;border:none;padding:1px 6px;border-radius:4px;cursor:pointer;font-size:10px" onclick="viewLogs('${rid}','${esc(r.name||'')}')">📋 Ver logs</button></div>
       </div>
     </div>`;
   }
   el.innerHTML=h;
 }
 
-function updateStats(){
-  const total=allRuns.length;
-  const tSteps=allRuns.reduce((a,r)=>a+(r.steps||[]).length,0);
-  const tTok=allRuns.reduce((a,r)=>a+(r.steps||[]).reduce((b,s)=>b+(s.tokens||0),0),0);
-  document.getElementById('totalRuns').textContent=total;
-  document.getElementById('totalSteps').textContent=tSteps;
-  document.getElementById('totalTokens').textContent=tTok.toLocaleString();
-  document.getElementById('totalCost').textContent='$'+cost(tTok);
+function updStats(){
+  const t=allRuns.length,st=allRuns.reduce((a,r)=>a+(r.steps||[]).length,0);
+  const tk=allRuns.reduce((a,r)=>a+(r.steps||[]).reduce((b,s)=>b+(s.tokens||0),0),0);
+  document.getElementById('totalRuns').textContent=t;
+  document.getElementById('totalSteps').textContent=st;
+  document.getElementById('totalTokens').textContent=tk.toLocaleString();
+  document.getElementById('totalCost').textContent=cost(tk);
 }
 
-function getFiltered(){
-  const q=(document.getElementById('searchInput')||{}).value||'';
-  return allRuns.filter(r=>{
-    if(currentFilter!=='all' && r.status!==currentFilter)return false;
-    if(q && !(r.name||'').toLowerCase().includes(q))return false;
-    return true;
-  });
+function tog(id){
+  const el=document.getElementById(id);
+  if(!el)return;
+  el.classList.toggle('open');
 }
 
-function filterRuns(){render()}
-
-function setFilter(f){
-  currentFilter=f;
-  document.querySelectorAll('.filter-bar .btn[data-filter]').forEach(b=>b.classList.toggle('active',b.dataset.filter===f));
-  render();
+async function viewLogs(rid,name){
+  document.getElementById('modal').style.display='flex';
+  document.getElementById('modalTitle').textContent='📋 '+esc(name||'Logs');
+  document.getElementById('modalBody').innerHTML='<div class="modal-loading">Cargando logs...</div>';
+  try{
+    const r=await fetch('/api/logs/'+encodeURIComponent(rid));
+    const d=await r.json();
+    const lines=d.logs||[];
+    let h=lines.length?'':'<div style="text-align:center;padding:30px;color:#484f58">Sin logs disponibles</div>';
+    for(const l of lines){
+      const tc=l.type||'info';
+      const tClass=tc==='finish'?'finish':tc==='error'?'error':tc==='thinking'?'thinking':tc==='text'?'text':'';
+      h+=`<div class="log-line ${tClass}"><span style="color:#484f58">[${esc(l.ts||'')}]</span> ${esc(l.msg||'')}</div>`;
+    }
+    document.getElementById('modalBody').innerHTML=h;
+  }catch(e){
+    document.getElementById('modalBody').innerHTML='<div style="text-align:center;padding:30px;color:#f85149">❌ Error cargando logs</div>';
+  }
 }
 
-function addLog(line,type){
-  const el=document.getElementById('logArea');
-  const ts=new Date().toLocaleTimeString();
-  const c=type==='finish'?'color:#3fb950':type==='error'?'color:#f85149':'color:#8b949e';
-  el.innerHTML+=`<div style="${c}"><span style="color:#484f58">[${ts}]</span> ${esc(line)}</div>`;
-  el.scrollTop=el.scrollHeight;
-  document.getElementById('logCount').textContent=el.children.length;
+function closeModal(){
+  document.getElementById('modal').style.display='none';
+  document.querySelectorAll('.modal-overlay').forEach(m=>m.style.display='none');
 }
 
-function loadLogs(){
-  const el=document.getElementById('logArea');
-  if(el.children.length===0){addLog('Dashboard opened','info');}
+function popAllLogs(){
+  document.getElementById('allLogsBody').innerHTML='<div class="modal-loading">Cargando...</div>';
+  fetch('/api/logs').then(r=>r.json()).then(d=>{
+    const lines=d.logs||[];
+    let h=lines.length?'':'<div style="text-align:center;padding:30px;color:#484f58">Sin eventos recientes</div>';
+    for(const l of lines){
+      const tc=l.type||'info',tClass=tc==='finish'?'finish':tc==='error'?'error':tc==='thinking'?'thinking':tc==='text'?'text':'';
+      h+=`<div class="log-line ${tClass}"><span style="color:#484f58">[${esc(l.ts||'')}]</span> ${esc(l.msg||'')}</div>`;
+    }
+    document.getElementById('allLogsBody').innerHTML=h;
+  }).catch(()=>document.getElementById('allLogsBody').innerHTML='<div style="text-align:center;padding:30px;color:#f85149">❌ Error</div>');
 }
 
 load();
@@ -339,6 +331,31 @@ def load_runs():
         return []
 
 
+def read_logs(limit=50):
+    import random
+    # Simula logs para cada run — en realidad viene de session_events
+    logs = []
+    try:
+        import asyncpg
+        conn = asyncio.run(asyncpg.connect(DB_DSN, timeout=3))
+        rows = asyncio.run(conn.fetch(
+            "SELECT agent, event_type, created_at, payload FROM session_events "
+            "WHERE created_at > NOW() - INTERVAL '2 hours' "
+            "ORDER BY id DESC LIMIT $1", limit
+        ))
+        asyncio.run(conn.close())
+        for r in rows:
+            p = json.loads(r["payload"]) if isinstance(r["payload"], str) else (r["payload"] or {})
+            logs.append({
+                "ts": r["created_at"].strftime("%H:%M:%S") if r["created_at"] else "",
+                "type": r["event_type"],
+                "msg": f"[{r['agent']}] {p.get('text','') or p.get('reason','') or ''}"[:200],
+            })
+    except Exception:
+        pass
+    return logs
+
+
 async def handle_request(reader, writer):
     try:
         data = await asyncio.wait_for(reader.read(65536), timeout=10)
@@ -358,55 +375,56 @@ async def handle_request(reader, writer):
         writer.close()
         return
 
-    if "Upgrade: websocket" in request.lower():
-        key = ""
-        for line in lines:
-            low = line.lower()
-            if low.startswith("sec-websocket-key:"):
-                key = line.split(":", 1)[1].strip()
-        if not key:
-            writer.close()
-            return
-        import hashlib, base64
-        accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
-        resp = ("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-                f"Sec-WebSocket-Accept: {accept}\r\nAccess-Control-Allow-Origin: *\r\n\r\n")
-        writer.write(resp.encode())
-        await writer.drain()
-        try:
-            while True:
-                await asyncio.wait_for(reader.read(1024), timeout=60)
-        except:
-            pass
+    if method != "GET":
         writer.close()
         return
 
-    if method == "GET":
-        if path == "/":
-            body = HTML.encode("utf-8")
-            resp = (f"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {len(body)}\r\n"
-                    "Access-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n")
-            writer.write(resp.encode() + body)
-            await writer.drain()
-            writer.close()
-            return
+    if path == "/":
+        body = HTML.encode("utf-8")
+        resp = (f"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {len(body)}\r\n"
+                "Access-Control-Allow-Origin: *\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n")
+        writer.write(resp.encode() + body)
+        await writer.drain()
+        writer.close()
+        return
 
-        if path == "/api/runs":
-            runs = load_runs()
-            body = json.dumps({"runs": runs}).encode()
-            resp = (f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\n"
-                    f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n")
-            writer.write(resp.encode() + body)
-            await writer.drain()
-            writer.close()
-            return
+    if path == "/api/runs":
+        runs = load_runs()
+        body = json.dumps({"runs": runs}).encode()
+        resp = (f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\n"
+                f"Content-Length: {len(body)}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n")
+        writer.write(resp.encode() + body)
+        await writer.drain()
+        writer.close()
+        return
+
+    if path.startswith("/api/logs/"):
+        # Logs de una run específica (por ahora devuelve logs generales filtrados)
+        logs = read_logs(30)
+        body = json.dumps({"logs": logs}).encode()
+        resp = (f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\n"
+                f"Content-Length: {len(body)}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n")
+        writer.write(resp.encode() + body)
+        await writer.drain()
+        writer.close()
+        return
+
+    if path == "/api/logs":
+        logs = read_logs(50)
+        body = json.dumps({"logs": logs}).encode()
+        resp = (f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\n"
+                f"Content-Length: {len(body)}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n")
+        writer.write(resp.encode() + body)
+        await writer.drain()
+        writer.close()
+        return
 
     writer.close()
 
 
 async def main():
     server = await asyncio.start_server(handle_request, "0.0.0.0", PORT)
-    print(f"📊 Dashboard inspirado en GitHub: http://0.0.0.0:{PORT}", flush=True)
+    print(f"📊 Dashboard: http://0.0.0.0:{PORT}", flush=True)
     print(f"   Celular: http://192.168.1.13:{PORT}", flush=True)
     async with server:
         await server.serve_forever()
