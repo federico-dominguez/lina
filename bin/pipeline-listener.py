@@ -23,6 +23,7 @@ import yaml
 from telethon import TelegramClient, events
 from telethon.tl.functions.messages import GetDialogsRequest
 from telethon.tl.types import InputPeerEmpty
+from telethon.tl.custom import Button
 
 BASE = Path(__file__).resolve().parent.parent
 BIN_PIPELINE = BASE / "bin" / "pipeline"
@@ -59,6 +60,35 @@ def copy_session_for_pipeline():
         shutil.copy2(sf, pf)
         return True
     return False
+
+
+# ─── Inline keyboards ─────────────────────────────────────────────
+async def send_pipeline_menu(client, chat, edit_msg=None):
+    """Muestra menu con pipelines como botones."""
+    yamls = sorted([f.stem for f in YAML_DIR.glob("*.yaml") if f.stem != "template"])
+    if not yamls:
+        txt = "📂 No hay pipelines. Crea uno con /new"
+        if edit_msg: await client.edit_message(chat, edit_msg, txt)
+        else: await client.send_message(chat, txt)
+        return
+    rows = [[Button.inline("📂 " + y, data="menu_" + y) for y in yamls[i:i+2]] for i in range(0, len(yamls), 2)]
+    rows.append([Button.inline("➕ Crear nuevo", data="action_new"), Button.inline("🔄 Refrescar", data="action_refresh")])
+    txt = f"📋 Pipeline Manager — {len(yamls)} pipeline(s)"
+    if edit_msg: await client.edit_message(chat, edit_msg, txt, buttons=rows)
+    else: await client.send_message(chat, txt, buttons=rows)
+
+async def send_pipeline_actions(client, chat, edit_msg, pname):
+    """Muestra acciones para un pipeline."""
+    rows = [
+        [Button.inline("▶️ Ejecutar", data="run_" + pname), Button.inline("⚡ Paralelo", data="runp_" + pname)],
+        [Button.inline("ℹ️ Info", data="info_" + pname), Button.inline("🗑️ Eliminar", data="del_" + pname)],
+        [Button.inline("🔙 Volver", data="action_menu")],
+    ]
+    await client.edit_message(chat, edit_msg, f"📋 Pipeline: {pname}", buttons=rows)
+
+async def send_confirm_delete(client, chat, edit_msg, pname):
+    rows = [[Button.inline("✅ Sí", data="confirm_del_" + pname)], [Button.inline("❌ No", data="menu_" + pname)]]
+    await client.edit_message(chat, edit_msg, f"🗑️ Eliminar '{pname}'?", buttons=rows)
 
 
 async def main():
@@ -130,18 +160,18 @@ async def main():
             await client.send_message(GROUP_ID, msg)
             return
 
-        # ── list / info ────────────────────────────────────────────
-        if subcmd in ("list", "info"):
+        # ── list (menu con botones) / info ─────────────────────────
+        if subcmd == "list":
+            await send_pipeline_menu(client, GROUP_ID)
+            return
+        if subcmd == "info":
             try:
-                r = subprocess.run(
-                    [sys.executable, str(BIN_PIPELINE), subcmd, name_arg],
-                    capture_output=True, text=True, timeout=15,
-                )
+                r = subprocess.run([sys.executable, str(BIN_PIPELINE), "info", name_arg],
+                    capture_output=True, text=True, timeout=15)
                 out = (r.stdout + r.stderr).strip()[:1500]
             except Exception as e:
                 out = str(e)
-            prefix = "📂 Pipelines:" if subcmd == "list" else f"📋 Info '{name_arg}':"
-            await client.send_message(GROUP_ID, f"{prefix}\n<code>{out}</code>")
+            await client.send_message(GROUP_ID, f"📋 Info '{name_arg}':\n<code>{out}</code>")
             return
 
         # ── new ────────────────────────────────────────────────────
@@ -218,6 +248,77 @@ async def main():
             return
 
         await client.send_message(GROUP_ID, f"❌ Comando /pipeline {subcmd} desconocido")
+
+    # ── CallbackQuery handler (botones inline) ──────────────────────
+    @client.on(events.CallbackQuery)
+    async def callback(event):
+        data = (event.data or b"").decode()
+        chat = event.chat_id
+        msg_id = event.message_id
+        sender = await event.get_sender()
+        sname = getattr(sender, "first_name", "") or getattr(sender, "username", str(sender.id))
+        log(f"🔘 {data} (from @{sname})")
+
+        # Menu principal
+        if data in ("action_menu", "action_refresh"):
+            if data == "action_refresh": await event.answer("🔄")
+            await send_pipeline_menu(client, chat, msg_id)
+            return
+
+        if data == "action_new":
+            await event.answer("📝 Usa /new")
+            await client.edit_message(chat, msg_id, "✨ Usa: /new <nombre> step1:lina -> msg, step2:cline -> msg2")
+            return
+
+        # Menu de pipeline
+        if data.startswith("menu_"):
+            await send_pipeline_actions(client, chat, msg_id, data[5:])
+            return
+
+        # Run
+        if data.startswith("run_") or data.startswith("runp_"):
+            parallel = data.startswith("runp_")
+            pname = data[5:] if parallel else data[4:]
+            await event.answer("🚀")
+            await client.edit_message(chat, msg_id, f"🚀 {pname}...")
+            copy_session_for_pipeline()
+            cmd = [sys.executable, str(BIN_PIPELINE), "run", pname]
+            if parallel: cmd.append("--parallel")
+            env = os.environ.copy()
+            env["COMM_SESSION"] = SESSION_PIPELINE
+            subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            log(f"🚀 '{pname}' desde boton")
+            return
+
+        # Info
+        if data.startswith("info_"):
+            pname = data[5:]
+            try:
+                r = subprocess.run([sys.executable, str(BIN_PIPELINE), "info", pname], capture_output=True, text=True, timeout=15)
+                out = (r.stdout + r.stderr).strip()[:1000]
+            except: out = "Error"
+            await client.edit_message(chat, msg_id, f"📋 {pname}:\n<code>{out}</code>")
+            return
+
+        # Delete
+        if data.startswith("del_"):
+            await send_confirm_delete(client, chat, msg_id, data[4:])
+            return
+
+        if data.startswith("confirm_del_"):
+            pname = data[12:]
+            yaml_path = YAML_DIR / f"{pname}.yaml"
+            if yaml_path.exists():
+                yaml_path.unlink()
+                await client.edit_message(chat, msg_id, f"🗑️ '{pname}' eliminado.")
+                log(f"🗑️ '{pname}' eliminado")
+            else:
+                await event.answer("⚠️ No encontrado")
+                return
+            await send_pipeline_menu(client, chat, msg_id)
+            return
+
+        await event.answer("❌")
 
     await client.run_until_disconnected()
 

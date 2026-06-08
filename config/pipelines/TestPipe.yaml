@@ -1,0 +1,9 @@
+_name: TestPipe
+description: 'Creado via Telegram: 2 paso(s)'
+steps:
+- bot: lina
+  msg: hola
+  notify: ✅ Lina completo.
+- bot: cline
+  msg: decime CPU y memoria
+  notify: ✅ Cline completo.
