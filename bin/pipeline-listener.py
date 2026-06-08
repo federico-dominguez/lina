@@ -2,10 +2,13 @@
 """
 pipeline-listener.py — Escucha comandos /pipeline en el grupo "Comms" via Comm.
 
-Uso directo:
+El listener se detiene a sí mismo durante la ejecución de pipelines para
+liberar la sesión de Telethon. Systemd lo reinicia automáticamente.
+
+Uso:
   python3 bin/pipeline-listener.py
 
-Uso daemon:
+Daemon:
   systemctl --user start lina-pipeline-listener.service
 """
 
@@ -23,14 +26,15 @@ SESSION = str(COMM_DIR / "comm_session")
 API_ID = 12663248
 API_HASH = "57a7b9ec3cd607e64b73dbae1240af24"
 
-GROUP = None
+GROUP_ID = None
 
 
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
-async def get_group(client):
+async def get_group_id(client):
+    """Obtiene el ID numérico del grupo 'Comms'."""
     dialogs = await client(GetDialogsRequest(
         offset_date=None, offset_id=0, offset_peer=InputPeerEmpty(),
         limit=200, hash=0,
@@ -38,12 +42,12 @@ async def get_group(client):
     for d in dialogs.chats:
         title = getattr(d, "title", "") or ""
         if "Comm" in title:
-            return d.id, d
-    return None, None
+            return d.id
+    return None
 
 
-def run_pipeline_sync(subcmd, name="", parallel=False):
-    """Ejecuta pipeline CLI como subproceso (síncrono)."""
+def run_sync(subcmd, name="", parallel=False):
+    """Ejecuta el CLI pipeline como subproceso (síncrono)."""
     cmd = [sys.executable, str(BIN_PIPELINE), subcmd]
     if name:
         cmd.append(name)
@@ -61,87 +65,86 @@ def run_pipeline_sync(subcmd, name="", parallel=False):
         return f"Error: {e}", 1
 
 
-async def handle_command(client, gid_entity, text, sender_name):
-    global GROUP
-
-    m = re.match(r"^/pipeline\s+(\w+)?\s*(\S+)?\s*(-p|--parallel)?", text.strip())
-    if not m:
-        return
-    subcmd = m.group(1) or "help"
-    name = m.group(2) or ""
-    parallel = bool(m.group(3))
-
-    log(f"📥 /pipeline {subcmd} {name} (from @{sender_name})")
-
-    if subcmd == "help":
-        await client.send_message(gid_entity,
-            "📋 Pipeline Manager\nUso:\n  /pipeline list\n  /pipeline run <nombre> [-p]\n  /pipeline info <nombre>\nEj: /pipeline run duo")
-        return
-
-    if subcmd in ("list", "info"):
-        out, _ = run_pipeline_sync(subcmd, name)
-        prefix = "📂 Pipelines:" if subcmd == "list" else f"📋 Info '{name}':"
-        await client.send_message(gid_entity, f"{prefix}\n<code>{out}</code>")
-        return
-
-    if subcmd == "run":
-        if not name:
-            await client.send_message(gid_entity, "❌ Usa: /pipeline run <nombre>")
-            return
-        await client.send_message(gid_entity, f"🚀 Ejecutando pipeline '{name}'...")
-        await asyncio.sleep(2)
-
-        # Guardar ID del grupo y cerrar sesión
-        gid = gid_entity.id if hasattr(gid_entity, "id") else int(gid_entity)
-        await client.disconnect()
-        # La sesión de Telethon ahora está libre para send-bot.py
-
-        # Ejecutar pipeline (síncrono, no necesita event loop de Telethon)
-        out, code = run_pipeline_sync("run", name, parallel)
-
-        # Reconectar con cliente nuevo y enviar resultado
-        new_c = TelegramClient(SESSION, API_ID, API_HASH)
-        new_c.parse_mode = None
-        await new_c.start()
+async def send_msg(client, text):
+    """Envía un mensaje al grupo."""
+    if GROUP_ID and client:
         try:
-            g_e = await new_c.get_entity(gid)
-            status = "✅ Completado" if code == 0 else "⚠️ Con errores"
-            await new_c.send_message(g_e, f"{status}:\n<code>{out}</code>")
+            entity = await client.get_entity(GROUP_ID)
+            await client.send_message(entity, text)
         except Exception as e:
-            log(f"⚠️ Error al notificar resultado: {e}")
-        await new_c.disconnect()
-
-        # Salir — systemd reinicia el listener automáticamente
-        log("🔄 Reiniciando listener...")
-        sys.exit(0)
-
-    await client.send_message(gid_entity, f"❌ Comando desconocido: /pipeline {subcmd}")
+            log(f"⚠️ Error send_msg: {e}")
 
 
 async def main():
-    global GROUP
+    global GROUP_ID
 
     client = TelegramClient(SESSION, API_ID, API_HASH)
     client.parse_mode = None
     await client.start()
     log("✅ pipeline-listener conectado")
 
-    gid, gid_entity = await get_group(client)
-    if not gid:
+    GROUP_ID = await get_group_id(client)
+    if not GROUP_ID:
         log("❌ No se encontró grupo Comm")
         return
-    GROUP = gid
-    log(f"👂 Escuchando /pipeline en '{getattr(gid_entity, 'title', '?')}'")
+    log(f"👂 Escuchando /pipeline en grupo #{GROUP_ID}")
 
-    @client.on(events.NewMessage(chats=GROUP))
+    @client.on(events.NewMessage(chats=GROUP_ID))
     async def handler(event):
         text = (event.message.text or "").strip()
         if not text.startswith("/pipeline"):
             return
-        e = await client.get_entity(GROUP)
+
         sender = await event.get_sender()
         name = getattr(sender, "first_name", "") or getattr(sender, "username", str(sender.id))
-        await handle_command(client, e, text, name)
+
+        m = re.match(r"^/pipeline\s+(\w+)?\s*(\S+)?\s*(-p|--parallel)?", text)
+        if not m:
+            await send_msg(client, "❌ Usa: /pipeline list | run <nombre> [-p] | info <nombre>")
+            return
+
+        subcmd = m.group(1) or "help"
+        name_arg = m.group(2) or ""
+        parallel = bool(m.group(3))
+
+        log(f"📥 /pipeline {subcmd} {name_arg} (from @{name})")
+
+        # ── help ────────────────────────────────────────
+        if subcmd in ("help", ""):
+            await send_msg(client, "📋 Pipeline Manager\nUso:\n  /pipeline list\n  /pipeline run <nombre> [-p]\n  /pipeline info <nombre>\nEj: /pipeline run duo")
+            return
+
+        # ── list / info (rápidos, no necesitan Telethon en subproceso) ──
+        if subcmd in ("list", "info"):
+            out, _ = run_sync(subcmd, name_arg)
+            prefix = "📂 Pipelines:" if subcmd == "list" else f"📋 Info '{name_arg}':"
+            await send_msg(client, f"{prefix}\n<code>{out}</code>")
+            return
+
+        # ── run ─────────────────────────────────────────
+        if subcmd == "run":
+            if not name_arg:
+                await send_msg(client, "❌ Usa: /pipeline run <nombre>")
+                return
+
+            await send_msg(client, f"🚀 Ejecutando pipeline '{name_arg}'...")
+            await asyncio.sleep(1)
+
+            # ── Liberar Telethon para el subproceso ──────
+            await client.disconnect()
+            log("🔌 Telethon desconectado, ejecutando subproceso...")
+
+            # Ejecutar pipeline (usa la sesión liberada)
+            out, code = run_sync("run", name_arg, parallel)
+
+            # El subproceso ya envió sus propias notificaciones al grupo
+            # (Lina y Cline respondieron + Comm notificó por el pipeline).
+            # No reconectamos — systemd reinicia el listener.
+            log(f"🏁 Subproceso completado (exit={code})")
+            log("🔄 Saliendo para que systemd reinicie el listener...")
+            sys.exit(0)
+
+        await send_msg(client, f"❌ Comando /pipeline {subcmd} desconocido")
 
     await client.run_until_disconnected()
 
