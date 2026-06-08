@@ -233,7 +233,7 @@ class Bot:
 
     async def _handle(self, msg: TelegramMessage) -> None:
         # Comm messages (from HTTP bridge) → redirect to real Comm group
-        if msg.from_user and getattr(msg.from_user, "id", None) == 8887121852:
+        if msg.from_user and getattr(msg.from_user, "id", None) == 8887121852 and getattr(msg.from_user, "is_bot", False):
             chat_id = -5110614353
         else:
             chat_id = msg.chat.id
@@ -494,7 +494,7 @@ class Bot:
         conv_id = str(
             uuid.uuid5(uuid.NAMESPACE_DNS, f"telegram-chat-{chat_id}")
         )  # UUID determinista por chat
-        if msg.chat.chat_type in ("group", "supergroup") and self._floor.is_enabled:
+        if False:  # floor deshabilitado — los bots responden sin turno
             token = await self._floor.try_acquire(
                 self._name.lower(),
                 conv_id,
