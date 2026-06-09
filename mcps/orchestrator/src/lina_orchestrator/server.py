@@ -34,9 +34,9 @@ from mcp.server.fastmcp import FastMCP
 from lina_orchestrator.application.policy_service import PolicyService
 from lina_orchestrator.domain.policy import PolicyStore
 from lina_orchestrator.infrastructure.spawner import (
-    SpawnerService,
     _WATCHDOG_INTERVAL,
     _WATCHDOG_MAX_LOOP_ERRORS,
+    SpawnerService,
 )
 
 logging.basicConfig(
