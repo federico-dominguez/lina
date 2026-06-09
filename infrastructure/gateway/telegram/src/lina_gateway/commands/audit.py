@@ -116,11 +116,12 @@ def _format_row(i: int, row: dict[str, Any]) -> str:
     args = row.get("args_json", {})
     if isinstance(args, str):
         import json
+
         try:
             args = json.loads(args)
         except (json.JSONDecodeError, TypeError):
             args = {}
-    
+
     # Redact if secret MCP
     if mcp in _SECRET_MCPS:
         args = {k: "<redacted>" for k in args}
@@ -204,7 +205,7 @@ async def _query_audit(db_url: str, filters: dict[str, Any]) -> list[dict[str, A
     # Build parameterized SQL with $1, $2, etc. for asyncpg
     # asyncpg uses $1, $2 positional params
     where_sql = " AND ".join(where_clauses)
-    
+
     # Replace %s with $1, $2 for asyncpg
     # Since we have at most 2 params, we can build directly
     limit_param = len(params) + 1  # next param index
@@ -220,7 +221,7 @@ async def _query_audit(db_url: str, filters: dict[str, Any]) -> list[dict[str, A
 
     # Hmm, this is getting complicated with param indexing. Let me use a cleaner approach.
     # Actually, let me just use a simple raw query with f-string for the limit (safe, int).
-    
+
     logger.info("audit query: filters=%s", filters)
 
     conn = await asyncpg.connect(db_url, timeout=_DB_TIMEOUT_S)

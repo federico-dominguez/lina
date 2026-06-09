@@ -293,7 +293,7 @@ class ObserveServer:
             acc = prev + text
             # Truncate to _MAX_CURRENT_TEXT to prevent unbounded memory growth
             if len(acc) > self._MAX_CURRENT_TEXT:
-                acc = acc[-self._MAX_CURRENT_TEXT:]
+                acc = acc[-self._MAX_CURRENT_TEXT :]
             self._current_text[session_id] = acc
             payload["text"] = text
             db_payload = {"text": text}

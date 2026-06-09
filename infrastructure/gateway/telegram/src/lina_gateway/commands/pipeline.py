@@ -31,20 +31,23 @@ async def handle_pipeline(text: str, tg, chat_id: int) -> None:
     parallel = "-p" in parts or "--parallel" in parts
 
     if subcmd in ("help", ""):
-        await tg.send_message(chat_id,
+        await tg.send_message(
+            chat_id,
             "📋 Pipeline Manager\n"
             "Uso:\n"
             "  /pipeline list          — listar pipelines\n"
             "  /pipeline run <nombre>  — ejecutar pipeline\n"
             "  /pipeline info <nombre> — info detallada\n"
-            "Ej: /pipeline run duo -p"
+            "Ej: /pipeline run duo -p",
         )
         return
 
     if subcmd == "list":
         try:
             proc = await asyncio.create_subprocess_exec(
-                sys.executable, str(BIN_PIPELINE), "list",
+                sys.executable,
+                str(BIN_PIPELINE),
+                "list",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
@@ -72,8 +75,7 @@ async def handle_pipeline(text: str, tg, chat_id: int) -> None:
             out = stdout.decode() if stdout else ""
             summary = out[-400:] if len(out) > 400 else out
             await tg.send_message(
-                chat_id,
-                f"✅ Pipeline '{name}' completado.\n<pre>{summary}</pre>"
+                chat_id, f"✅ Pipeline '{name}' completado.\n<pre>{summary}</pre>"
             )
         except TimeoutError:
             await tg.send_message(chat_id, f"⚠️ Pipeline '{name}' excedió 5 min de timeout")
@@ -84,7 +86,10 @@ async def handle_pipeline(text: str, tg, chat_id: int) -> None:
     if subcmd == "info" and name:
         try:
             proc = await asyncio.create_subprocess_exec(
-                sys.executable, str(BIN_PIPELINE), "info", name,
+                sys.executable,
+                str(BIN_PIPELINE),
+                "info",
+                name,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
