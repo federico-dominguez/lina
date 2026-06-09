@@ -1,0 +1,6 @@
+Fix aplicado:
+1. Editado docker-compose.yml:
+   - Cline: agregado GOOSE_SERVER__SECRET_KEY
+   - Gemma: agregados LINA_SECRET_KEY + GOOSE_SERVER__SECRET_KEY
+2. Containers recreados con los secrets correctos
+3. Verificado funcionamiento

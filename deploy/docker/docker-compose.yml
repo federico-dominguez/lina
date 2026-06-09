@@ -87,6 +87,7 @@ services:
         condition: service_started
     environment:
       LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
+      COMM_SENDER: "lina"
       LINA_SECRET_KEY: ${LINA_SECRET_KEY:-${GOOSE_SERVER__SECRET_KEY:-}}
       # goosed binary expects GOOSE_SERVER_SECRET_KEY (or GOOSE_SERVER__SECRET_KEY)
       GOOSE_SERVER__SECRET_KEY: ${LINA_SECRET_KEY:-${GOOSE_SERVER__SECRET_KEY:-}}
@@ -389,8 +390,20 @@ services:
       - "host.docker.internal:host-gateway"
 
   # ─── MCP: lina-orchestrator ─────────────────────────────────────────────────
-  # Multi-agent orchestrator: expone políticas de subagentes (read-only MVP).
-  # Lee policies.yaml montado desde el repo del host (ro).
+  # Multi-agent orchestrator: expone políticas de subagentes + watchdog de
+  # timeouts + spawn de sub-agentes goosed como procesos hijos (issues #84, #89).
+  #
+  # ⚠️  WATCHDOG DUAL: El sistema tiene dos watchdogs complementarios:
+  #    1. lina-watchdog.service (host systemd) → monitorea container lina-goosed
+  #       via Docker healthcheck. Corre en el HOST (no en container).
+  #    2. Watchdog interno (in-process) → thread daemon en SpawnerService.
+  #       Monitorea sub-agentes goosed hijos y los mata si exceden
+  #       max_runtime_minutes según la política del rol.
+  #    Son complementarios, no duplicados. Ver docs/architecture/ para detalle.
+  #
+  # 🟢  HARDENING: Este MCP es read-only y no tiene acceso a fs-safe ni
+  #     shell-policy. Solo spawna procesos goosed hijos con configs filtradas
+  #     según policies.yaml.
   lina-mcp-orchestrator:
     <<: *mcp-defaults
     build:
@@ -407,8 +420,22 @@ services:
       LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
       LINA_GOOSED_URL: https://lina-goosed:3000
       LINA_GOOSED_SECRET: ${GOOSE_SERVER__SECRET_KEY:-}
+      # ── Sub-agent spawning ────────────────────────────────────────────────
+      # Ruta al binario goosed dentro del container (necesario para spawn).
+      # Si cambia la versión en Dockerfile.goosed, actualizar acá también.
+      LINA_GOOSED_BIN: /usr/local/bin/goosed
+      # Config base de goosed que se filtra por rol para generar las configs
+      # temporales de los sub-agentes (solo MCPs permitidos).
+      LINA_BASE_GOOSE_CONFIG: /root/.config/goose/config.yaml
+      # ── Watchdog de timeouts (opcionales, mostrar valores por defecto) ────
+      LINA_WATCHDOG_INTERVAL: ${LINA_WATCHDOG_INTERVAL:-30}
+      LINA_WATCHDOG_MAX_ERRORS: ${LINA_WATCHDOG_MAX_ERRORS:-5}
     volumes:
       - ../../config/policies.yaml:/home/user/lina/config/policies.yaml:ro
+      # Base config de goosed (para filtrar MCPs por rol en sub-agentes)
+      - ../../config/goose.config.docker.yaml:/root/.config/goose/config.yaml:ro
+      # Binario goosed para spawnear sub-agentes (mismo que usa lina-goosed)
+      - /usr/local/bin/goosed:/usr/local/bin/goosed:ro
 
   # ─── MCP Gateway — nginx rate limiting (3.3) ────────────────────────────────
   # Proxy reverso para todos los MCPs. Expone 8101-8110 en localhost.
@@ -517,7 +544,10 @@ services:
         condition: service_started
     environment:
       LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@localhost:5432/lina
+      COMM_SENDER: "cline"
       LINA_SECRET_KEY: ${LINA_SECRET_KEY:-${GOOSE_SERVER__SECRET_KEY:-}}
+      # goosed binary expects GOOSE_SERVER__SECRET_KEY for /agent/start auth
+      GOOSE_SERVER__SECRET_KEY: ${LINA_SECRET_KEY:-${GOOSE_SERVER__SECRET_KEY:-}}
       GOOSE_PORT: "3001"
       GOOSE_HOST: "127.0.0.1"
       GOOSE_MAX_TURNS: ${GOOSE_MAX_TURNS:-1000}
@@ -550,6 +580,53 @@ services:
     # ── Memory limits: cline-goosed con contexto grande
     mem_limit: 2g
     memswap_limit: 2g
+
+  # ─── gemma-goosed ────────────────────────────────────────────────────────────
+  gemma-goosed:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.goosed
+      args:
+        AGENT_PERSONALITY: gemma
+    image: gemma-goosed:latest
+    container_name: gemma-goosed
+    restart: unless-stopped
+    depends_on:
+      lina-db:
+        condition: service_healthy
+    environment:
+      LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
+      COMM_SENDER: "gemma"
+      LINA_SECRET_KEY: ${GEMMA_SECRET_KEY:-}
+      GOOSE_SERVER__SECRET_KEY: ${GEMMA_SECRET_KEY:-}
+      GOOSE_PORT: "3002"
+      GOOSE_HOST: "0.0.0.0"
+      GOOSE_MAX_TURNS: ${GOOSE_MAX_TURNS:-1000}
+      GOOSE_GATEWAY_MAX_TURNS: ${GOOSE_GATEWAY_MAX_TURNS:-50}
+      GOOSE_SUBAGENT_MAX_TURNS: ${GOOSE_SUBAGENT_MAX_TURNS:-200}
+      GOOSE_CONTEXT_STRATEGY: ${GOOSE_CONTEXT_STRATEGY:-summarize}
+      GOOSE_TELEMETRY_ENABLED: "false"
+      GOOSE_DISABLE_AUTO_SESSION_TITLES: "true"
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      LINA_ENV: docker
+    volumes:
+      - ../../config/goose.config.gemma.yaml:/root/.config/goose/config.yaml:ro
+      - ${HOME}/.config/goose/memory-gemma:/root/.config/goose/memory:rw
+      - ${HOME}/.config/goose/gateway-gemma:/root/.config/goose/gateway:rw
+      - lina-logs:/app/logs
+      - ${HOME}:/home/user:rw
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+    ports:
+      - "127.0.0.1:3002:3002"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    mem_limit: 2g
+    memswap_limit: 2g
+    profiles: ["all"]
+
 
   # ─── [DEPRECATED] Telegram Gateway Docker — reemplazado por host-native ──
   # Ya no se usa. Reemplazado por:

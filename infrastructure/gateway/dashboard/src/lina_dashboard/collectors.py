@@ -5,6 +5,7 @@ Polling targets:
 1. Bot observe ports (9091=Goose, 9092=CLINE, 9093=LINA)
 2. Docker socket proxy (container list + health)
 3. MCP nginx gateway (health check per MCP endpoint)
+4. PostgreSQL — comm_messages stats (via psycopg2)
 """
 
 from __future__ import annotations
@@ -12,11 +13,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+import psycopg2
+import psycopg2.extras
 
 logger = logging.getLogger(__name__)
 
@@ -132,10 +136,43 @@ class MCPStatus:
 
 
 @dataclass
+class CommStats:
+    """Estadísticas de mensajería del Comm Bridge."""
+
+    total: int = 0
+    delivered: int = 0
+    failed: int = 0
+    ignored: int = 0
+    sent: int = 0
+    retrying: int = 0
+    by_sender: dict[str, int] = field(default_factory=dict)
+    latest_errors: list[dict[str, Any]] = field(default_factory=list)
+    date_from: str | None = None
+    date_to: str | None = None
+    db_available: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "total": self.total,
+            "delivered": self.delivered,
+            "failed": self.failed,
+            "ignored": self.ignored,
+            "sent": self.sent,
+            "retrying": self.retrying,
+            "by_sender": self.by_sender,
+            "latest_errors": self.latest_errors,
+            "date_from": self.date_from,
+            "date_to": self.date_to,
+            "db_available": self.db_available,
+        }
+
+
+@dataclass
 class DashboardSnapshot:
     bots: list[BotStatus] = field(default_factory=list)
     containers: list[ContainerStatus] = field(default_factory=list)
     mcps: list[MCPStatus] = field(default_factory=list)
+    comm_stats: CommStats | None = None
     all_sessions: list[dict[str, Any]] = field(default_factory=list)
     collected_at: float = 0.0
 
@@ -144,9 +181,18 @@ class DashboardSnapshot:
             "bots": [b.to_dict() for b in self.bots],
             "containers": [c.to_dict() for c in self.containers],
             "mcps": [m.to_dict() for m in self.mcps],
+            "comm_stats": self.comm_stats.to_dict() if self.comm_stats else None,
             "sessions": self.all_sessions,
             "collected_at": self.collected_at,
         }
+
+
+# ── PostgreSQL connection ──────────────────────────────────────────────────
+
+LINA_DB_URL = os.environ.get(
+    "LINA_DB_URL",
+    "postgresql://lina:lina_dev@localhost:5432/lina",
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -164,12 +210,14 @@ class DashboardCollector:
         mcp_host: str = "localhost",
         bot_host: str = "localhost",
         timeout: float = 5.0,
+        db_url: str = "",
     ):
         self.bot_ports = bot_ports or [m["port"] for m in BOT_METADATA]
         self.docker_url = docker_url
         self.mcp_host = mcp_host
         self.bot_host = bot_host
         self.timeout = timeout
+        self.db_url = db_url or LINA_DB_URL
         self._client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
@@ -330,6 +378,101 @@ class DashboardCollector:
 
         return results
 
+    # ── Comm stats ───────────────────────────────────────────────────────────
+
+    async def collect_comm_stats(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> CommStats:
+        """Query PostgreSQL for comm_messages statistics.
+
+        Args:
+            date_from: ISO date string (e.g. '2026-06-05') or empty for all.
+            date_to:   ISO date string (e.g. '2026-06-06') or empty for all.
+
+        Returns:
+            CommStats with counts by status, sender breakdown, latest errors.
+        """
+        stats = CommStats()
+        try:
+            conn = psycopg2.connect(self.db_url)
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+            # Build WHERE clause from date filter
+            where = ""
+            params: list[str] = []
+            if date_from:
+                params.append(date_from)
+                where = " WHERE created_at >= %s::timestamptz"
+            if date_to:
+                params.append(date_to)
+                where += " AND created_at <= %s::timestamptz" if where else " WHERE created_at <= %s::timestamptz"
+
+            # Counts by status
+            cur.execute(
+                f"SELECT status, COUNT(*) AS cnt FROM comm_messages{where} GROUP BY status ORDER BY status",
+                params,
+            )
+            for row in cur.fetchall():
+                s = row["status"]
+                c = row["cnt"]
+                stats.total += c
+                if s == "delivered":
+                    stats.delivered = c
+                elif s == "failed":
+                    stats.failed = c
+                elif s == "ignored":
+                    stats.ignored = c
+                elif s == "sent":
+                    stats.sent = c
+                elif s == "retrying":
+                    stats.retrying = c
+
+            # By sender
+            cur.execute(
+                f"SELECT sender, COUNT(*) AS cnt FROM comm_messages{where} GROUP BY sender ORDER BY cnt DESC",
+                params,
+            )
+            stats.by_sender = {row["sender"]: row["cnt"] for row in cur.fetchall()}
+
+            # Latest errors (top 10)
+            error_where = " WHERE error IS NOT NULL AND error != ''"
+            error_params: list[str] = []
+            if date_from:
+                error_params.append(date_from)
+                error_where += " AND created_at >= %s::timestamptz"
+            if date_to:
+                error_params.append(date_to)
+                error_where += " AND created_at <= %s::timestamptz"
+
+            cur.execute(
+                f"SELECT id, sender, destination, error, created_at"
+                f" FROM comm_messages{error_where}"
+                f" ORDER BY created_at DESC LIMIT 10",
+                error_params,
+            )
+            stats.latest_errors = [
+                {
+                    "id": r["id"],
+                    "sender": r["sender"],
+                    "destination": r["destination"],
+                    "error": (r["error"] or "")[:120],
+                    "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
+                }
+                for r in cur.fetchall()
+            ]
+
+            stats.date_from = date_from
+            stats.date_to = date_to
+            conn.close()
+
+        except Exception as e:
+            logger.warning("Error fetching comm stats: %s", e)
+            stats.db_available = False
+
+        return stats
+
     # ── Full snapshot ────────────────────────────────────────────────────────
 
     async def collect_all(self) -> DashboardSnapshot:
@@ -337,9 +480,10 @@ class DashboardCollector:
         bots_task = self.collect_bots()
         containers_task = self.collect_containers()
         mcps_task = self.collect_mcps()
+        comm_task = self.collect_comm_stats()
 
-        bots, containers, mcps = await asyncio.gather(
-            bots_task, containers_task, mcps_task
+        bots, containers, mcps, comm_stats = await asyncio.gather(
+            bots_task, containers_task, mcps_task, comm_task
         )
 
         # Aggregate all sessions across bots
@@ -354,6 +498,7 @@ class DashboardCollector:
             bots=bots,
             containers=containers,
             mcps=mcps,
+            comm_stats=comm_stats,
             all_sessions=all_sessions,
             collected_at=time.time(),
         )
