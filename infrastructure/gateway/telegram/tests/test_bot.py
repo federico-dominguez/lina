@@ -33,7 +33,7 @@ def _make_config() -> Config:
 
 def _make_bot() -> Bot:
     cfg = _make_config()
-    return Bot(cfg.bots[0], cfg.shared)
+    return Bot(cfg)
 
 
 class FakeTg:
@@ -294,7 +294,7 @@ class TestSmartContextInjection:
         bot = _make_bot()
         fake_tg = FakeTg()
         bot._tg = fake_tg  # type: ignore[assignment]
-        bot._shared.lina_db_url = "postgresql://fake"  # ensure injection is not skipped
+        bot._cfg.shared.lina_db_url = "postgresql://fake"  # ensure injection is not skipped
 
         ctx = SmartContext(summary="Resumen previo.", messages=[])
 
@@ -322,7 +322,7 @@ class TestSmartContextInjection:
         bot = _make_bot()
         fake_tg = FakeTg()
         bot._tg = fake_tg  # type: ignore[assignment]
-        bot._shared.lina_db_url = "postgresql://fake"  # ensure injection is not skipped
+        bot._cfg.shared.lina_db_url = "postgresql://fake"  # ensure injection is not skipped
 
         ctx = SmartContext(summary="Algo.", messages=[])
 
@@ -349,8 +349,8 @@ class TestSmartContextInjection:
         bot = _make_bot()
         fake_tg = FakeTg()
         bot._tg = fake_tg  # type: ignore[assignment]
-        bot._shared = MagicMock()
-        bot._shared.lina_db_url = None
+        bot._cfg.shared = MagicMock()
+        bot._cfg.shared.lina_db_url = None
 
         with patch("lina_gateway.bot.get_smart_context") as mock_gsc:
             cancel = asyncio.Event()
