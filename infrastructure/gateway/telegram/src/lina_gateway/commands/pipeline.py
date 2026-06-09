@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import subprocess
 import sys
 from pathlib import Path
 
@@ -52,7 +51,7 @@ async def handle_pipeline(text: str, tg, chat_id: int) -> None:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
             out = stdout.decode() if stdout else ""
             await tg.send_message(chat_id, f"📂 Pipelines:\n<pre>{out}</pre>")
-        except asyncio.TimeoutError:
+        except TimeoutError:
             await tg.send_message(chat_id, "⚠️ Timeout al listar pipelines")
         except Exception as e:
             await tg.send_message(chat_id, f"❌ Error: {e}")
@@ -76,7 +75,7 @@ async def handle_pipeline(text: str, tg, chat_id: int) -> None:
                 chat_id,
                 f"✅ Pipeline '{name}' completado.\n<pre>{summary}</pre>"
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             await tg.send_message(chat_id, f"⚠️ Pipeline '{name}' excedió 5 min de timeout")
         except Exception as e:
             await tg.send_message(chat_id, f"❌ Error: {e}")
@@ -92,7 +91,7 @@ async def handle_pipeline(text: str, tg, chat_id: int) -> None:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
             out = stdout.decode() if stdout else ""
             await tg.send_message(chat_id, f"📋 Pipeline '{name}':\n<pre>{out}</pre>")
-        except asyncio.TimeoutError:
+        except TimeoutError:
             await tg.send_message(chat_id, f"⚠️ Timeout obteniendo info de '{name}'")
         except Exception as e:
             await tg.send_message(chat_id, f"❌ Error: {e}")
