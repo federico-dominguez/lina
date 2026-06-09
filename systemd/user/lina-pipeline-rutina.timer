@@ -1,0 +1,10 @@
+# systemd/user/lina-pipeline-rutina.timer
+[Unit]
+Description=LINA Pipeline — Rutina matutina (9:00 AM)
+
+[Timer]
+OnCalendar=*-*-* 09:00:00 America/Argentina/Buenos_Aires
+Persistent=true
+
+[Install]
+WantedBy=timers.target
