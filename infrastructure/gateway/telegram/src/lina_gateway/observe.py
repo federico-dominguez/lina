@@ -210,6 +210,9 @@ class ObserveServer:
     El bot llama push_event() y el server broadcast a WS + persiste a DB.
     """
 
+    # Max chars to keep per session in _current_text to prevent memory leak
+    _MAX_CURRENT_TEXT = 10_000
+
     def __init__(
         self,
         port: int = 9090,
@@ -228,6 +231,8 @@ class ObserveServer:
         self._agent_sessions: dict[str, str] = {}
         self._bot: Any = None  # reference to Bot for /api/comm
         self._comm_queue: list[dict] = []
+        # Timestamp of last periodic cleanup (in start())
+        self._last_cleanup_ts: float = 0.0
 
     def set_bot(self, bot: Any) -> None:
         self._bot = bot
@@ -285,7 +290,11 @@ class ObserveServer:
         elif event_type == "text":
             text = str(event)
             prev = self._current_text.get(session_id, "")
-            self._current_text[session_id] = prev + text
+            acc = prev + text
+            # Truncate to _MAX_CURRENT_TEXT to prevent unbounded memory growth
+            if len(acc) > self._MAX_CURRENT_TEXT:
+                acc = acc[-self._MAX_CURRENT_TEXT:]
+            self._current_text[session_id] = acc
             payload["text"] = text
             db_payload = {"text": text}
         elif event_type == "tool_request":
@@ -810,6 +819,30 @@ conn();ls();setInterval(ls,5000);setInterval(function(){if(ws)ws.send(JSON.strin
         import json
 
         while True:
+            # Periodic cleanup of in-memory tracking dicts (every 5 min)
+            now_ts = time.time()
+            if now_ts - self._last_cleanup_ts > 300:
+                self._last_cleanup_ts = now_ts
+                # Prune event_count — keep only last 5 sessions
+                if len(self._event_count) > 5:
+                    sorted_sessions = sorted(
+                        self._event_count.keys(),
+                        key=lambda s: self._event_count.get(s, 0),
+                        reverse=True,
+                    )
+                    for stale_sid in sorted_sessions[5:]:
+                        self._event_count.pop(stale_sid, None)
+                        self._last_tool_req_id.pop(stale_sid, None)
+                        self._current_text.pop(stale_sid, None)
+                # Cap _comm_queue to max 1000 entries
+                if len(self._comm_queue) > 1000:
+                    self._comm_queue = self._comm_queue[-500:]
+                logger.debug(
+                    "Observe cleanup: current_text=%d event_count=%d comm_queue=%d",
+                    len(self._current_text),
+                    len(self._event_count),
+                    len(self._comm_queue),
+                )
             db_path = None
             for p in db_paths:
                 if __import__("os").path.exists(p):

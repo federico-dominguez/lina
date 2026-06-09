@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -19,7 +20,22 @@ logger = logging.getLogger(__name__)
 
 # Track tool call IDs to names across SSE events.
 # key: call_id (e.g. "call_00_xxx"), value: tool_name (e.g. "shell")
+# Periodically pruned to prevent orphaned entries from memory leaks.
 _tool_call_names: dict[str, str] = {}
+_LAST_TOOL_CALL_CLEANUP: float = 0.0
+
+
+def _cleanup_tool_call_names() -> None:
+    """Remove entries older than 10 minutes (orphaned tool calls)."""
+    global _LAST_TOOL_CALL_CLEANUP  # noqa: PLW0603
+    now = time.time()
+    if now - _LAST_TOOL_CALL_CLEANUP < 600:
+        return
+    _LAST_TOOL_CALL_CLEANUP = now
+    n = len(_tool_call_names)
+    if n > 100:
+        _tool_call_names.clear()
+        logger.info("Cleared %d orphaned tool_call_names entries", n)
 
 
 # ─── MessageEvent types (mirrors goose-server reply.rs) ─────────────────────
@@ -84,6 +100,7 @@ def _parse_tool_args(args: Any) -> str:
 
 
 def _parse_event(data: dict[str, Any]) -> MessageEvent | None:
+    _cleanup_tool_call_names()  # periodic pruning of orphaned entries
     event_type_raw = data.get("type")
     try:
         etype = EventType(event_type_raw)
