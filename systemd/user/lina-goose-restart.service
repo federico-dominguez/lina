@@ -1,0 +1,6 @@
+[Unit]
+Description=Restart goose.service every 4h (memory leak mitigation)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl --user restart goose.service
