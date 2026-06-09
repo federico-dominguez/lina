@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""
+pipeline — CLI para gestionar pipelines multi-bot.
+
+Uso:
+    pipeline list                       Lista pipelines guardados
+    pipeline create <nombre>            Crea pipeline nuevo interactivo
+    pipeline run <nombre> [--parallel]  Ejecuta pipeline
+    pipeline schedule <nombre> <cron>   Programa pipeline (ej: "daily")
+    pipeline info <nombre>              Muestra detalle del pipeline
+
+Ejemplos:
+    pipeline create mi-check
+    pipeline run mi-check --parallel
+    pipeline schedule mi-check hourly
+    pipeline list
+"""
+
+import argparse, json, os, subprocess, sys
+from pathlib import Path
+
+BASE = Path(__file__).resolve().parent.parent
+PIPELINES_DIR = BASE / "config" / "pipelines"
+RUNNER = BASE / "bin" / "pipeline-runner.py"
+SYSTEMD_DIR = BASE / "systemd" / "user"
+
+PRESETS = {"daily": "0 9 * * *", "hourly": "0 * * * *", "weekly": "0 9 * * 1", "test": "* * * * *"}
+
+TEMPLATES = {
+    "saludo": {"description": "Saludo matutino a LINA + Cline", "steps": [
+        {"bot": "lina", "msg": "buenos dias", "notify": "☀️ Lina saludo."},
+        {"bot": "cline", "msg": "check rapido del sistema", "notify": "🔧 Cline check OK."},
+    ]},
+    "healthcheck": {"description": "Healthcheck del servidor por Cline", "steps": [
+        {"bot": "cline", "msg": "check del servidor: CPU, memoria, discos, procesos criticos", "notify": "🕐 Healthcheck completado."},
+    ]},
+    "duo": {"description": "Pipeline dual: LINA saluda + Cline sistema", "steps": [
+        {"bot": "lina", "msg": "hola", "notify": "✅ Lina saludo."},
+        {"bot": "cline", "msg": "decime CPU y memoria", "notify": "✅ Cline sysinfo."},
+    ]},
+}
+
+def log(m): print(m, flush=True)
+
+def _list():
+    yamls = sorted(PIPELINES_DIR.glob("*.yaml")) if PIPELINES_DIR.exists() else []
+    if not yamls:
+        log("📂 No hay pipelines guardados. Crea uno con: pipeline create <nombre>")
+        return
+    log(f"📂 Pipelines ({len(yamls)}):")
+    log(f"   {'NOMBRE':20s} {'DESCRIPCION':40s} {'SCHEDULE':15s}")
+    log(f"   {'-'*20} {'-'*40} {'-'*15}")
+    for y in yamls:
+        import yaml
+        data = (yaml.safe_load(y.read_text()) or {}) if y.exists() else {}
+        steps = data.get("steps", [])
+        log(f"   {y.stem:20s} {data.get('description', f'{len(steps)} paso(s)'):40s} {data.get('_schedule', ''):15s}")
+
+def _create(name):
+    path = PIPELINES_DIR / f"{name}.yaml"
+    if path.exists():
+        r = input(f"⚠️ Ya existe '{name}'. Sobreescribir? (s/N): ").strip().lower()
+        if r != "s": log("Cancelado."); return
+    log(f"\n🧰 Creando pipeline '{name}'\n")
+    log("Templates:" + ", ".join(f"  {k}" for k in TEMPLATES.keys()))
+    log("  custom - Crear desde cero")
+    tmpl = input("Template [duo]: ").strip() or "duo"
+    if tmpl in TEMPLATES:
+        data = dict(TEMPLATES[tmpl])
+    else:
+        steps = []
+        log("Pasos (deja bot vacio para terminar):")
+        i = 1
+        while True:
+            bot = input(f"  Paso {i} bot [lina/cline/goose/gemma]: ").strip()
+            if not bot: break
+            msg = input(f"  Paso {i} mensaje: ").strip()
+            notify = input(f"  Paso {i} notificacion: ").strip() or f"✅ {bot.title()} completo."
+            steps.append({"bot": bot, "msg": msg, "notify": notify})
+            i += 1
+        data = {"description": input("Descripcion: ").strip() or f"{len(steps)} paso(s)", "steps": steps}
+    data["_name"] = name
+    sched = input("Schedule (cron o preset: daily/hourly/weekly/test) []: ").strip()
+    cron = PRESETS.get(sched, sched if sched else "")
+    if cron:
+        data["_schedule"] = cron
+        _install_timer(name, cron)
+    import yaml
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f: yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    log(f"✅ Creado: {path}")
+    log(f"   Ejecutar: pipeline run {name}")
+
+def _run(name, parallel=False):
+    path = PIPELINES_DIR / f"{name}.yaml"
+    if not path.exists():
+        log(f"❌ Pipeline '{name}' no encontrado.")
+        for y in sorted(PIPELINES_DIR.glob("*.yaml")): log(f"  - {y.stem}")
+        sys.exit(1)
+    cmd = [sys.executable, str(RUNNER), str(path)]
+    if parallel: cmd.append("--parallel")
+    log(f"🚀 Ejecutando '{name}'...")
+    sys.exit(subprocess.run(cmd).returncode)
+
+def _schedule(name, cron_expr):
+    path = PIPELINES_DIR / f"{name}.yaml"
+    if not path.exists(): log(f"❌ No encontrado '{name}'"); sys.exit(1)
+    cron = PRESETS.get(cron_expr, cron_expr)
+    _install_timer(name, cron)
+    import yaml
+    with open(path) as f: data = yaml.safe_load(f) or {}
+    data["_schedule"] = cron
+    with open(path, "w") as f: yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    log(f"✅ Programado: {cron}")
+
+def _install_timer(name, cron):
+    parts = cron.split()
+    sysd_cal = f"{parts[0]} {parts[1]} {parts[2]} {parts[3]} {parts[4]}" if len(parts) == 5 else cron
+    svc = f"""[Unit]
+Description=LINA Pipeline - {name}
+After=network-online.target
+[Service]
+Type=oneshot
+ExecStart={sys.executable} {RUNNER} {PIPELINES_DIR / f'{name}.yaml'}
+[Install]
+WantedBy=default.target
+"""
+    timer = f"""[Unit]
+Description=LINA Pipeline - {name} (timer)
+[Timer]
+OnCalendar={sysd_cal}
+Persistent=true
+[Install]
+WantedBy=timers.target
+"""
+    SYSTEMD_DIR.mkdir(parents=True, exist_ok=True)
+    (SYSTEMD_DIR / f"lina-pipeline-{name}.service").write_text(svc)
+    (SYSTEMD_DIR / f"lina-pipeline-{name}.timer").write_text(timer)
+    subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+    subprocess.run(["systemctl", "--user", "enable", f"lina-pipeline-{name}.timer"], capture_output=True)
+    subprocess.run(["systemctl", "--user", "start", f"lina-pipeline-{name}.timer"], capture_output=True)
+    log(f"   ⏰ Timer: lina-pipeline-{name}.timer")
+
+def _info(name):
+    path = PIPELINES_DIR / f"{name}.yaml"
+    if not path.exists(): log(f"❌ No encontrado '{name}'"); return
+    import yaml
+    data = yaml.safe_load(path.read_text()) or {}
+    steps = data.get("steps", [])
+    log(f"📋 Pipeline: {name}")
+    log(f"   Descripcion: {data.get('description', '(sin descripcion)')}")
+    log(f"   Schedule: {data.get('_schedule', 'No programado')}")
+    log(f"   Pasos: {len(steps)}")
+    for i, s in enumerate(steps, 1):
+        log(f"   {i}. @{s['bot']}: {s['msg'][:60]} -> {s.get('notify', '✅ completo.')}")
+    timer = f"lina-pipeline-{name}.timer"
+    r = subprocess.run(["systemctl", "--user", "is-active", timer], capture_output=True, text=True)
+    log(f"   Timer: {r.stdout.strip() or 'No instalado'}")
+    if r.stdout.strip() == "active":
+        r2 = subprocess.run(["systemctl", "--user", "show", timer, "--property=NextElapseUSecRealtime", "--value"], capture_output=True, text=True)
+        log(f"   Proximo: {r2.stdout.strip()}")
+
+def main():
+    p = argparse.ArgumentParser(description="Pipeline manager para LINA + Cline")
+    s = p.add_subparsers(dest="cmd")
+    s.add_parser("list", help="Lista pipelines guardados")
+    pc = s.add_parser("create", help="Crea pipeline nuevo"); pc.add_argument("name")
+    pr = s.add_parser("run", help="Ejecuta pipeline"); pr.add_argument("name"); pr.add_argument("--parallel", "-p", action="store_true")
+    ps = s.add_parser("schedule", help="Programa pipeline"); ps.add_argument("name"); ps.add_argument("cron")
+    pi = s.add_parser("info", help="Info detallada"); pi.add_argument("name")
+    a = p.parse_args()
+    if a.cmd == "list": _list()
+    elif a.cmd == "create": _create(a.name)
+    elif a.cmd == "run": _run(a.name, a.parallel)
+    elif a.cmd == "schedule": _schedule(a.name, a.cron)
+    elif a.cmd == "info": _info(a.name)
+    else: p.print_help()
+
+if __name__ == "__main__": main()
