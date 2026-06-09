@@ -387,6 +387,7 @@ class ConversationRouter:
         # Verificar si el bot actual puede manejar esta intención
         # Si este bot es el PRIMERO mencionado (@s_botname va primero), no rutear
         import re as _re2
+
         _mentioned = _re2.findall(r"@s_([a-z]+)_bot", text_lower)
         if len(_mentioned) > 1 and _mentioned[0] == current:
             return RouteDecision(
