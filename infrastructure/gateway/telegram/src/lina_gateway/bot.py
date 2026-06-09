@@ -15,18 +15,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-import uuid
 from collections import defaultdict
 
 import httpx
 
 from .boot_hook import get_smart_context, save_message, save_token_usage, save_trace
-from .circuit_breaker import CircuitBreaker
 from .commands.audit import handle_audit
-from .config import BotConfig, SharedConfig
-from .episodic_memory import EpisodicMemory
-from .feedback import FeedbackManager
-from .floor import FloorTokenManager, _is_higher_priority
+from .config import Config
 from .formatter import (
     format_tool_status,
     format_with_thinking,
@@ -34,10 +29,8 @@ from .formatter import (
     split_message,
 )
 from .goose_client import EventType, GoosedClient, TokenState
-from .heartbeat import HeartbeatService
 from .observe import ObserveServer
 from .pacer import StreamingBubble
-from .profiles import BotProfileLoader
 from .telegram_client import (
     MAX_VOICE_FILE_SIZE,
     TelegramCallbackQuery,
@@ -73,22 +66,14 @@ _GOOSED_RESTART_TIMEOUT = 90.0  # seconds to wait for goosed to come back up
 
 
 class Bot:
-    """A single bot instance: one Telegram client + one goosed endpoint.
-
-    Multiple Bot instances can coexist in the same process (multi-bot gateway),
-    each with its own Telegram bot token and goosed URL.
-    """
-
-    def __init__(self, bot_cfg: BotConfig, shared: SharedConfig) -> None:
-        self._cfg = bot_cfg
-        self._shared = shared
-        self._name = bot_cfg.name
-        self._tg = TelegramClient(bot_cfg.bot_token, poll_timeout=shared.poll_timeout)
+    def __init__(self, cfg: Config) -> None:
+        self._cfg = cfg
+        self._tg = TelegramClient(cfg.bot_token, poll_timeout=cfg.poll_timeout)
         self._goosed = GoosedClient(
-            base_url=bot_cfg.goosed_url,
-            secret=bot_cfg.goosed_secret,
-            connect_timeout=shared.goosed_connect_timeout,
-            read_timeout=shared.goosed_read_timeout,
+            base_url=cfg.goosed_url,
+            secret=cfg.goosed_secret,
+            connect_timeout=cfg.goosed_connect_timeout,
+            read_timeout=cfg.goosed_read_timeout,
         )
         # chat_id → session_id (persistent per chat)
         self._sessions: dict[int, str] = {}
@@ -103,47 +88,6 @@ class Bot:
         self._last_response: dict[int, str] = {}
         # chat_id → True if we should send voice response (voice thread)
         self._voice_mode: dict[int, bool] = {}
-        # Floor token manager for multi-bot conversation turn control
-        self._floor: FloorTokenManager = FloorTokenManager(shared.lina_db_url)
-        # Orchestrator for intelligent routing (initialized on first _handle with DB)
-        self._orchestrator = None  # Inicializado en _handle si hay DB
-        # Fase 4 — Memoria Compartida y Evolución
-        self._memory: EpisodicMemory | None = None
-        self._feedback: FeedbackManager | None = None
-        self._profile_prompt: str = ""
-
-        if shared.lina_db_url:
-            self._memory = EpisodicMemory(shared.lina_db_url)
-            self._feedback = FeedbackManager(shared.lina_db_url)
-            try:
-                profile = BotProfileLoader.load(self._name)
-                self._profile_prompt = BotProfileLoader.format_system_prompt(profile)
-                logger.info(
-                    "%s: loaded profile (%s, %s)", self._name, profile.personality, profile.tone
-                )
-            except Exception as exc:
-                logger.warning("%s: failed to load profile: %s", self._name, exc)
-        # ID del floor token activo (si se adquirió), por chat_id
-        self._floor_token_ids: dict[int, int] = {}
-        # Floor timeout configurable por bot (turn-timeout escalado)
-        self._floor_timeout: float = getattr(bot_cfg, "floor_timeout", 30.0)
-        # Heartbeat service
-        self._heartbeat: HeartbeatService | None = None
-        # Circuit breaker
-        self._breaker: CircuitBreaker | None = None
-
-        # Initialize heartbeat and circuit breaker if DB URL is available
-        if shared.lina_db_url:
-            self._heartbeat = HeartbeatService(
-                shared.lina_db_url,
-                self._name,
-                interval=getattr(bot_cfg, "heartbeat_interval", 30.0),
-            )
-            self._breaker = CircuitBreaker(
-                shared.lina_db_url,
-                self._name,
-                threshold=getattr(bot_cfg, "circuit_breaker_threshold", 5),
-            )
 
     @property
     def tg(self) -> TelegramClient:
@@ -174,45 +118,19 @@ class Bot:
         if msg.chat.chat_type not in ("group", "supergroup"):
             return False  # channel or unknown → no
 
-        # Bot-to-bot: responder SOLO si este bot es mencionado
+        # Bot-to-bot
         if msg.from_user and msg.from_user.is_bot:
-            if msg.entities:
-                text_lower = (msg.text or "").lower()
-                for ent in msg.entities:
-                    ent_text = text_lower[
-                        ent.get("offset", 0) : ent.get("offset", 0) + ent.get("length", 0)
-                    ]
-                    if self._is_this_bot(ent_text.lstrip("@")):
-                        return True
-            # Fallback: @mention en texto plano
-            if msg.text and self._is_this_bot((msg.text or "").lstrip("@")):
-                return True
-            return False
+            return True
 
         # @mention check
         if msg.entities:
             text = (msg.text or "").lower()
             for ent in msg.entities:
-                if (isinstance(ent, dict) and ent.get("type") == "mention") or (
-                    not isinstance(ent, dict) and ent.type == "mention"
-                ):
+                if (isinstance(ent, dict) and ent.get("type") == "mention") or (not isinstance(ent, dict) and ent.type == "mention"):
                     mentioned = text[ent.offset : ent.offset + ent.length].lstrip("@")
                     if self._is_this_bot(mentioned):
-                        import re as _re_mod
-
-                        _prio_mentioned = _re_mod.findall(
-                            r"@s_([a-z]+)_bot", msg.text.lower() if msg.text else ""
-                        )
-                        _my_name = self._name.lower()
-                        if len(_prio_mentioned) > 1 and _my_name in _prio_mentioned:
-                            for _other in _prio_mentioned:
-                                if _other != _my_name and _is_higher_priority(_other, _my_name):
-                                    logger.debug("%s: skipping - %s has priority", _my_name, _other)
-                                    return False
-                    return True
-                elif (isinstance(ent, dict) and ent.get("type") == "text_mention") or (
-                    not isinstance(ent, dict) and ent.type == "text_mention"
-                ):
+                        return True
+                elif (isinstance(ent, dict) and ent.get("type") == "text_mention") or (not isinstance(ent, dict) and ent.type == "text_mention"):
                     # text_mention to a user/bot by ID — assume it's us
                     return True
 
@@ -225,18 +143,13 @@ class Bot:
             "lina": "s_lina_bot",
             "goose": "s_goose_bot",
             "cline": "s_cline_bot",
-            "gemma": "s_gemma_bot",
         }
-        my_name = self._name.lower()
+        my_name = self._cfg.bot_name.lower()
         expected = mapping.get(my_name)
         return username.lower() == expected
 
     async def _handle(self, msg: TelegramMessage) -> None:
-        # Comm messages (from HTTP bridge) → redirect to real Comm group
-        if msg.from_user and getattr(msg.from_user, "id", None) == 8887121852 and getattr(msg.from_user, "is_bot", False):
-            chat_id = -5110614353
-        else:
-            chat_id = msg.chat.id
+        chat_id = msg.chat.id
         text = msg.text or ""
 
         # ── Mention filter: skip if not addressed to this bot ──────────────
@@ -261,54 +174,6 @@ class Bot:
         # ── /agents ───────────────────────────────────────────────
         if text.strip() == "/agents":
             await self._handle_agents(chat_id)
-            return
-
-        # ── /feedback ──────────────────────────────────────────
-        if text.startswith("/feedback"):
-            parts = text.split()
-            if len(parts) < 2:
-                await self._tg.send_message(
-                    chat_id,
-                    "Uso: /feedback <bot> <rating 1-5> [comentario]\n"
-                    "Ej: /feedback cline 5 Excelente código!",
-                )
-                return
-
-            target = parts[1].lower().replace("@s_", "").replace("_bot", "")
-            try:
-                rating = int(parts[2])
-            except (IndexError, ValueError):
-                await self._tg.send_message(chat_id, "❌ Rating debe ser un número del 1 al 5")
-                return
-
-            comment = " ".join(parts[3:]) if len(parts) > 3 else ""
-
-            fb_conv_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"telegram-chat-{chat_id}"))
-            if self._feedback:
-                success = await self._feedback.submit(
-                    from_bot=self._name.lower(),
-                    to_bot=target,
-                    conversation_id=fb_conv_id,
-                    rating=rating,
-                    comment=comment,
-                )
-                if success:
-                    await self._tg.send_message(
-                        chat_id, f"✅ Feedback registrado: @{target} → ⭐ {rating}/5"
-                    )
-                else:
-                    await self._tg.send_message(chat_id, "❌ Error al guardar feedback")
-            else:
-                await self._tg.send_message(chat_id, "❌ Feedback no disponible (sin DB)")
-            return
-
-        # ── /ratings ──────────────────────────────────────────
-        if text.startswith("/ratings"):
-            if self._feedback:
-                summary = await self._feedback.get_team_summary()
-                await self._tg.send_message(chat_id, summary)
-            else:
-                await self._tg.send_message(chat_id, "❌ Ratings no disponibles (sin DB)")
             return
 
         # ── /cline ── muestra estado de CLINE (cross-agent) ────────────
@@ -451,8 +316,8 @@ class Bot:
 
         # ── /audit ── consulta de acciones recientes ─────────────────────
         if text.strip().lower().startswith("/audit"):
-            args = text.strip()[len("/audit") :].strip()
-            await handle_audit(chat_id, args, self._tg, self._shared.lina_db_url)
+            args = text.strip()[len("/audit"):].strip()
+            await handle_audit(chat_id, args, self._tg, self._cfg.lina_db_url)
             return
 
         # ── /voz ── respond with voice (TTS) ──────────────────────────
@@ -462,9 +327,7 @@ class Bot:
                 await self._tg.send_message(chat_id, "🔊 Convirtiendo a voz...")
                 await self._tg.send_voice_from_text(chat_id, last)
             else:
-                await self._tg.send_message(
-                    chat_id, "ℹ️ No hay respuesta previa para convertir a voz."
-                )
+                await self._tg.send_message(chat_id, "ℹ️ No hay respuesta previa para convertir a voz.")
             return
 
         # ── voice note ─────────────────────────────────────────────────
@@ -489,126 +352,21 @@ class Bot:
         if not text.strip():
             return
 
-        # ── Filtro: solo responder si este bot es mencionado ──────────
-        import re as _re_mention2
-        if msg and msg.chat.chat_type in ("group", "supergroup") and (not msg.from_user or not getattr(msg.from_user, "is_bot", False)):
-            _mentions2 = _re_mention2.findall(r"@s_([a-z]+)_bot", (msg.text or "").lower())
-            if _mentions2 and not any(b == self._name.lower() for b in _mentions2):
-                return
-
-        # ── Floor token: evitar que varios bots respondan a la vez ──────
-        # Solo en grupos/supergrupos donde hay múltiples bots
-        conv_id = str(
-            uuid.uuid5(uuid.NAMESPACE_DNS, f"telegram-chat-{chat_id}")
-        )  # UUID determinista por chat
-        if False:  # floor deshabilitado — los bots responden sin turno
-            token = await self._floor.try_acquire(
-                self._name.lower(),
-                conv_id,
-                timeout=self._cfg.floor_timeout,
-            )
-            if not token.granted:
-                # Otro bot tiene el turno — encolamos el mensaje como pendiente
-                logger.debug(
-                    "%s: floor ocupado por %s, encolando mensaje %s",
-                    self._name,
-                    token.active_bot,
-                    msg.message_id,
-                )
-                await self._floor.enqueue_message(
-                    conv_id,
-                    from_bot="user",
-                    to_bot=self._name.lower(),
-                    message=text,
-                )
-                await self._tg.send_message(
-                    chat_id,
-                    f"⏳ {self._name} esperando turno… ({token.active_bot} está respondiendo)",
-                )
-                return
-
-            # Token adquirido — guardamos el ID para liberarlo después
-            self._floor_token_ids[chat_id] = token.token_id
-            logger.debug(
-                "%s: floor adquirido (id=%s) conv=%s",
-                self._name,
-                token.token_id,
-                conv_id,
-            )
-
-            # ── Contexto acumulativo: inyectar historial de la conversación ──
-            # Siempre que se adquiere el floor (nuevo o renovado), recuperamos
-            # los últimos mensajes entre bots para mantener coherencia.
-            context_msgs = await self._floor.get_context_messages(conv_id, limit=8)
-            if context_msgs:
-                ctx_lines = ["--- Contexto conversacional ---"]
-                for cm in context_msgs:
-                    label = "Usuario" if cm.from_bot == "user" else cm.from_bot.upper()
-                    preview = cm.message[:300].replace("\n", " ")
-                    ctx_lines.append(f"  {label}: {preview}")
-                ctx_text = "\n".join(ctx_lines)
-                text = f"{text}\n\n{ctx_text}"
-                logger.debug(
-                    "%s: contexto inyectado (%d mensajes previos)",
-                    self._name,
-                    len(context_msgs),
-                )
-
-            # Marcar mensajes pendientes como procesados (ACK)
-            pending = await self._floor.get_pending_messages(conv_id, to_bot=self._name.lower())
-            for pm in pending:
-                await self._floor.ack_message(pm["id"])
-
-            # ── Orchestrator: routing inteligente ──
-            if self._shared.lina_db_url and msg.chat.chat_type in ("group", "supergroup"):
-                if self._orchestrator is None:
-                    from .orchestrator import ConversationRouter
-
-                    self._orchestrator = ConversationRouter()
-
-                decision = self._orchestrator.route(text, self._name.lower())
-                if decision.should_route:
-                    logger.debug(
-                        "%s: redirigiendo a %s (%s)",
-                        self._name,
-                        decision.target_bot,
-                        decision.reason,
-                    )
-                    # Encolar para el bot destino via conversation_messages
-                    # Prefijar con @mention para que el bot destino lo detecte
-                    target_mention = (
-                        f"@{decision.target_username}"
-                        if decision.target_username
-                        else f"@{decision.target_bot}"
-                    )
-                    await self._floor.enqueue_message(
-                        conv_id,
-                        from_bot=self._name.lower(),
-                        to_bot=decision.target_bot,
-                        message=f"{target_mention} {text}",
-                    )
-                    await self._tg.send_message(
-                        chat_id,
-                        f"⏳ Redirigiendo a @{decision.target_username} "
-                        f"(intención: {decision.intent_category})...",
-                    )
-                    return
-
         # ── Goosed health check ─────────────────────────────────────────
         if not await self._goosed.is_alive():
             # goosed may be mid-restart — wait briefly before giving up
             status_id = await self._tg.send_message(
-                chat_id, f"⏳ {self._name} se está reiniciando, un momento..."
+                chat_id, f"⏳ {self._cfg.bot_name} se está reiniciando, un momento..."
             )
             recovered = await self._wait_for_goosed()
             if not recovered:
                 await self._tg.edit_message(
                     chat_id,
                     status_id,
-                    f"⚠️ {self._name} no está disponible. Intentá de nuevo en unos segundos.",
+                    f"⚠️ {self._cfg.bot_name} no está disponible. Intentá de nuevo en unos segundos.",
                 )
                 return
-            await self._tg.edit_message(chat_id, status_id, f"✅ {self._name} de vuelta.")
+            await self._tg.edit_message(chat_id, status_id, f"✅ {self._cfg.bot_name} de vuelta.")
 
         # ── Typing indicator ────────────────────────────────────────────
         await self._tg.send_chat_action(chat_id, "typing")
@@ -619,60 +377,12 @@ class Bot:
         self._cancels[chat_id] = cancel_event
         self._busy[chat_id] = True
 
-        # ── Fase 4: Inyectar contexto de memoria episódica ──
-        episodic_context = ""
-        if self._memory and msg.chat.chat_type in ("group", "supergroup"):
-            try:
-                episodic_context = await self._memory.get_context(
-                    text, limit=2, min_similarity=0.65
-                )
-            except Exception as exc:
-                logger.debug("%s: episodic memory context failed: %s", self._name, exc)
-
-        # Si hay contexto episódico, extender el mensaje
-        if episodic_context:
-            text = f"{text}\n\n[Contexto]\n{episodic_context}"
-            logger.debug(
-                "%s: injected episodic context (%d chars)", self._name, len(episodic_context)
-            )
-
-        # ── Fase 4: Inyectar perfil de personalidad ──
-        if self._profile_prompt and msg.chat.chat_type in ("group", "supergroup"):
-            text = f"[{self._profile_prompt}]\n\n{text}"
-
         try:
             await self._reply(chat_id, msg.message_id, text, cancel_event)
         finally:
             self._busy[chat_id] = False
-            # Liberar floor token si lo habíamos adquirido
-            floor_token_id = self._floor_token_ids.pop(chat_id, None)
-            if floor_token_id is not None:
-                asyncio.create_task(
-                    self._floor.release(
-                        floor_token_id,
-                        conv_id,
-                        self._name.lower(),
-                        reason="voluntary",
-                    ),
-                    name=f"floor-release-{chat_id}",
-                )
             # Clear reaction on original message
             await self._tg.set_reaction(chat_id, msg.message_id, "")
-
-        # ── Fase 4: Almacenar en memoria episódica ──
-        if self._memory and msg.chat.chat_type in ("group", "supergroup"):
-            response_text = self._last_response.get(chat_id, "")
-            if response_text:
-                try:
-                    await self._memory.store(
-                        conversation_id=conv_id,
-                        bot_name=self._name.lower(),
-                        summary=response_text[:500],
-                        topics=[],
-                        turn_count=1,
-                    )
-                except Exception as exc:
-                    logger.debug("%s: failed to store conversation memory: %s", self._name, exc)
 
     # ── Agent management actions ─────────────────────────────────────────
 
@@ -681,7 +391,7 @@ class Bot:
         try:
             import asyncpg
 
-            conn = await asyncpg.connect(self._shared.lina_db_url, timeout=5)
+            conn = await asyncpg.connect(self._cfg.lina_db_url, timeout=5)
             try:
                 await conn.execute(
                     "UPDATE agent_sessions SET status='killed', ended_at=NOW(), updated_at=NOW()"
@@ -699,7 +409,7 @@ class Bot:
         try:
             import asyncpg
 
-            conn = await asyncpg.connect(self._shared.lina_db_url, timeout=5)
+            conn = await asyncpg.connect(self._cfg.lina_db_url, timeout=5)
             try:
                 await conn.execute(
                     "UPDATE agent_sessions SET status='paused', updated_at=NOW()"
@@ -717,7 +427,7 @@ class Bot:
         try:
             import asyncpg
 
-            conn = await asyncpg.connect(self._shared.lina_db_url, timeout=5)
+            conn = await asyncpg.connect(self._cfg.lina_db_url, timeout=5)
             try:
                 await conn.execute(
                     "UPDATE agent_sessions SET status='running', updated_at=NOW()"
@@ -735,7 +445,7 @@ class Bot:
         try:
             import asyncpg
 
-            conn = await asyncpg.connect(self._shared.lina_db_url, timeout=5)
+            conn = await asyncpg.connect(self._cfg.lina_db_url, timeout=5)
             try:
                 result = await conn.execute(
                     "UPDATE agent_sessions SET goal=$2, updated_at=NOW()"
@@ -822,7 +532,7 @@ class Bot:
 
     async def _handle_cline_status(self, chat_id: int) -> None:
         """Muestra el estado de CLINE — cross-agent status check."""
-        db_url = self._shared.lina_db_url
+        db_url = self._cfg.lina_db_url
         if not db_url:
             await self._tg.send_message(chat_id, "⚠️ lina-db no disponible.")
             return
@@ -869,7 +579,7 @@ class Bot:
 
     async def _handle_lina_status(self, chat_id: int) -> None:
         """Muestra el estado de LINA — cross-agent status check."""
-        db_url = self._shared.lina_db_url
+        db_url = self._cfg.lina_db_url
         if not db_url:
             await self._tg.send_message(chat_id, "⚠️ lina-db no disponible.")
             return
@@ -899,7 +609,7 @@ class Bot:
             return
 
         parts = [
-            f"<b>🩷 Estado de {self._name}</b>",
+            f"<b>🩷 Estado de {self._cfg.bot_name}</b>",
             "",
             f"• Órdenes creadas: <b>{orders['completed'] or 0}</b> completadas, <b>{orders['pending'] or 0}</b> pendientes",
             f"• En ejecución: <b>{orders['running'] or 0}</b>",
@@ -917,7 +627,7 @@ class Bot:
         Sin pasar por goosed — consulta directo a lina-db para velocidad.
         Si *edit_msg_id* se pasa, edita ese mensaje en lugar de crear uno nuevo.
         """
-        db_url = self._shared.lina_db_url
+        db_url = self._cfg.lina_db_url
         if not db_url:
             await self._tg.send_message(chat_id, "⚠️ lina-db no disponible.")
             return
@@ -995,7 +705,7 @@ class Bot:
 
     async def _handle_agent_status(self, chat_id: int, agent_id_prefix: str) -> None:
         """Show detailed status for a single agent, matched by id prefix."""
-        db_url = self._shared.lina_db_url
+        db_url = self._cfg.lina_db_url
         if not db_url:
             await self._tg.send_message(chat_id, "⚠️ lina-db no disponible.")
             return
@@ -1054,7 +764,7 @@ class Bot:
 
     async def _handle_agent_events(self, chat_id: int, agent_id_prefix: str) -> None:
         """Show last 10 events for an agent, matched by id prefix."""
-        db_url = self._shared.lina_db_url
+        db_url = self._cfg.lina_db_url
         if not db_url:
             await self._tg.send_message(chat_id, "⚠️ lina-db no disponible.")
             return
@@ -1141,7 +851,7 @@ class Bot:
         # First message to this chat in this process lifetime: inject previous context
         if chat_id not in self._sessions_initialized:
             self._sessions_initialized.add(chat_id)
-            if self._shared.lina_db_url and session_is_new:
+            if self._cfg.lina_db_url and session_is_new:
                 await self._maybe_inject_context(chat_id, session_id, cancel_event)
 
         # Accumulators for the current turn
@@ -1275,7 +985,7 @@ class Bot:
                             if first_send_ts is None:
                                 first_send_ts = time.monotonic()
                             thinking_bubble = StreamingBubble(
-                                tick=self._shared.pacer_tick,
+                                tick=self._cfg.pacer_tick,
                                 edit_fn=_edit_thinking_bubble,
                             )
                             thinking_bubble.start()
@@ -1301,7 +1011,7 @@ class Bot:
                             if first_send_ts is None:
                                 first_send_ts = time.monotonic()
                             body_bubble = StreamingBubble(
-                                tick=self._shared.pacer_tick,
+                                tick=self._cfg.pacer_tick,
                                 edit_fn=_edit_body_bubble,
                             )
                             body_bubble.start()
@@ -1368,22 +1078,22 @@ class Bot:
             if _retry:
                 # Already retried once — give up gracefully
                 await self._tg.send_message(
-                    chat_id, f"⚠️ {self._name} no está disponible. Intentá de nuevo."
+                    chat_id, f"⚠️ {self._cfg.bot_name} no está disponible. Intentá de nuevo."
                 )
                 return
             status_id = await self._tg.send_message(
-                chat_id, f"⏳ {self._name} se está reiniciando, un momento..."
+                chat_id, f"⏳ {self._cfg.bot_name} se está reiniciando, un momento..."
             )
             recovered = await self._wait_for_goosed()
             if not recovered:
                 await self._tg.edit_message(
                     chat_id,
                     status_id,
-                    f"⚠️ {self._name} no está disponible. Intentá de nuevo.",
+                    f"⚠️ {self._cfg.bot_name} no está disponible. Intentá de nuevo.",
                 )
                 return
             await self._tg.edit_message(
-                chat_id, status_id, f"✅ {self._name} de vuelta. Reprocesando..."
+                chat_id, status_id, f"✅ {self._cfg.bot_name} de vuelta. Reprocesando..."
             )
             # Invalidate cached session — force ensure_session to create/resume fresh
             self._sessions.pop(chat_id, None)
@@ -1429,13 +1139,13 @@ class Bot:
             self._last_response[chat_id] = body_acc
 
         # Persist this turn for session recovery across restarts (best-effort)
-        if self._shared.lina_db_url and text.strip() and body_acc.strip():
+        if self._cfg.lina_db_url and text.strip() and body_acc.strip():
             asyncio.create_task(
                 self._persist_turn(session_id, text, body_acc, finish_token_state),
                 name=f"persist-turn-{chat_id}",
             )
         # Persist reasoning trace if thinking content was produced (best-effort, issue #62)
-        if self._shared.lina_db_url and total_thinking_acc.strip():
+        if self._cfg.lina_db_url and total_thinking_acc.strip():
             import hashlib
 
             prompt_hash = hashlib.sha256(text.encode()).hexdigest()
@@ -1454,7 +1164,7 @@ class Bot:
         token_state: TokenState | None = None,
     ) -> None:
         """Save a user+assistant turn to PostgreSQL. Silently swallows errors."""
-        db_url = self._shared.lina_db_url
+        db_url = self._cfg.lina_db_url
         if not db_url:
             return
         try:
@@ -1478,7 +1188,7 @@ class Bot:
         prompt_hash: str | None = None,
     ) -> None:
         """Persist the <think> block for this turn. Silently swallows errors (issue #62)."""
-        db_url = self._shared.lina_db_url
+        db_url = self._cfg.lina_db_url
         if not db_url:
             return
         try:
@@ -1505,7 +1215,7 @@ class Bot:
         once context is ready (or swallows errors silently if DB/goosed is down).
         Only called when ``ensure_session`` confirmed this is a *new* session.
         """
-        db_url = self._shared.lina_db_url
+        db_url = self._cfg.lina_db_url
         if not db_url:
             return
 
@@ -1554,29 +1264,23 @@ class Bot:
             else:
                 # Legacy: object with .update_id, .message, .callback_query
                 offset = update.update_id + 1
-                if hasattr(update, "message") and update.message:
+                if hasattr(update, 'message') and update.message:
                     asyncio.create_task(self._handle(update.message))
-                if hasattr(update, "callback_query") and update.callback_query:
+                if hasattr(update, 'callback_query') and update.callback_query:
                     asyncio.create_task(self._handle_callback(update.callback_query))
         # Process comm messages (HTTP bridge from other bots)
         if self._observer:
             for cmd in self._observer.pop_comm_messages():
-                logger.info(
-                    "Comm: handling from=%s text=%.60s", cmd.get("from", "?"), cmd.get("text", "")
-                )
+                logger.info("Comm: handling from=%s text=%.60s", cmd.get("from","?"), cmd.get("text",""))
                 asyncio.create_task(
-                    self._handle(
-                        TelegramMessage(
-                            message_id=int(time.time() * 1000) % (2**31),
-                            chat=TelegramChat(id=-5110614353, chat_type="group"),
-                            text=cmd.get("text", ""),
-                            from_user=TelegramUser(
-                                id=8887121852, first_name="Comm", is_bot=True, username="comm_bot"
-                            ),
-                            voice=None,
-                        )
-                    ),
-                    name=f"comm-{cmd.get('id', '')}-{int(time.time())}",
+                    self._handle(TelegramMessage(
+                        message_id=int(time.time() * 1000) % (2**31),
+                        chat=TelegramChat(id=8887121852, chat_type="private"),
+                        text=cmd.get("text", ""),
+                        from_user=TelegramUser(id=8887121852, first_name="Comm", is_bot=False, username="comm_bot"),
+                        voice=None,
+                    )),
+                    name=f"comm-{cmd.get('id','')}-{int(time.time())}",
                 )
         return offset
 
@@ -1608,7 +1312,9 @@ class Bot:
         elif action == "approve":
             # User approved a human input request — send approval as follow-up
             await self._tg.answer_callback_query(cq.id, "✅ Aprobado. Enviando respuesta...")
-            await self._tg.send_message(cq.chat_id, f"✅ Aprobado — reenviando a {self._name}…")
+            await self._tg.send_message(
+                cq.chat_id, f"✅ Aprobado — reenviando a {self._cfg.bot_name}…"
+            )
             cancel = self._cancels.get(cq.chat_id) or asyncio.Event()
             # Send "Sí, aprobado" as a new user message to LINA
             asyncio.create_task(
@@ -1626,7 +1332,9 @@ class Bot:
         elif action == "reject":
             # User rejected — send rejection as follow-up
             await self._tg.answer_callback_query(cq.id, "❌ Rechazado.")
-            await self._tg.send_message(cq.chat_id, f"❌ Rechazado — reenviando a {self._name}…")
+            await self._tg.send_message(
+                cq.chat_id, f"❌ Rechazado — reenviando a {self._cfg.bot_name}…"
+            )
             cancel = self._cancels.get(cq.chat_id) or asyncio.Event()
             asyncio.create_task(
                 self._reply(cq.chat_id, None, "No, no aprobado ❌", cancel),
@@ -1637,37 +1345,15 @@ class Bot:
             logger.warning("Unknown callback: %s", data)
 
     async def run(self) -> None:
-        """Main loop: poll forever with heartbeat and circuit breaker."""
+        """Main loop: poll forever."""
         logger.info("lina-gateway starting (goosed=%s)", self._cfg.goosed_url)
-
-        # Start heartbeat
-        if self._heartbeat:
-            await self._heartbeat.start()
-
         offset: int | None = None
         retry_delay = 1.0
-        try:
-            while True:
-                # Circuit breaker check
-                if self._breaker and await self._breaker.is_open():
-                    logger.warning("%s: circuit open, skipping poll", self._name)
-                    await asyncio.sleep(30)
-                    continue
-
-                try:
-                    offset = await self.run_once(offset)
-                    retry_delay = 1.0
-                    # Record success on connection
-                    if self._breaker:
-                        await self._breaker.record_success()
-                except Exception as exc:
-                    # Record failure
-                    if self._breaker:
-                        await self._breaker.record_failure()
-                    logger.error("Poll error (retry in %.0fs): %s", retry_delay, exc)
-                    await asyncio.sleep(retry_delay)
-                    retry_delay = min(retry_delay * 2, 60.0)
-        finally:
-            # Stop heartbeat
-            if self._heartbeat:
-                await self._heartbeat.stop()
+        while True:
+            try:
+                offset = await self.run_once(offset)
+                retry_delay = 1.0
+            except Exception as exc:
+                logger.error("Poll error (retry in %.0fs): %s", retry_delay, exc)
+                await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 60.0)
