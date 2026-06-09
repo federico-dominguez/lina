@@ -88,6 +88,64 @@ class Config:
         s.max_voice_bytes = int(os.environ.get("MAX_VOICE_BYTES", str(20 * 1024 * 1024)))
         s.agent_poll_interval = float(os.environ.get("GATEWAY_AGENT_POLL_INTERVAL", "10"))
 
+    # ── Convenience properties (delegate to bots[0] + shared) ────────────────
+
+    @property
+    def bot_token(self) -> str:
+        return self.bots[0].bot_token
+
+    @property
+    def bot_name(self) -> str:
+        return self.bots[0].name
+
+    @property
+    def bot_username(self) -> str:
+        return self.bots[0].bot_username
+
+    @property
+    def goosed_url(self) -> str:
+        return self.bots[0].goosed_url
+
+    @property
+    def goosed_secret(self) -> str:
+        return self.bots[0].goosed_secret
+
+    @property
+    def fixed_session_id(self):
+        return self.bots[0].fixed_session_id
+
+    @property
+    def trusted_users(self):
+        return self.bots[0].trusted_users
+
+    @property
+    def observe_port(self) -> int:
+        return self.bots[0].observe_port
+
+    @property
+    def lina_db_url(self):
+        return self.shared.lina_db_url
+
+    @property
+    def pacer_tick(self) -> float:
+        return self.shared.pacer_tick
+
+    @property
+    def poll_timeout(self) -> int:
+        return self.shared.poll_timeout
+
+    @property
+    def goosed_connect_timeout(self) -> float:
+        return self.shared.goosed_connect_timeout
+
+    @property
+    def goosed_read_timeout(self) -> float:
+        return self.shared.goosed_read_timeout
+
+    @property
+    def max_voice_bytes(self) -> int:
+        return self.shared.max_voice_bytes
+
     # ── Bot discovery ───────────────────────────────────────────────────────
 
     @staticmethod

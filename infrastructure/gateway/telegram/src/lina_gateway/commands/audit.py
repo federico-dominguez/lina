@@ -203,8 +203,24 @@ async def _query_audit(db_url: str, filters: dict[str, Any]) -> list[dict[str, A
         params.append(f"{hours} hours")
 
     # Build parameterized SQL with $1, $2, etc. for asyncpg
-    # The actual SQL query is built inline below with native asyncpg params.
-    # The sql_parts approach was abandoned for direct SQL due to param indexing complexity.
+    # asyncpg uses $1, $2 positional params
+    where_sql = " AND ".join(where_clauses)
+
+    # Replace %s with $1, $2 for asyncpg
+    # Since we have at most 2 params, we can build directly
+    limit_param = len(params) + 1  # next param index
+
+    # Build SQL
+    [
+        "SELECT mcp, tool, args_json, result_summary, created_at",
+        "FROM audit.tool_calls",
+        f"WHERE {where_sql.replace('%s', '$1').replace('$2', '$2' if len(params) > 1 else '$2')}",
+        "ORDER BY created_at DESC",
+        f"LIMIT ${limit_param}",
+    ]
+
+    # Hmm, this is getting complicated with param indexing. Let me use a cleaner approach.
+    # Actually, let me just use a simple raw query with f-string for the limit (safe, int).
 
     logger.info("audit query: filters=%s", filters)
 

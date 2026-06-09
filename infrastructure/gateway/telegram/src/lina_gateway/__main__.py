@@ -47,7 +47,7 @@ async def _run() -> None:
     notifier_tasks: list[asyncio.Task] = []
 
     for bot_cfg in bot_configs:
-        bot = Bot(bot_cfg, shared)
+        bot = Bot(cfg)
         bots.append(bot)
 
         # ── Observer per bot (each on a different WS port) ────────────────────
