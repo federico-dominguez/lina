@@ -88,7 +88,6 @@ class Config:
         s.max_voice_bytes = int(os.environ.get("MAX_VOICE_BYTES", str(20 * 1024 * 1024)))
         s.agent_poll_interval = float(os.environ.get("GATEWAY_AGENT_POLL_INTERVAL", "10"))
 
-
     # ── Convenience properties (delegate to bots[0] + shared) ────────────────
 
     @property
