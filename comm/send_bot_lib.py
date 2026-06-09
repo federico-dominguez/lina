@@ -13,7 +13,7 @@ from telethon.tl.types import InputPeerEmpty, MessageEntityMention
 
 API_ID = 12663248
 API_HASH = "57a7b9ec3cd607e64b73dbae1240af24"
-SESSION = str(Path(__file__).resolve().parent / "comm_session")
+SESSION = os.environ.get("COMM_SESSION") or str(Path(__file__).resolve().parent / "comm_session")
 
 
 def find_group(match: str = "Comm"):

@@ -1,6 +1,17 @@
 # config/pipelines/healthcheck-hourly.yaml
-# Se ejecuta cada hora
+# Se ejecuta cada hora por systemd timer
 steps:
   - bot: cline
-    msg: "Check rápido: servidor responde? CPU < 80%? Memoria suficiente?"
-    notify: "🕐 Healthcheck horario: servidor OK"
+    msg: >
+      ⚡ HEALTHCHECK CRÍTICO — Ejecutá todos estos comandos y mostrá los VALORES REALES:
+
+      1. CPU: "top -bn1 | head -5" — mostrá load average y % CPU
+      2. MEMORIA: "free -h" — mostrá total, usada, disponible y % usado
+      3. DISCO: "df -h /" — mostrá el uso real del disco
+      4. UPTIME: "uptime" — mostrá el uptime y load averages
+      5. PROCESOS: "ps aux --sort=-%mem | head -5" — top 5 por memoria
+
+      ⚠️ IMPORTANTE: Ejecutá TODOS los comandos con shell y reportá los valores REALES.
+      No digas "todo está bien" sin mostrar números concretos.
+      El dashboard muestra estos resultados. Quiero ver los DATOS REALES.
+    notify: "🩺 Healthcheck: servidor OK ✓"

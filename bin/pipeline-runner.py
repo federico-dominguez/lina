@@ -1,83 +1,50 @@
-#!/usr/bin/env python3
-"""
-pipeline-runner.py — Pipeline multi-bot configurable.
-
-Uso:
-  python3 bin/pipeline-runner.py [pasos.yaml]
-
-  Si no se pasa archivo, usa los pasos por defecto abajo.
-
-Formato del YAML:
-    steps:
-      - bot: lina
-        msg: "hola"
-        notify: "✅ Lina saludo completo."
-      - bot: cline
-        msg: "decime el uso de CPU y memoria del servidor"
-        notify: "✅ Cline sysinfo completo."
-
-Cada paso:
-  - Envía msg al bot en el grupo "Comms" (con @mention)
-  - Espera el evento "finish" en session_events (DB del Observer)
-  - Envía notify al grupo (texto plano, sin @mention, sin loop)
-"""
-
-import asyncio
-import json
-import os
-import subprocess
-import sys
-import time
+import asyncio, json, os, subprocess, sys, time
 from pathlib import Path
 
-# ═════════════════════════════════════════════════════════════════════════════
-# CONFIGURACIÓN
-# ═════════════════════════════════════════════════════════════════════════════
+import yaml
 
 BASE = Path(__file__).resolve().parent.parent
-SEND_BOT = str(BASE / "comm" / "send-bot.py")
-COMM_DIR = str(BASE / "comm")
+SEND_BOT = BASE / "comm" / "send-bot.py"
+BIN_PIPELINE = BASE / "bin" / "pipeline"
+YAML_DIR = BASE / "config" / "pipelines"
+
 DB_DSN = os.environ.get("LINA_DB_URL", "postgresql://lina:lina_dev@localhost:5432/lina")
-
-POLL_INTERVAL = 0.5  # segundos entre polls a la DB
-POLL_TIMEOUT = 180   # tiempo máximo esperando Finish por paso
-
-# ═════════════════════════════════════════════════════════════════════════════
-# PASOS POR DEFECTO (usado si no se pasa archivo YAML)
-# ═════════════════════════════════════════════════════════════════════════════
+POLL_INTERVAL = 0.5
+POLL_TIMEOUT = 600  # 10 min — tareas Moodle pueden ser largas
 
 DEFAULT_STEPS = [
-    {
-        "bot": "lina",
-        "msg": "hola",
-        "notify": "✅ Lina saludo completo.",
-    },
-    {
-        "bot": "cline",
-        "msg": "decime el uso de CPU y memoria del servidor",
-        "notify": "✅ Cline sysinfo completo.",
-    },
+    {"bot": "lina", "msg": "hola", "notify": "✅ Lina saludo completo."},
+    {"bot": "cline", "msg": "decime el uso de CPU y memoria del servidor", "notify": "✅ Cline sysinfo completo."},
 ]
 
-# Mapa bot_name → agent en session_events
-BOT_AGENT = {
-    "lina": "lina",
-    "cline": "cline",
-    "goose": "goose",
-    "gemma": "gemma",
-}
+BOT_AGENT = {"lina": "lina", "cline": "cline", "goose": "goose", "gemma": "gemma"}
+
+# ─── Pipeline run tracking ──────────────────────────────────────
+PIPELINE_RUNS_FILE = "/tmp/pipeline-runs.jsonl"
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# HELPERS
-# ═════════════════════════════════════════════════════════════════════════════
+def track_run(name, status, steps_data, started_at=None):
+    """Guarda un registro de ejecución de pipeline."""
+    import json
+    record = {
+        "name": name,
+        "status": status,
+        "started_at": started_at or (time.time() - 10),
+        "completed_at": time.time(),
+        "steps": steps_data,
+    }
+    try:
+        with open(PIPELINE_RUNS_FILE, "a") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as e:
+        log(f"⚠️ track: {e}")
+
 
 def log(msg: str):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
 def tg_send(target: str, message: str) -> bool:
-    """Envía @s_{target}_bot {message} al grupo via Comm."""
     try:
         r = subprocess.run(
             [sys.executable, SEND_BOT, target, message],
@@ -86,62 +53,43 @@ def tg_send(target: str, message: str) -> bool:
         if r.returncode == 0:
             log(f"📤 @{target}: {message}")
             return True
-        log(f"⚠️ tg_send: {(r.stdout+r.stderr)[:200]}")
+        log(f"❌ send-bot exit={r.returncode}: {r.stderr[:200]}")
         return False
     except Exception as e:
-        log(f"⚠️ tg_send error: {e}")
+        log(f"❌ send-bot: {e}")
         return False
 
 
-async def tg_notify_plain(message: str) -> bool:
-    """Envía texto plano al grupo (sin @mention)."""
+async def tg_notify_plain(text: str):
     try:
-        from telethon import TelegramClient
-        from telethon.tl.functions.messages import GetDialogsRequest
-        from telethon.tl.types import InputPeerEmpty
-        client = TelegramClient(
-            str(Path(COMM_DIR) / "comm_session"),
-            12663248, "57a7b9ec3cd607e64b73dbae1240af24",
-        )
-        client.parse_mode = None
-        await client.start()
-        dialogs = await client(GetDialogsRequest(
-            offset_date=None, offset_id=0, offset_peer=InputPeerEmpty(),
-            limit=200, hash=0,
-        ))
-        gid = None
-        for d in dialogs.chats:
-            title = (getattr(d, "title", "") or "")
-            if "Comm" in title:
-                gid = d.id
-                break
-        if not gid:
-            log("❌ tg_notify: no group")
-            await client.disconnect()
-            return False
-        await client.send_message(gid, message)
-        log(f"📤 (plain) {message}")
-        await client.disconnect()
-        return True
+        subprocess.run([sys.executable, SEND_BOT, "--plain", text], capture_output=True, text=True, timeout=30)
+        log(f"📤 (plain): {text}")
     except Exception as e:
-        log(f"⚠️ tg_notify error: {e}")
-        return False
+        log(f"⚠️ notify: {e}")
 
 
 async def wait_for_finish(agent: str) -> dict:
-    """Espera nuevo evento 'finish' en session_events (DB) para un agente."""
-    import asyncpg
-    conn = await asyncpg.connect(DB_DSN, timeout=5)
-    last_id = await conn.fetchval(
-        "SELECT COALESCE(MAX(id),0) FROM session_events WHERE event_type='finish' AND agent=$1",
-        agent,
-    )
-    await conn.close()
-    log(f"⏳ Finish (last #{last_id})...")
+    """Espera el ULTIMO evento 'finish' en session_events (DB) para un agente.
+    Usa cooldown de 3s para evitar Finishes de sub-agentes.
+    """
+    last_id = 0
+    try:
+        import asyncpg
+        conn = await asyncpg.connect(DB_DSN, timeout=5)
+        try:
+            last_id = await conn.fetchval(
+                "SELECT COALESCE(MAX(id),0) FROM session_events WHERE event_type='finish' AND agent=$1", agent)
+        finally:
+            await conn.close()
+    except:
+        pass
 
+    log(f"⏳ Finish (last #{last_id})...")
+    found_finish = None
     deadline = time.time() + POLL_TIMEOUT
     while time.time() < deadline:
         try:
+            import asyncpg
             conn2 = await asyncpg.connect(DB_DSN, timeout=5)
             try:
                 row = await conn2.fetchrow(
@@ -151,40 +99,48 @@ async def wait_for_finish(agent: str) -> dict:
                 )
                 if row:
                     p = json.loads(row["payload"]) if isinstance(row["payload"], str) else (row["payload"] or {})
-                    log(f"🏁 #{row['id']} session={row['session_id']} "
-                        f"reason={p.get('reason','?')} tokens={p.get('tokens',0)}")
-                    return {
-                        "session_id": row["session_id"],
-                        "reason": p.get("reason", "stop"),
-                        "tokens": p.get("tokens", 0),
-                    }
+                    reason = p.get("reason", "stop")
+                    tokens = p.get("tokens", 0)
+                    log(f"🏁 #{row['id']} session={row['session_id']} reason={reason} tokens={tokens}")
+                    found_finish = {"session_id": row["session_id"], "reason": reason, "tokens": tokens, "id": row["id"]}
+                    last_id = row["id"]
+                    continue  # cooldown
             finally:
                 await conn2.close()
         except Exception as e:
             log(f"⚠️ DB error: {e}")
             last_id += 1
+
+        if found_finish:
+            await asyncio.sleep(3)
+            try:
+                import asyncpg
+                conn3 = await asyncpg.connect(DB_DSN, timeout=5)
+                try:
+                    newer = await conn3.fetchval(
+                        "SELECT COUNT(*) FROM session_events "
+                        "WHERE event_type='finish' AND agent=$1 AND id>$2",
+                        agent, found_finish["id"],
+                    )
+                finally:
+                    await conn3.close()
+                if newer and newer > 0:
+                    log(f"⚠️ Apareció otro Finish, esperando el último...")
+                    last_id = found_finish["id"]
+                    found_finish = None
+                    continue
+            except:
+                pass
+            log(f"🏁 Fin CONFIRMADO: reason={found_finish['reason']}")
+            return found_finish
+
         await asyncio.sleep(POLL_INTERVAL)
 
-    log(f"⚠️ Timeout: no Finish en {POLL_TIMEOUT}s")
+    log(f"⚠️ Timeout ({POLL_TIMEOUT}s): no Finish para '{agent}'")
     return {"session_id": "", "reason": "timeout", "tokens": 0}
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# EJECUTOR DE PASOS
-# ═════════════════════════════════════════════════════════════════════════════
-
 async def run_step(step: dict) -> bool:
-    """Ejecuta un paso del pipeline.
-
-    Args:
-        step: dict con claves:
-            bot:    "lina" | "cline" | "goose" | "gemma"
-            msg:    mensaje a enviar (ej: "hola", "decime el CPU")
-            notify: texto de notificación al grupo cuando termine
-
-    Returns:
-        True si el paso se completó exitosamente.
-    """
     bot = step["bot"]
     msg = step["msg"]
     notify = step.get("notify", f"✅ {bot.capitalize()} completo.")
@@ -193,30 +149,23 @@ async def run_step(step: dict) -> bool:
     log("═" * 50)
     log(f"🎯 Paso: @s_{bot}_bot ← \"{msg}\"")
 
-    # 1. Enviar al grupo con @mention
     ok = tg_send(bot, msg)
     if not ok:
         log(f"❌ {bot}: fallo envío al grupo")
         return False
 
-    # 2. Esperar Finish en session_events
     fin = await wait_for_finish(agent)
     if fin.get("reason") == "timeout":
         log(f"❌ {bot}: timeout esperando Finish")
         return False
 
-    # 3. Notificar al grupo (texto plano, sin loop)
     await tg_notify_plain(notify)
     log(f"💰 {bot}: {fin.get('tokens', 0)} tokens")
     return True
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# MAIN
-# ═════════════════════════════════════════════════════════════════════════════
-
 async def main():
-    # Cargar pasos: desde YAML file o usar defaults
+    started_at = time.time()
     steps = DEFAULT_STEPS
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     flags = [a for a in sys.argv[1:] if a.startswith("--")]
@@ -224,7 +173,6 @@ async def main():
     if args:
         yaml_path = args[0]
         try:
-            import yaml
             with open(yaml_path) as f:
                 data = yaml.safe_load(f)
             steps = data.get("steps", data) if isinstance(data, dict) else data
@@ -238,6 +186,8 @@ async def main():
     log(f"   {'  →  '.join(descs)}")
 
     results = {}
+    step_records = []
+
     if parallel:
         log(f"⚡ Modo paralelo: ejecutando {len(steps)} paso(s) simultáneamente")
         async def run_all():
@@ -247,18 +197,25 @@ async def main():
         for i, ok in enumerate(ok_list):
             s = steps[i]
             results[f"@{s['bot']}: {s['msg'][:30]}"] = ok
+            step_records.append({"bot": s["bot"], "msg": s["msg"], "status": "done" if ok else "error", "tokens": 0, "cost": 0})
     else:
         for i, step in enumerate(steps):
             log(f"\n─── Paso {i+1}/{len(steps)} ───")
             ok = await run_step(step)
             results[f"@{step['bot']}: {step['msg'][:30]}"] = ok
+            step_records.append({"bot": step["bot"], "msg": step["msg"], "status": "done" if ok else "error", "tokens": 0, "cost": 0})
 
     log("\n" + "═" * 50)
     log("📊 RESUMEN:")
     for desc, ok in results.items():
         log(f"   {'✅' if ok else '❌'} {desc}")
 
-    if all(results.values()):
+    # Tracking
+    pipeline_name = Path(args[0]).stem if args else "default"
+    all_ok = all(results.values())
+    track_run(pipeline_name, "done" if all_ok else "error", step_records, started_at)
+
+    if all_ok:
         log("✅ Pipeline completado exitosamente")
         sys.exit(0)
     else:
@@ -267,4 +224,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        log("⏹️ Pipeline detenido")

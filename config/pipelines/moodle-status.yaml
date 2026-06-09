@@ -1,0 +1,11 @@
+_name: moodle-status
+description: 'Creado via wizard: 2 paso(s)'
+steps:
+- bot: lina
+  msg: Revisa los cuestionarios de Moodle de Programación Backend y genera un reporte
+    en Documents/
+  notify: ✅ Lina completo.
+- bot: cline
+  msg: Revisa en Documents/ el report sobre los cuestionarios de programación Backend
+    y corrobora que es correcto. Sino agrega tus comentarios al final.
+  notify: ✅ Cline completo.
