@@ -6,7 +6,7 @@ entry point with a mocked database.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -117,7 +117,10 @@ class TestElapsed:
         assert result == "hace 2d"
 
     def test_naive_datetime(self):
+        # Use UTC-aware now to match _elapsed's internal datetime.now(UTC) call
         ts = datetime.now(timezone.utc) - timedelta(minutes=10)
+        # Strip tzinfo so the helper sees a naive datetime and applies UTC
+        ts = ts.replace(tzinfo=None)
         result = _elapsed(ts)
         assert result == "hace 10m"
 
