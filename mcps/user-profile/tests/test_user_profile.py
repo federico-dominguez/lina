@@ -17,6 +17,7 @@ def _cleanup():
         conn.close()
 
 
+@pytest.mark.db
 def test_ensure_table():
     """Table should be created on first access."""
     conn = _connect()
@@ -29,6 +30,7 @@ def test_ensure_table():
         conn.close()
 
 
+@pytest.mark.db
 def test_set_and_get():
     """Set a field and retrieve it."""
     set_profile("test_nombre", "Fede")
@@ -38,6 +40,7 @@ def test_set_and_get():
     assert result["key"] == "test_nombre"
 
 
+@pytest.mark.db
 def test_set_json_value():
     """Set a JSON value (nested dict)."""
     set_profile("test_meta", {"libros": 12, "ejercicio": "3x semana"})
@@ -46,6 +49,7 @@ def test_set_json_value():
     assert result["value"]["ejercicio"] == "3x semana"
 
 
+@pytest.mark.db
 def test_get_nonexistent():
     """Getting a nonexistent key returns found=False."""
     result = get_profile("test_no_existe_xyz_123")
@@ -53,6 +57,7 @@ def test_get_nonexistent():
     assert result["value"] is None
 
 
+@pytest.mark.db
 def test_list_all():
     """List all profile fields."""
     set_profile("test_a", "alpha")
@@ -63,6 +68,7 @@ def test_list_all():
     assert "test_b" in keys
 
 
+@pytest.mark.db
 def test_update_existing():
     """Updating an existing field changes the value."""
     set_profile("test_update", "v1")
@@ -71,6 +77,7 @@ def test_update_existing():
     assert result["value"] == "v2"
 
 
+@pytest.mark.db
 def test_delete():
     """Delete a field."""
     set_profile("test_delete", "bye")

@@ -7,13 +7,18 @@ from lina_google_fit.store import set_cache, get_cached, _connect, _ensure_table
 
 @pytest.fixture(autouse=True)
 def _cleanup():
-    yield
-    conn = _connect()
+    """Clean up DB after each test. No-op if PG unavailable."""
+    try:
+        conn = _connect()
+    except Exception:
+        yield
+        return
     try:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM lina.health_cache")
             conn.commit()
     finally:
+        conn.close()
         conn.close()
 
 
@@ -43,7 +48,7 @@ def test_cache_miss():
     assert result is None
 
 
-def test_store_imports():
+def test_store_module_structure():
     """Basic non-DB test verifying store module imports correctly."""
     from lina_google_fit import store
     assert store is not None  # module imports OK
