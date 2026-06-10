@@ -15,17 +15,17 @@ class TestTrimWorkLog:
         assert trim_work_log(text) == text
 
     def test_long_log_trimmed(self):
-        lines = [f"line{i}" for i in range(30)]
+        lines = [f"line{i}" for i in range(60)]
         text = "\n".join(lines)
         result = trim_work_log(text)
         assert result.startswith("[…]")
-        assert "line29" in result
-        # Only last 18 lines kept
+        assert "line59" in result
+        # Only last 50 lines kept
         kept = result.split("\n")[1:]  # skip "[…]"
-        assert len(kept) == 18
+        assert len(kept) == 50
 
     def test_exactly_at_limit_not_trimmed(self):
-        lines = [f"line{i}" for i in range(18)]
+        lines = [f"line{i}" for i in range(50)]
         text = "\n".join(lines)
         assert trim_work_log(text) == text
 
