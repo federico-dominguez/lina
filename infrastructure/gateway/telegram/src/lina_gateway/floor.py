@@ -124,7 +124,12 @@ class FloorTokenManager:
                             # Otro bot tiene el floor — verificar prioridad
                             if _is_higher_priority(active["active_bot"], bot_name):
                                 # Un bot de mayor prioridad ya tiene el floor, ceder
-                                return FloorToken(False, conversation_id, active["active_bot"], "higher_priority_holds")
+                                return FloorToken(
+                                    False,
+                                    conversation_id,
+                                    active["active_bot"],
+                                    "higher_priority_holds",
+                                )
                         if active["active_bot"] == bot_name:
                             # El mismo bot ya tiene el token — renovar
                             await conn.execute(
