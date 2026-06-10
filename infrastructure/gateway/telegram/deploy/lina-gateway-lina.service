@@ -1,0 +1,24 @@
+[Unit]
+Description=LINA Gateway — s_lina_bot (therapeutic personality)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fede
+Environment=TELEGRAM_BOT_TOKEN=8749962054:AAHm8vP6w3BBzvcgth5NVPowhyJk_FfiR0E
+Environment=GOOSED_URL=https://localhost:3000
+Environment=GOOSE_SERVER_SECRET_KEY=4bea469dd75fb2de8cf3f797c832813575bc5408fab3ae3a2b6734037971e564
+Environment=GATEWAY_BOT_NAME=LINA
+Environment=GATEWAY_BOT_USERNAME=s_lina_bot
+Environment=GOOSE_FIXED_SESSION_ID=telegram-fede-lina
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/home/fede/lina/infrastructure/gateway/telegram
+ExecStart=/usr/bin/python3 -u -m lina_gateway
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
