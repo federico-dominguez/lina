@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
 from typing import Any
 
 import psycopg2
@@ -47,7 +46,7 @@ def set_profile(key: str, value: Any) -> dict[str, Any]:
             conn.commit()
     finally:
         conn.close()
-    
+
     return {
         "key": row["key"],
         "value": row["value"],
@@ -84,7 +83,7 @@ def get_profile(key: str | None = None) -> dict[str, Any] | list[dict[str, Any]]
                 rows = cur.fetchall()
     finally:
         conn.close()
-    
+
     return [
         {
             "key": r["key"],
@@ -106,5 +105,5 @@ def delete_profile(key: str) -> dict[str, Any]:
             conn.commit()
     finally:
         conn.close()
-    
+
     return {"key": key, "deleted": deleted is not None}

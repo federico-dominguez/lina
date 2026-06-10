@@ -42,12 +42,13 @@ async def profile_set(key: str, value: str) -> dict:
         El campo guardado con key, value y updated_at.
     """
     import json as _json
+
     # Try to parse value as JSON, fall back to string
     try:
         parsed = _json.loads(value)
     except (_json.JSONDecodeError, TypeError):
         parsed = value
-    
+
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, store.set_profile, key, parsed)
 
@@ -95,7 +96,9 @@ async def profile_delete(key: str) -> dict:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
     logger.info("LINA User Profile MCP starting on port 8000")
     mcp.run(transport="streamable-http")
 

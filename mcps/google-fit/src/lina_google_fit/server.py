@@ -12,7 +12,6 @@ Tools:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 from datetime import date, datetime, timedelta, timezone
@@ -20,8 +19,6 @@ from datetime import date, datetime, timedelta, timezone
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from mcp.server.fastmcp import FastMCP
-
-from . import store
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +45,7 @@ def _get_service():
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
 
 def _aggregate_daily(service, data_type: str, days: int, data_source: str) -> list[dict]:
     start_ms = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp() * 1000)
@@ -121,12 +119,15 @@ def _hr_daily(service, days: int) -> list[dict]:
     for d, bpms in sorted(daily.items()):
         bpms_sorted = sorted(bpms)
         avg = sum(bpms) / len(bpms) if bpms else 0
-        out.append({
-            "date": d, "avg_bpm": round(avg, 1),
-            "min_bpm": round(bpms_sorted[0], 1) if bpms_sorted else 0,
-            "max_bpm": round(bpms_sorted[-1], 1) if bpms_sorted else 0,
-            "readings": len(bpms),
-        })
+        out.append(
+            {
+                "date": d,
+                "avg_bpm": round(avg, 1),
+                "min_bpm": round(bpms_sorted[0], 1) if bpms_sorted else 0,
+                "max_bpm": round(bpms_sorted[-1], 1) if bpms_sorted else 0,
+                "readings": len(bpms),
+            }
+        )
     return out
 
 
@@ -140,9 +141,11 @@ async def fit_steps(days: int = 7) -> list[dict]:
     Returns [{"date": "2026-06-10", "value": 8432}, ...].
     """
     loop = asyncio.get_running_loop()
+
     def _run():
         service = _get_service()
         return _aggregate_daily(service, "com.google.step_count.delta", days, "estimated_steps")
+
     return await loop.run_in_executor(None, _run)
 
 
@@ -153,9 +156,11 @@ async def fit_sleep(days: int = 7) -> list[dict]:
     Returns [{"date": "2026-06-10", "hours": 7.2}, ...].
     """
     loop = asyncio.get_running_loop()
+
     def _run():
         service = _get_service()
         return _sleep_daily(service, days)
+
     return await loop.run_in_executor(None, _run)
 
 
@@ -166,9 +171,11 @@ async def fit_heart_rate(days: int = 7) -> list[dict]:
     Returns [{"date":"...","avg_bpm":72,"min_bpm":55,"max_bpm":120,"readings":45}, ...].
     """
     loop = asyncio.get_running_loop()
+
     def _run():
         service = _get_service()
         return _hr_daily(service, days)
+
     return await loop.run_in_executor(None, _run)
 
 
@@ -179,9 +186,11 @@ async def fit_activity(days: int = 7) -> list[dict]:
     Returns [{"date": "2026-06-10", "minutes_active": 45}, ...].
     """
     loop = asyncio.get_running_loop()
+
     def _run():
         service = _get_service()
         return _aggregate_daily(service, "com.google.active_minutes", days, "merge_active_minutes")
+
     return await loop.run_in_executor(None, _run)
 
 
@@ -192,6 +201,7 @@ async def fit_weight() -> dict:
     Returns {"date":"...","value_kg":82.5} or {"has_data":false}.
     """
     loop = asyncio.get_running_loop()
+
     def _run():
         service = _get_service()
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -218,6 +228,7 @@ async def fit_weight() -> dict:
         if latest:
             return {"date": latest_day, "value_kg": round(float(latest), 1)}
         return {"has_data": False}
+
     return await loop.run_in_executor(None, _run)
 
 
@@ -232,6 +243,7 @@ async def fit_daily_summary(date_str: str = "") -> dict:
     """
     target = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else date.today()
     loop = asyncio.get_running_loop()
+
     def _run():
         service = _get_service()
         steps = _aggregate_daily(service, "com.google.step_count.delta", 1, "estimated_steps")
@@ -245,13 +257,17 @@ async def fit_daily_summary(date_str: str = "") -> dict:
             "avg_bpm": hr_data[0]["avg_bpm"] if hr_data else 0,
             "active_minutes": active[0]["value"] if active else 0,
         }
+
     return await loop.run_in_executor(None, _run)
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────
 
+
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
     logger.info("LINA Google Fit MCP starting on port 8000")
     mcp.run(transport="streamable-http")
 
