@@ -351,6 +351,80 @@ async def save_token_usage(
         logger.debug("boot_hook: save_token_usage failed (session=%s): %s", session_id, exc)
 
 
+# ─── session_log — unified append-only log (issue #216) ──────────────────────
+
+
+async def save_session_log(
+    db_url: str,
+    session_id: str,
+    role: str,
+    sender: str,
+    msg_text: str | None = None,
+    thinking_text: str | None = None,
+    tool_name: str | None = None,
+    tool_args: dict | None = None,
+    tool_result: str | None = None,
+    model: str = _DEFAULT_MODEL,
+    tags: list[str] | None = None,
+    tokens_in: int | None = None,
+    tokens_out: int | None = None,
+    cost_usd: float | None = None,
+) -> None:
+    """Write an entry into ``lina.session_logs``. Best-effort, never raises.
+
+    Logs user messages, assistant responses (with thinking), and tool calls
+    into the unified append-only log table for full session auditability.
+
+    Turn number is auto-computed per session (max + 1).
+    Tags default to ``["auto"]`` if not provided.
+    """
+    if not msg_text and not thinking_text and not tool_name:
+        return  # nothing to log
+
+    if tags is None:
+        tags = ["auto"]
+
+    try:
+        import asyncpg
+        import json
+
+        conn = await asyncpg.connect(db_url, timeout=5)
+        try:
+            turn_number = await conn.fetchval(
+                "SELECT COALESCE(MAX(turn_number) + 1, 0)"
+                " FROM lina.session_logs WHERE session_id = $1",
+                session_id,
+            )
+            await conn.execute(
+                """INSERT INTO lina.session_logs
+                   (session_id, turn_number, role, sender,
+                    msg_text, thinking_text,
+                    tool_name, tool_args, tool_result,
+                    model, tags,
+                    tokens_in, tokens_out, cost_usd)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7,
+                           $8::jsonb, $9, $10, $11, $12, $13, $14)""",
+                session_id,
+                turn_number,
+                role,
+                sender,
+                msg_text,
+                thinking_text,
+                tool_name,
+                json.dumps(tool_args) if tool_args else None,
+                tool_result,
+                model,
+                tags,
+                tokens_in,
+                tokens_out,
+                cost_usd,
+            )
+        finally:
+            await conn.close()
+    except Exception as exc:
+        logger.debug("save_session_log failed (session=%s): %s", session_id, exc)
+
+
 # ─── Reasoning trace persistence (issue #62) ─────────────────────────────────
 
 

@@ -19,7 +19,7 @@ from collections import defaultdict
 
 import httpx
 
-from .boot_hook import get_smart_context, save_message, save_token_usage, save_trace
+from .boot_hook import get_smart_context, save_message, save_session_log, save_token_usage, save_trace
 from .commands.audit import handle_audit
 from .config import Config
 from .formatter import (
@@ -1147,7 +1147,10 @@ class Bot:
         # Persist this turn for session recovery across restarts (best-effort)
         if self._cfg.lina_db_url and text.strip() and body_acc.strip():
             asyncio.create_task(
-                self._persist_turn(session_id, text, body_acc, finish_token_state),
+                self._persist_turn(
+                    session_id, text, body_acc, finish_token_state,
+                    thinking_text=total_thinking_acc,
+                ),
                 name=f"persist-turn-{chat_id}",
             )
         # Persist reasoning trace if thinking content was produced (best-effort, issue #62)
@@ -1168,6 +1171,7 @@ class Bot:
         user_text: str,
         assistant_text: str,
         token_state: TokenState | None = None,
+        thinking_text: str = "",
     ) -> None:
         """Save a user+assistant turn to PostgreSQL. Silently swallows errors."""
         db_url = self._cfg.lina_db_url
@@ -1184,6 +1188,28 @@ class Bot:
                     output_tokens=token_state.output_tokens,
                     accumulated_cost_usd=token_state.accumulated_cost,
                 )
+
+            # Unified session_log: user entry + assistant entry
+            model = getattr(token_state, "model", None) if token_state else None
+            tokens_in = token_state.input_tokens if token_state else None
+            tokens_out = token_state.output_tokens if token_state else None
+            cost = token_state.accumulated_cost if token_state else None
+
+            await save_session_log(
+                db_url, session_id,
+                role="user", sender="fede",
+                msg_text=user_text,
+            )
+            await save_session_log(
+                db_url, session_id,
+                role="assistant", sender="goose",
+                msg_text=assistant_text,
+                thinking_text=thinking_text or None,
+                model=model,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                cost_usd=cost,
+            )
         except Exception as exc:
             logger.debug("_persist_turn failed for session %s: %s", session_id, exc)
 
