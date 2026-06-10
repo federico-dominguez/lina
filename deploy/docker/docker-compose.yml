@@ -491,6 +491,27 @@ services:
     # No volumes necesarios — solo PostgreSQL
 
 
+  # ─── MCP: lina-user-profile ───────────────────────────────────────────────
+  # Perfil de Fede: datos personales, preferencias, metas, historia.
+  # Herramientas: profile_set, profile_get, profile_list, profile_delete
+  lina-mcp-user-profile:
+    <<: *mcp-defaults
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.mcp
+      args:
+        MCP_DIR: mcps/user-profile
+        MCP_CMD: lina-user-profile
+    image: lina-mcp-user-profile:latest
+    environment:
+      MCP_TRANSPORT: streamable-http
+      MCP_PORT: "8000"
+      LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
+    depends_on:
+      lina-db:
+        condition: service_healthy
+
+
   # ─── MCP Gateway — nginx rate limiting (3.3) ────────────────────────────────
   # Proxy reverso para todos los MCPs. Expone 8101-8110 en localhost.
   # Los MCPs no tienen port mappings propios; sólo son accesibles via este gateway.
