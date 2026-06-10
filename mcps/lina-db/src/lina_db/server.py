@@ -1851,7 +1851,7 @@ def search_session_logs(
     if query and query.strip():
         order_by = "ts DESC"
         # Podríamos ordenar por ts_rank pero complica los params:
-        # order_by = "ts_rank(to_tsvector('spanish', COALESCE(msg_text,'') || ' ' || COALESCE(thinking_text,'')), plainto_tsquery('spanish', %s)) DESC"
+        # ts_rank ordering available but kept simple (ts DESC)
         # Se deja simple por ahora.
 
     clamped_limit = min(max(limit, 1), 100)
@@ -1931,17 +1931,24 @@ def get_session_log_stats(session_id: str) -> dict:
 
     # Agrupaciones por role, sender, tool
     by_role = _execute(
-        "SELECT role, COUNT(*) AS cnt FROM lina.session_logs WHERE session_id = %s GROUP BY role ORDER BY cnt DESC",
+        "SELECT role, COUNT(*) AS cnt"
+        " FROM lina.session_logs WHERE session_id = %s"
+        " GROUP BY role ORDER BY cnt DESC",
         (session_id,),
         fetch="all",
     )
     by_sender = _execute(
-        "SELECT sender, COUNT(*) AS cnt FROM lina.session_logs WHERE session_id = %s GROUP BY sender ORDER BY cnt DESC",
+        "SELECT sender, COUNT(*) AS cnt"
+        " FROM lina.session_logs WHERE session_id = %s"
+        " GROUP BY sender ORDER BY cnt DESC",
         (session_id,),
         fetch="all",
     )
     by_tool = _execute(
-        "SELECT tool_name, COUNT(*) AS cnt FROM lina.session_logs WHERE session_id = %s AND tool_name IS NOT NULL GROUP BY tool_name ORDER BY cnt DESC LIMIT 20",
+        "SELECT tool_name, COUNT(*) AS cnt"
+        " FROM lina.session_logs WHERE session_id = %s"
+        " AND tool_name IS NOT NULL"
+        " GROUP BY tool_name ORDER BY cnt DESC LIMIT 20",
         (session_id,),
         fetch="all",
     )
