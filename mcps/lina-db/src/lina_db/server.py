@@ -29,6 +29,9 @@ Herramientas expuestas:
     send_agent_command       — envía comando al buzón de un sub-agente (issue #83)
     list_agent_events        — devuelve el log de eventos de un sub-agente (issue #88)
     get_pending_instructions — lee y ackea instrucciones pendientes (issue #90)
+    session_log               — escribe una entrada en session_logs (append-only) (issue #216)
+    search_session_logs       — busca en session_logs con filtros combinados (issue #216)
+    get_session_log_stats     — estadísticas resumidas de una sesión (issue #216)
 
 Variables de entorno:
     LINA_DB_URL              URL de conexión (default: postgresql://lina:lina_dev@localhost:5432/lina)
@@ -42,6 +45,7 @@ import json
 import logging
 import os
 import re
+from datetime import date, datetime
 from typing import Any
 
 import psycopg2
@@ -1665,6 +1669,297 @@ def get_cline_activity(order_id: int | None = None, limit: int = 20) -> list[dic
         }
         for r in rows
     ]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# session_logs — unified append-only logging (issue #216)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def session_log(
+    session_id: str,
+    turn_number: int = 0,
+    role: str = "system",
+    sender: str = "unknown",
+    msg_text: str | None = None,
+    thinking_text: str | None = None,
+    tool_name: str | None = None,
+    tool_args: str | None = None,
+    tool_result: str | None = None,
+    model: str | None = None,
+    tags: list[str] | None = None,
+    tokens_in: int | None = None,
+    tokens_out: int | None = None,
+    cost_usd: float | None = None,
+) -> dict:
+    """Escribe una entrada en el log unificado session_logs (append-only).
+
+    Toda la actividad de Goose pasa por acá: mensajes del usuario, respuestas
+    del asistente, bloques <think>, tool calls con argumentos y resultados,
+    y metadata del modelo.
+
+    Args:
+        session_id:    ID de la sesión (ej. '20260610_1')
+        turn_number:   Número de turno dentro de la sesión
+        role:          'user' | 'assistant' | 'system' | 'tool'
+        sender:        'fede' | 'goose' | 'lina' | 'cline' | 'gemma' | 'system' | 'unknown'
+        msg_text:      Texto del mensaje (user o assistant response)
+        thinking_text: Bloque <think> del asistente (opcional)
+        tool_name:     Nombre del tool llamado (ej. 'shell', 'edit', 'lina-db/storeMemory')
+        tool_args:     Argumentos del tool en JSON string (opcional)
+        tool_result:   Resultado del tool (opcional, truncado a 10K si excede)
+        model:         Modelo usado (ej. 'deepseek-v4-flash')
+        tags:          Lista de tags para filtrar (opcional)
+        tokens_in:     Tokens de entrada estimados (chars/3)
+        tokens_out:    Tokens de salida estimados (chars/3)
+        cost_usd:      Costo estimado en USD
+
+    Returns:
+        Dict con id, session_id y ts del registro creado.
+    """
+    # Validar role y sender contra los CHECK constraints
+    valid_roles = {"user", "assistant", "system", "tool"}
+    valid_senders = {"fede", "goose", "lina", "cline", "gemma", "system", "unknown"}
+
+    if role not in valid_roles:
+        role = "system"
+    if sender not in valid_senders:
+        sender = "unknown"
+
+    # Truncar tool_result si excede 10KB
+    if tool_result and len(tool_result) > 10000:
+        tool_result = tool_result[:9997] + "..."
+
+    # Parsear tool_args si es string JSON
+    args_json = None
+    if tool_args:
+        try:
+            args_json = json.loads(tool_args)
+        except (json.JSONDecodeError, TypeError):
+            args_json = {"raw": tool_args[:500]}
+
+    # Tags default si no se pasa
+    if tags is None:
+        tags = []
+
+    row = _execute(
+        """INSERT INTO lina.session_logs
+           (session_id, turn_number, role, sender,
+            msg_text, thinking_text,
+            tool_name, tool_args, tool_result,
+            model, tags,
+            tokens_in, tokens_out, cost_usd)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+           RETURNING id, session_id, ts""",
+        (
+            session_id,
+            turn_number,
+            role,
+            sender,
+            msg_text,
+            thinking_text,
+            tool_name,
+            psycopg2.extras.Json(args_json) if args_json else None,
+            tool_result,
+            model,
+            tags,
+            tokens_in,
+            tokens_out,
+            cost_usd,
+        ),
+        fetch="one",
+    )
+    if not row:
+        raise RuntimeError("session_log INSERT falló — sin RETURNING row")
+
+    _audit(
+        "session_log",
+        {"session_id": session_id, "turn_number": turn_number, "role": role, "sender": sender},
+        f"logged turn {turn_number} ({role}/{sender})",
+    )
+    return {
+        "id": row["id"],
+        "session_id": row["session_id"],
+        "ts": row["ts"].isoformat() if isinstance(row["ts"], datetime) else str(row["ts"]),
+    }
+
+
+@mcp.tool()
+def search_session_logs(
+    query: str = "",
+    session_id: str | None = None,
+    role: str | None = None,
+    sender: str | None = None,
+    tool_name: str | None = None,
+    tag: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[dict]:
+    """Busca en los session_logs con filtros combinados.
+
+    Args:
+        query:      Texto a buscar en msg_text + thinking_text (full-text search en español)
+        session_id: Filtrar por ID de sesión exacto
+        role:       Filtrar por role ('user', 'assistant', 'system', 'tool')
+        sender:     Filtrar por sender ('fede', 'goose', 'lina', etc.)
+        tool_name:  Filtrar por nombre de tool
+        tag:        Filtrar por tag exacto (ej. 'error', 'moodle')
+        limit:      Máximo de resultados (1-100, default 20)
+        offset:     Desplazamiento para paginación
+
+    Returns:
+        Lista de entradas de log con todos los campos.
+    """
+    conditions: list[str] = []
+    params: list[Any] = []
+    param_idx = 0
+
+    if query and query.strip():
+        param_idx += 1
+        conditions.append(
+            f"to_tsvector('spanish', COALESCE(msg_text, '') || ' ' || COALESCE(thinking_text, '')) @@ plainto_tsquery('spanish', %s)"
+        )
+        params.append(query.strip())
+    if session_id:
+        param_idx += 1
+        conditions.append(f"session_id = %s")
+        params.append(session_id)
+    if role:
+        param_idx += 1
+        conditions.append(f"role = %s")
+        params.append(role)
+    if sender:
+        param_idx += 1
+        conditions.append(f"sender = %s")
+        params.append(sender)
+    if tool_name:
+        param_idx += 1
+        conditions.append(f"tool_name = %s")
+        params.append(tool_name)
+    if tag:
+        param_idx += 1
+        conditions.append(f"%s = ANY(tags)")
+        params.append(tag)
+
+    where_clause = " AND ".join(conditions) if conditions else "TRUE"
+
+    order_by = "ts DESC"
+    # Si hay query de texto, ordenar por relevancia tsvector
+    if query and query.strip():
+        order_by = "ts DESC"
+        # Podríamos ordenar por ts_rank pero complica los params:
+        # order_by = "ts_rank(to_tsvector('spanish', COALESCE(msg_text,'') || ' ' || COALESCE(thinking_text,'')), plainto_tsquery('spanish', %s)) DESC"
+        # Se deja simple por ahora.
+
+    clamped_limit = min(max(limit, 1), 100)
+
+    sql = (
+        f"SELECT id, session_id, turn_number, ts, role, sender,"
+        f" msg_text, thinking_text, tool_name, tool_args, tool_result,"
+        f" model, tags, tokens_in, tokens_out, cost_usd"
+        f" FROM lina.session_logs"
+        f" WHERE {where_clause}"
+        f" ORDER BY {order_by}"
+        f" LIMIT %s OFFSET %s"
+    )
+    params.append(clamped_limit)
+    params.append(max(offset, 0))
+
+    rows = _execute(sql, tuple(params), fetch="all")
+
+    def _fmt(val: Any) -> Any:
+        if val is None:
+            return None
+        if isinstance(val, datetime):
+            return val.isoformat()
+        if isinstance(val, date):
+            return val.isoformat()
+        return val
+
+    return [
+        {
+            "id": r["id"],
+            "session_id": r["session_id"],
+            "turn_number": r["turn_number"],
+            "ts": _fmt(r.get("ts")),
+            "role": r["role"],
+            "sender": r["sender"],
+            "msg_text": r["msg_text"][:500] if r.get("msg_text") else None,
+            "thinking_text": r["thinking_text"][:500] if r.get("thinking_text") else None,
+            "tool_name": r["tool_name"],
+            "tool_args": r.get("tool_args"),
+            "tool_result": r["tool_result"][:300] if r.get("tool_result") else None,
+            "model": r["model"],
+            "tags": r.get("tags", []),
+            "tokens_in": r.get("tokens_in"),
+            "tokens_out": r.get("tokens_out"),
+            "cost_usd": float(r["cost_usd"]) if r.get("cost_usd") is not None else None,
+        }
+        for r in rows
+    ]
+
+
+@mcp.tool()
+def get_session_log_stats(session_id: str) -> dict:
+    """Estadísticas resumidas de una sesión.
+
+    Args:
+        session_id: ID de la sesión a analizar
+
+    Returns:
+        Dict con total_entries, turns, por_role, por_sender, por_tool,
+        first_ts, last_ts, total_tokens_in, total_tokens_out, total_cost_usd.
+    """
+    # Estadísticas básicas y agrupaciones en una sola query
+    rows = _execute(
+        """SELECT
+               COUNT(*)                                                 AS total_entries,
+               COUNT(DISTINCT turn_number)                              AS distinct_turns,
+               MIN(ts)                                                  AS first_ts,
+               MAX(ts)                                                  AS last_ts,
+               COALESCE(SUM(tokens_in), 0)                              AS total_tokens_in,
+               COALESCE(SUM(tokens_out), 0)                             AS total_tokens_out,
+               COALESCE(SUM(cost_usd), 0)                               AS total_cost_usd
+           FROM lina.session_logs
+           WHERE session_id = %s""",
+        (session_id,),
+        fetch="one",
+    )
+
+    # Agrupaciones por role, sender, tool
+    by_role = _execute(
+        "SELECT role, COUNT(*) AS cnt FROM lina.session_logs WHERE session_id = %s GROUP BY role ORDER BY cnt DESC",
+        (session_id,),
+        fetch="all",
+    )
+    by_sender = _execute(
+        "SELECT sender, COUNT(*) AS cnt FROM lina.session_logs WHERE session_id = %s GROUP BY sender ORDER BY cnt DESC",
+        (session_id,),
+        fetch="all",
+    )
+    by_tool = _execute(
+        "SELECT tool_name, COUNT(*) AS cnt FROM lina.session_logs WHERE session_id = %s AND tool_name IS NOT NULL GROUP BY tool_name ORDER BY cnt DESC LIMIT 20",
+        (session_id,),
+        fetch="all",
+    )
+
+    if not rows:
+        return {"session_id": session_id, "total_entries": 0, "error": "no data"}
+
+    return {
+        "session_id": session_id,
+        "total_entries": rows["total_entries"],
+        "distinct_turns": rows["distinct_turns"],
+        "first_ts": rows["first_ts"].isoformat() if rows.get("first_ts") else None,
+        "last_ts": rows["last_ts"].isoformat() if rows.get("last_ts") else None,
+        "total_tokens_in": rows["total_tokens_in"],
+        "total_tokens_out": rows["total_tokens_out"],
+        "total_cost_usd": float(rows["total_cost_usd"]),
+        "by_role": {r["role"]: r["cnt"] for r in by_role},
+        "by_sender": {r["sender"]: r["cnt"] for r in by_sender},
+        "by_tool": {r["tool_name"]: r["cnt"] for r in by_tool},
+    }
 
 
 # ─── entrypoint ───────────────────────────────────────────────────────────────
