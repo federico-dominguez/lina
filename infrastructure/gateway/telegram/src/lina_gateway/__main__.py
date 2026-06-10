@@ -131,3 +131,7 @@ async def _run() -> None:
     if stop_task in done:
         for bot in bots:
             await on_shutdown(bot.tg, shared.lina_db_url, [])
+
+
+if __name__ == "__main__":
+    main()
