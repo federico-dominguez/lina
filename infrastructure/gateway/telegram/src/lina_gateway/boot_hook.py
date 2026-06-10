@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re as _re
+from collections import Counter as _Counter
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
@@ -385,8 +387,9 @@ async def save_session_log(
         tags = ["auto"]
 
     try:
-        import asyncpg
         import json
+
+        import asyncpg
 
         conn = await asyncpg.connect(db_url, timeout=5)
         try:
@@ -423,6 +426,216 @@ async def save_session_log(
             await conn.close()
     except Exception as exc:
         logger.debug("save_session_log failed (session=%s): %s", session_id, exc)
+
+
+# ─── Auto-summarizer + Vector RAG (issue #219) ──────────────────────────────────
+
+
+_AUTO_SUMMARY_INTERVAL = 5  # turns between auto-summaries
+_AUTO_SUMMARY_PREV_TURNS = 10  # session_log entries to consider
+
+_STOP_WORDS = frozenset(
+    {
+        "el",
+        "la",
+        "los",
+        "las",
+        "que",
+        "de",
+        "en",
+        "un",
+        "una",
+        "es",
+        "por",
+        "con",
+        "para",
+        "del",
+        "al",
+        "no",
+        "se",
+        "su",
+        "lo",
+        "como",
+        "más",
+        "pero",
+        "sus",
+        "le",
+        "ya",
+        "este",
+        "entre",
+        "todo",
+        "esa",
+        "esa",
+        "the",
+        "and",
+        "for",
+        "are",
+        "not",
+        "but",
+        "you",
+        "all",
+        "can",
+        "has",
+        "was",
+        "what",
+        "which",
+        "their",
+        "there",
+        "when",
+        "make",
+        "been",
+        "have",
+        "from",
+        "they",
+        "this",
+        "that",
+        "with",
+        "each",
+        "also",
+    }
+)
+
+
+def _extract_topics(texts: list[str], max_topics: int = 5) -> list[str]:
+    """Extract top N key topics from text strings via word frequency."""
+    combined = " ".join(texts).lower()
+    words = _re.findall(r"[a-záéíóúñü]+", combined)
+    filtered = [w for w in words if len(w) > 3 and w not in _STOP_WORDS]
+    counter = _Counter(filtered)
+    return [w for w, _ in counter.most_common(max_topics)]
+
+
+async def auto_summarize(
+    db_url: str,
+    session_id: str,
+    turn_number: int,
+    *,
+    summary_interval: int = _AUTO_SUMMARY_INTERVAL,
+    prev_turns: int = _AUTO_SUMMARY_PREV_TURNS,
+) -> None:
+    """Periodically generate session summaries every  turns.
+
+    Best-effort, never raises. Stores summary in session_summaries
+    and key facts in memories for vector RAG on session startup.
+    """
+    if turn_number < 1 or turn_number % summary_interval != 0:
+        return
+
+    try:
+        import asyncpg
+
+        conn = await asyncpg.connect(db_url, timeout=5)
+        try:
+            # Fetch recent session_log entries
+            rows = await conn.fetch(
+                """SELECT role, sender, msg_text, thinking_text, tool_name,
+                          tokens_in, tokens_out, cost_usd
+                   FROM lina.session_logs
+                   WHERE session_id = 
+                   ORDER BY id DESC LIMIT """,
+                session_id,
+                prev_turns,
+            )
+            if not rows:
+                return
+
+            # Compute metrics
+            user_msgs = sum(1 for r in rows if r["role"] == "user")
+            asst_msgs = sum(1 for r in rows if r["role"] == "assistant")
+            tool_calls = sum(1 for r in rows if r["tool_name"] is not None)
+            total_tokens = sum((r["tokens_in"] or 0) + (r["tokens_out"] or 0) for r in rows)
+
+            # Extract topics from user messages
+            user_texts = [r["msg_text"] or "" for r in rows if r["role"] == "user"]
+            topics = _extract_topics(user_texts)
+
+            # Build raw summary
+            raw_summary = (
+                f"[Auto-summary @ turn {turn_number}] "
+                f"{user_msgs} user msgs · {asst_msgs} responses · {tool_calls} tools · "
+                f"~{total_tokens} tok · . "
+            )
+            if topics:
+                raw_summary += "Topics: " + ", ".join(topics) + ". "
+
+            # Store in session_summaries
+            await conn.execute(
+                """INSERT INTO session_summaries
+                   (session_id, topics, raw_summary, tokens_in, tokens_out)
+                   VALUES (, , , , )
+                   ON CONFLICT (session_id)
+                   DO UPDATE SET
+                       topics = ,
+                       raw_summary = ,
+                       tokens_in = ,
+                       tokens_out = ,
+                       updated_at = NOW()""",
+                session_id,
+                topics,
+                raw_summary,
+                sum(r["tokens_in"] or 0 for r in rows),
+                sum(r["tokens_out"] or 0 for r in rows),
+            )
+            logger.info(
+                "auto_summarize: session=%s turn=%d topics=%s",
+                session_id,
+                turn_number,
+                topics,
+            )
+
+            # Store key topics in memories table for vector RAG on startup
+            for topic in topics[:3]:
+                if len(topic) > 2:
+                    fact = (
+                        f"En la sesión {session_id} (turno {turn_number}) se habló sobre {topic}."
+                    )
+                    mem_key = f"auto:topic:{session_id}:{topic}"
+                    await conn.execute(
+                        """INSERT INTO memories (key, value)
+                           VALUES (, )
+                           ON CONFLICT (key) DO UPDATE
+                               SET value = , updated_at = NOW()""",
+                        mem_key,
+                        fact,
+                    )
+        finally:
+            await conn.close()
+    except Exception as exc:
+        logger.debug("auto_summarize failed (session=%s): %s", session_id, exc)
+
+
+async def search_relevant_memories(
+    db_url: str,
+    query: str,  # noqa: ARG001
+    limit: int = 3,
+) -> list[dict]:
+    """Search memories for relevant auto-summaries. Best-effort, never raises.
+
+    Returns list of {key, value, similarity} sorted by recency.
+    NOTE: Uses recency ordering (not vector search) as baseline.
+          Vector similarity via pgvector is a future enhancement.
+    """
+    try:
+        import asyncpg
+
+        conn = await asyncpg.connect(db_url, timeout=5)
+        try:
+            rows = await conn.fetch(
+                """SELECT key, value, 1.0::float as similarity
+                   FROM memories
+                   WHERE key LIKE 'auto:topic:%'
+                   ORDER BY updated_at DESC
+                   LIMIT """,
+                limit,
+            )
+            return [
+                {"key": r["key"], "value": r["value"], "similarity": r["similarity"]} for r in rows
+            ]
+        finally:
+            await conn.close()
+    except Exception as exc:
+        logger.debug("search_relevant_memories failed: %s", exc)
+        return []
 
 
 # ─── Reasoning trace persistence (issue #62) ─────────────────────────────────
@@ -630,22 +843,21 @@ async def get_smart_context(
     session_id: str,
     *,
     recent_limit: int = _RECENT_MESSAGES_LIMIT,
+    memory_limit: int = 3,
 ) -> SmartContext:
     """Build a compact context bundle for warmup injection (issue #60).
 
     Combines:
     1. The structured prose summary from ``session_summaries`` (~200 tokens).
     2. The last *recent_limit* raw messages for continuity (~300 tokens).
+    3. Relevant memories from ``memories`` for vector RAG (issue #219).
 
-    Total budget is roughly 3–5× smaller than the previous 20-message raw dump.
+    Total budget is roughly 500-700 tokens.
     Returns a ``SmartContext`` with empty fields on any DB error (best-effort).
     """
     try:
         import asyncpg
 
-        # Two separate connections: asyncpg connections are single-operation;
-        # running asyncio.gather on the same connection raises
-        # "another operation is in progress".
         conn_s = await asyncpg.connect(db_url, timeout=5)
         try:
             summary = await _get_latest_summary(conn_s, session_id)
@@ -657,6 +869,15 @@ async def get_smart_context(
             messages = await _get_recent_messages(conn_m, session_id, recent_limit)
         finally:
             await conn_m.close()
+
+        # Enrich with relevant memories from auto-summarizer (issue #219)
+        memories = await search_relevant_memories(db_url, query=session_id, limit=memory_limit)
+        if memories:
+            memory_lines = "\n".join(f"  • {m['value']}" for m in memories)
+            if summary:
+                summary += f"\n[Memorias relevantes]\n{memory_lines}"
+            else:
+                summary = f"[Memorias relevantes]\n{memory_lines}"
 
         return SmartContext(summary=summary or "", messages=messages)
     except Exception as exc:

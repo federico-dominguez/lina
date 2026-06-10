@@ -19,7 +19,14 @@ from collections import defaultdict
 
 import httpx
 
-from .boot_hook import get_smart_context, save_message, save_session_log, save_token_usage, save_trace
+from .boot_hook import (
+    auto_summarize,
+    get_smart_context,
+    save_message,
+    save_session_log,
+    save_token_usage,
+    save_trace,
+)
 from .commands.audit import handle_audit
 from .config import Config
 from .formatter import (
@@ -88,6 +95,8 @@ class Bot:
         self._last_response: dict[int, str] = {}
         # chat_id → True if we should send voice response (voice thread)
         self._voice_mode: dict[int, bool] = {}
+        # session_id → turn counter for auto-summarize (issue #219)
+        self._turn_counters: dict[str, int] = {}
 
     @property
     def tg(self) -> TelegramClient:
@@ -1144,12 +1153,20 @@ class Bot:
         if body_acc:
             self._last_response[chat_id] = body_acc
 
+        # Track turn number for auto-summarizer (issue #219)
+        current_turn = self._turn_counters.get(session_id, 0) + 1
+        self._turn_counters[session_id] = current_turn
+
         # Persist this turn for session recovery across restarts (best-effort)
         if self._cfg.lina_db_url and text.strip() and body_acc.strip():
             asyncio.create_task(
                 self._persist_turn(
-                    session_id, text, body_acc, finish_token_state,
+                    session_id,
+                    text,
+                    body_acc,
+                    finish_token_state,
                     thinking_text=total_thinking_acc,
+                    turn_number=current_turn,
                 ),
                 name=f"persist-turn-{chat_id}",
             )
@@ -1172,6 +1189,7 @@ class Bot:
         assistant_text: str,
         token_state: TokenState | None = None,
         thinking_text: str = "",
+        turn_number: int = 0,
     ) -> None:
         """Save a user+assistant turn to PostgreSQL. Silently swallows errors."""
         db_url = self._cfg.lina_db_url
@@ -1196,19 +1214,30 @@ class Bot:
             cost = token_state.accumulated_cost if token_state else None
 
             await save_session_log(
-                db_url, session_id,
-                role="user", sender="fede",
+                db_url,
+                session_id,
+                role="user",
+                sender="fede",
                 msg_text=user_text,
             )
             await save_session_log(
-                db_url, session_id,
-                role="assistant", sender="goose",
+                db_url,
+                session_id,
+                role="assistant",
+                sender="goose",
                 msg_text=assistant_text,
                 thinking_text=thinking_text or None,
                 model=model,
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
                 cost_usd=cost,
+            )
+
+            # Auto-summarize every N turns (issue #219)
+            await auto_summarize(
+                db_url,
+                session_id,
+                turn_number,
             )
         except Exception as exc:
             logger.debug("_persist_turn failed for session %s: %s", session_id, exc)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import date, datetime, timezone
+from datetime import date
 
 import psycopg2
 from psycopg2.extras import RealDictCursor

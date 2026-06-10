@@ -487,7 +487,10 @@ class SpawnerService:
 
             log.warning(
                 "timeout: agent %s (role=%s) running for %ds > %dmin limit",
-                agent_id[:8], role, elapsed, policy["max_runtime_minutes"],
+                agent_id[:8],
+                role,
+                elapsed,
+                policy["max_runtime_minutes"],
             )
 
             # Matar proceso en memoria
@@ -508,23 +511,28 @@ class SpawnerService:
 
             # Actualizar DB
             summary = (
-                f"timeout: exceeded {policy['max_runtime_minutes']}min limit "
-                f"(elapsed={elapsed}s)"
+                f"timeout: exceeded {policy['max_runtime_minutes']}min limit (elapsed={elapsed}s)"
             )
             _db_update_status(agent_id, "timeout", result_summary=summary)
-            _db_append_event(agent_id, "timeout", {
-                "elapsed_seconds": elapsed,
-                "max_runtime_minutes": policy["max_runtime_minutes"],
-            })
+            _db_append_event(
+                agent_id,
+                "timeout",
+                {
+                    "elapsed_seconds": elapsed,
+                    "max_runtime_minutes": policy["max_runtime_minutes"],
+                },
+            )
             self._cleanup_config(agent_id)
 
             self._timeout_count += 1
-            timed_out.append({
-                "agent_id": agent_id,
-                "role": role,
-                "elapsed_seconds": elapsed,
-                "max_runtime_minutes": policy["max_runtime_minutes"],
-            })
+            timed_out.append(
+                {
+                    "agent_id": agent_id,
+                    "role": role,
+                    "elapsed_seconds": elapsed,
+                    "max_runtime_minutes": policy["max_runtime_minutes"],
+                }
+            )
 
         if timed_out:
             log.warning(
@@ -542,7 +550,11 @@ class SpawnerService:
           1. Llama a _enforce_timeouts()
           2. Si hay errores consecutivos, frena (fail-stop tras _WATCHDOG_MAX_LOOP_ERRORS).
         """
-        log.info("watchdog started (interval=%ds, max_errors=%d)", _WATCHDOG_INTERVAL, _WATCHDOG_MAX_LOOP_ERRORS)  # noqa: E501
+        log.info(
+            "watchdog started (interval=%ds, max_errors=%d)",
+            _WATCHDOG_INTERVAL,
+            _WATCHDOG_MAX_LOOP_ERRORS,
+        )  # noqa: E501
         consecutive_errors = 0
 
         while not self._stop_event.is_set():
