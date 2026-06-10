@@ -17,6 +17,7 @@ def _cleanup():
         conn.close()
 
 
+@pytest.mark.db
 def test_ensure_table():
     conn = _connect()
     try:
@@ -28,6 +29,7 @@ def test_ensure_table():
         conn.close()
 
 
+@pytest.mark.db
 def test_cache_write_and_read():
     set_cache("steps", date(2026, 6, 10), {"value": 8432})
     result = get_cached("steps", date(2026, 6, 10))
@@ -35,6 +37,13 @@ def test_cache_write_and_read():
     assert result["value"]["value"] == 8432
 
 
+@pytest.mark.db
 def test_cache_miss():
     result = get_cached("steps", date(2024, 1, 1))
     assert result is None
+
+
+def test_store_imports():
+    """Basic non-DB test verifying store module imports correctly."""
+    from lina_google_fit import store
+    assert store is not None  # module imports OK

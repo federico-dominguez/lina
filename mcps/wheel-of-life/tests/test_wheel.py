@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import pytest
 
 os.environ.setdefault("LINA_DB_URL", "postgresql://lina:lina_dev@localhost:5432/lina")
 
@@ -15,6 +16,7 @@ def test_areas():
     assert store.AREAS[-1] == "espiritualidad"
 
 
+@pytest.mark.db
 def test_save_and_retrieve():
     store.save_evaluation("salud", 8, "Me siento con energía")
     wheel = store.get_current_wheel()
@@ -24,6 +26,7 @@ def test_save_and_retrieve():
     assert areas["salud"]["notes"] == "Me siento con energía"
 
 
+@pytest.mark.db
 def test_batch_save():
     evals = [
         {"area": "trabajo", "score": 7, "notes": "Buen desafío"},
@@ -54,6 +57,7 @@ def test_invalid_area():
         pass
 
 
+@pytest.mark.db
 def test_history():
     result = store.get_wheel_history(2)
     assert isinstance(result, list)
@@ -64,6 +68,7 @@ def test_history():
         assert "average" in week
 
 
+@pytest.mark.db
 def test_wheel_current_structure():
     from lina_wheel.store import AREAS
 
