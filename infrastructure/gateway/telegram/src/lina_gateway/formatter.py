@@ -20,8 +20,8 @@ from dataclasses import dataclass, field
 # ─── Constants ───────────────────────────────────────────────────────────────
 
 MAX_MESSAGE_LENGTH = 4096
-MAX_THINKING_CHARS = 800
-INLINE_TOOL_RESULT_MAX_CHARS = 1500
+MAX_THINKING_CHARS = 3000
+INLINE_TOOL_RESULT_MAX_CHARS = 3000
 PRE_CHAR_THRESHOLD = 400
 PRE_LINE_THRESHOLD = 10
 
@@ -255,8 +255,8 @@ _HR_RE = re.compile(r"^(-{3,}|\*{3,}|_{3,})$")
 _UL_RE = re.compile(r"^(\s*)[*\-+]\s+(.+)$")
 _OL_RE = re.compile(r"^(\s*)\d+\.\s+(.+)$")
 _BQ_RE = re.compile(r"^>\s*(.*)$")
-_TABLE_ROW_RE = re.compile(r"^\|(.+)\|$")
-_TABLE_SEP_RE = re.compile(r"^\|[-| :]+\|$")
+_TABLE_ROW_RE = re.compile(r"^[│|](.+)[│|]$")
+_TABLE_SEP_RE = re.compile(r"^[│|][-| :]+[│|]$")
 
 
 @dataclass

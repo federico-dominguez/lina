@@ -17,7 +17,7 @@ from collections.abc import Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
-WORK_LOG_WINDOW_LINES = 18
+WORK_LOG_WINDOW_LINES = 50
 
 
 def trim_work_log(text: str) -> str:

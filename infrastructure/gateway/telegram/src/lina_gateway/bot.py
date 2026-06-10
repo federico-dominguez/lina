@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 _STOP_COMMANDS = {"/stop", "stop", "/Stop", "Stop", "/STOP", "STOP"}
 _TG_CHAR_LIMIT = 4096
-_OVERFLOW_MARGIN = 200  # start splitting when content approaches the limit
+_OVERFLOW_MARGIN = 400  # start splitting when content approaches the limit
 
 
 def _btn(label: str, action: str, agent_id: str) -> dict:
