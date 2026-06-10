@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import os
 
-os.environ.setdefault(
-    "LINA_DB_URL", "postgresql://lina:lina_dev@localhost:5432/lina"
-)
+os.environ.setdefault("LINA_DB_URL", "postgresql://lina:lina_dev@localhost:5432/lina")
 
 from lina_wheel import store
 

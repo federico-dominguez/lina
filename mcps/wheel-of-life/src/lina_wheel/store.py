@@ -116,14 +116,17 @@ def get_wheel_history(weeks: int = 4) -> list[dict[str, Any]]:
     try:
         _ensure_table(conn)
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT week_start, area, MAX(score) AS score,
                        MAX(evaluated_at) AT TIME ZONE 'America/Montevideo' AS last_evaluated
                 FROM lina.wheel_of_life
                 WHERE week_start >= DATE_TRUNC('week', NOW()) - INTERVAL '%s weeks'
                 GROUP BY week_start, area
                 ORDER BY week_start DESC, area
-            """, (weeks,))
+            """,
+                (weeks,),
+            )
             rows = cur.fetchall()
     finally:
         conn.close()

@@ -120,9 +120,9 @@ async def wheel_history(weeks: int = 4) -> list[dict]:
 
 def main() -> None:
     logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     logger.info("LINA Wheel of Life MCP starting on port 8000")
     mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)
 
