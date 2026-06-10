@@ -1422,6 +1422,7 @@ def comm_send(
         {"id": int, "sender": str, "destination": str, "status": "sent", "message": str}
     """
     import socket
+
     hostname = socket.gethostname().lower()
     sender_map = {"goose": "goose", "lina": "lina", "cline": "cline", "gemma": "gemma"}
     resolved = sender or os.environ.get("COMM_SENDER") or sender_map.get(hostname, "goose")
@@ -1431,8 +1432,7 @@ def comm_send(
         raise ValueError(f"destino inválido: {destination}. Válidos: {', '.join(sorted(valid))}")
 
     row = _execute(
-        "INSERT INTO comm_messages (sender, destination, message) "
-        "VALUES (%s, %s, %s) RETURNING id",
+        "INSERT INTO comm_messages (sender, destination, message) VALUES (%s, %s, %s) RETURNING id",
         (resolved, destination, message),
         fetch="one",
     )
