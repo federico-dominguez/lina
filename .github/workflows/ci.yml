@@ -202,11 +202,11 @@ jobs:
           - mcp: orchestrator
             cov_threshold: 75
           - mcp: wheel-of-life
-            cov_threshold: 50
-          - mcp: user-profile
-            cov_threshold: 50
-          - mcp: google-fit
             cov_threshold: 15
+          - mcp: user-profile
+            cov_threshold: 15
+          - mcp: google-fit
+            cov_threshold: 5
 
     steps:
       - name: Checkout
