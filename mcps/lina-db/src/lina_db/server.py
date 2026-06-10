@@ -1818,28 +1818,30 @@ def search_session_logs(
     if query and query.strip():
         param_idx += 1
         conditions.append(
-            f"to_tsvector('spanish', COALESCE(msg_text, '') || ' ' || COALESCE(thinking_text, '')) @@ plainto_tsquery('spanish', %s)"
+            "to_tsvector('spanish',"
+            " COALESCE(msg_text, '') || ' ' || COALESCE(thinking_text, ''))"
+            " @@ plainto_tsquery('spanish', %s)"
         )
         params.append(query.strip())
     if session_id:
         param_idx += 1
-        conditions.append(f"session_id = %s")
+        conditions.append("session_id = %s")
         params.append(session_id)
     if role:
         param_idx += 1
-        conditions.append(f"role = %s")
+        conditions.append("role = %s")
         params.append(role)
     if sender:
         param_idx += 1
-        conditions.append(f"sender = %s")
+        conditions.append("sender = %s")
         params.append(sender)
     if tool_name:
         param_idx += 1
-        conditions.append(f"tool_name = %s")
+        conditions.append("tool_name = %s")
         params.append(tool_name)
     if tag:
         param_idx += 1
-        conditions.append(f"%s = ANY(tags)")
+        conditions.append("%s = ANY(tags)")
         params.append(tag)
 
     where_clause = " AND ".join(conditions) if conditions else "TRUE"
