@@ -131,6 +131,13 @@ extensions:
     uri: http://lina-mcp-gateway:8114/mcp
     enabled: true
     timeout: 30
+  lina-google-fit:
+    name: lina-google-fit
+    display_name: LINA Google Fit
+    type: streamable_http
+    uri: http://lina-mcp-gateway:8115/mcp
+    enabled: true
+    timeout: 30
 
   lina-orchestrator:
     name: lina-orchestrator

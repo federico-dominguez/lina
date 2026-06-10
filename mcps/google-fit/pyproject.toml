@@ -1,0 +1,44 @@
+[project]
+name = "lina-google-fit"
+version = "0.1.0"
+description = "LINA MCP — Google Fit. Pasos, sueño, ritmo cardíaco y más desde la pulsera Samsung."
+requires-python = ">=3.10"
+dependencies = [
+    "mcp[cli]>=1.2.0",
+    "google-auth-oauthlib>=1.2.0",
+    "google-api-python-client>=2.140",
+    "psycopg2-binary>=2.9",
+]
+
+[project.scripts]
+lina-google-fit = "lina_google_fit.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lina_google_fit"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
+    "ruff>=0.4",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.coverage.report]
+fail_under = 65
+show_missing = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]

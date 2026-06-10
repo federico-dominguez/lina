@@ -204,6 +204,7 @@ jobs:
           - mcp: wheel-of-life
             cov_threshold: 65
           - mcp: user-profile
+          - mcp: google-fit
             cov_threshold: 65
 
     steps:
