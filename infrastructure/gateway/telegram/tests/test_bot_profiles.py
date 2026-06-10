@@ -51,8 +51,8 @@ class TestBotProfileLoader:
         """Cargar perfil de LINA."""
         profile = BotProfileLoader.load("lina")
         assert profile.name == "lina"
-        assert profile.personality == "formal"
-        assert profile.tone == "entusiasta"
+        assert profile.personality == "terapeutica"
+        assert profile.tone == "calida"
         assert len(profile.constraints) > 0
 
     def test_load_cline(self):
