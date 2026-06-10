@@ -469,6 +469,28 @@ services:
       # Binario goosed para spawnear sub-agentes (mismo que usa lina-goosed)
       - /usr/local/bin/goosed:/usr/local/bin/goosed:ro
 
+  # ─── MCP: lina-wheel-of-life ─────────────────────────────────────────────────
+  # Rueda de la Vida: 8 áreas vitales evaluadas 1-10 cada semana.
+  # Herramientas: wheel_evaluate, wheel_current, wheel_history, wheel_batch
+  lina-mcp-wheel-of-life:
+    <<: *mcp-defaults
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.mcp
+      args:
+        MCP_DIR: mcps/wheel-of-life
+        MCP_CMD: lina-wheel-of-life
+    image: lina-mcp-wheel-of-life:latest
+    environment:
+      MCP_TRANSPORT: streamable-http
+      MCP_PORT: "8000"
+      LINA_DB_URL: postgresql://lina:${POSTGRES_PASSWORD:-lina_dev}@lina-db:5432/lina
+    depends_on:
+      lina-db:
+        condition: service_healthy
+    # No volumes necesarios — solo PostgreSQL
+
+
   # ─── MCP Gateway — nginx rate limiting (3.3) ────────────────────────────────
   # Proxy reverso para todos los MCPs. Expone 8101-8110 en localhost.
   # Los MCPs no tienen port mappings propios; sólo son accesibles via este gateway.
