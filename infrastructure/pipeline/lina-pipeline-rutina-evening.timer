@@ -1,0 +1,11 @@
+[Unit]
+Description=LINA Pipeline — Cierre nocturno timer
+Requires=lina-pipeline-rutina-evening.service
+
+[Timer]
+OnCalendar=Montevideo *-*-* 22:00:00
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

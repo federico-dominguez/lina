@@ -117,6 +117,20 @@ extensions:
     uri: http://lina-mcp-gateway:8110/mcp
     enabled: true
     timeout: 60
+  lina-wheel-of-life:
+    name: lina-wheel-of-life
+    display_name: LINA Wheel of Life
+    type: streamable_http
+    uri: http://lina-mcp-gateway:8113/mcp
+    enabled: true
+    timeout: 30
+  lina-user-profile:
+    name: lina-user-profile
+    display_name: LINA User Profile
+    type: streamable_http
+    uri: http://lina-mcp-gateway:8114/mcp
+    enabled: true
+    timeout: 30
 
   lina-orchestrator:
     name: lina-orchestrator

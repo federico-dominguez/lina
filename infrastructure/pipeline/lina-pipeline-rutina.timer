@@ -1,0 +1,11 @@
+[Unit]
+Description=LINA Pipeline — Rutina diaria timer
+Requires=lina-pipeline-rutina.service
+
+[Timer]
+OnCalendar=Montevideo *-*-* 08:30:00
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

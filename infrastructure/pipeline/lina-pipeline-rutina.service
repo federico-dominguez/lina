@@ -1,0 +1,13 @@
+[Unit]
+Description=LINA Pipeline — Rutina diaria (check-in matutino + cierre nocturno)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=fede
+Environment=PYTHONUNBUFFERED=1
+Environment=LINA_DB_URL=postgresql://lina:lina_dev@localhost:5432/lina
+ExecStart=/usr/bin/python3 /home/fede/lina/infrastructure/pipeline/rutina.py morning
+StandardOutput=journal
+StandardError=journal
