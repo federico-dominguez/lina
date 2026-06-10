@@ -203,6 +203,8 @@ jobs:
             cov_threshold: 75
           - mcp: wheel-of-life
             cov_threshold: 65
+          - mcp: user-profile
+            cov_threshold: 65
 
     steps:
       - name: Checkout
