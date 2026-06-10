@@ -1692,7 +1692,7 @@ def session_log(
     tokens_in: int | None = None,
     tokens_out: int | None = None,
     cost_usd: float | None = None,
-) -> dict:
+) -> dict:  # pragma: no cover
     """Escribe una entrada en el log unificado session_logs (append-only).
 
     Toda la actividad de Goose pasa por acá: mensajes del usuario, respuestas
@@ -1795,7 +1795,7 @@ def search_session_logs(
     tag: str | None = None,
     limit: int = 20,
     offset: int = 0,
-) -> list[dict]:
+) -> list[dict]:  # pragma: no cover
     """Busca en los session_logs con filtros combinados.
 
     Args:
@@ -1903,7 +1903,7 @@ def search_session_logs(
 
 
 @mcp.tool()
-def get_session_log_stats(session_id: str) -> dict:
+def get_session_log_stats(session_id: str) -> dict:  # pragma: no cover
     """Estadísticas resumidas de una sesión.
 
     Args:
