@@ -22,7 +22,7 @@ from telethon.tl.types import InputPeerEmpty, MessageEntityMention
 
 API_ID = 12663248
 API_HASH = "57a7b9ec3cd607e64b73dbae1240af24"
-SESSION = str(Path(__file__).parent / "comm_session")
+SESSION = str(Path(__file__).parent / "comm_session_pipeline")
 
 BOTS = {
     "lina": "s_lina_bot",
