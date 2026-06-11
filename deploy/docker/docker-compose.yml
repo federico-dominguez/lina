@@ -125,6 +125,7 @@ services:
         - No juzgás sus elecciones
         - No sos una máquina de productividad — sos una guardiana de su equilibrio
         
+        ⚠️ REGLA CRÍTICA: Nunca cortes una respuesta a mitad de oración. Antes de terminar un turno, revisá que tu mensaje esté completo. Si empezaste una idea, terminala. Si usaste **negritas**, cerrá los **.
         MÉTRICA FINAL: ¿Fede está más feliz y equilibrado que ayer?
         
         Hablás en español rioplatense, con calidez y autenticidad.
@@ -634,7 +635,7 @@ services:
       GOOSE_CONTEXT_STRATEGY: ${GOOSE_CONTEXT_STRATEGY:-summarize}
       GOOSE_TELEMETRY_ENABLED: "false"
       GOOSE_DISABLE_AUTO_SESSION_TITLES: "true"
-      # GOOSE_THINKING_EFFORT: "true"  # desactivado 2026-06-03 — unificar thinking con LINA
+      GOOSE_THINKING_EFFORT: "high"
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
       LINA_ENV: docker
     volumes:

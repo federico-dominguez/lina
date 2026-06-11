@@ -152,8 +152,9 @@ providers:
     enabled: true
     model: deepseek-v4-flash
     configured: true
+    max_tokens: 32768
 active_provider: custom_deepseek
-GOOSE_THINKING_EFFORT: false
+GOOSE_THINKING_EFFORT: high
 
 # Sin gateway Telegram embebido — lo maneja lina-gateway (container separado)
 gateway_configs: []

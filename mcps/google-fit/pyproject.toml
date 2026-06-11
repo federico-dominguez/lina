@@ -8,6 +8,7 @@ dependencies = [
     "google-auth-oauthlib>=1.2.0",
     "google-api-python-client>=2.140",
     "psycopg2-binary>=2.9",
+    "pytz>=2024.1",
 ]
 
 [project.scripts]

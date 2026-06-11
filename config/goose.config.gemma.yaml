@@ -16,6 +16,7 @@ providers:
     enabled: true
     model: deepseek-v4-flash
     configured: true
+    max_tokens: 32768
 active_provider: custom_deepseek
 
 extensions:

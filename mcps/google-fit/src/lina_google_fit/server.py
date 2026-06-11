@@ -14,11 +14,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 
+import pytz
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from mcp.server.fastmcp import FastMCP
+
+# Zona horaria de Uruguay (UTC-3, sin DST)
+_TZ = pytz.timezone("America/Montevideo")
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +52,13 @@ def _get_service():
 
 
 def _aggregate_daily(service, data_type: str, days: int, data_source: str) -> list[dict]:
-    start_ms = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp() * 1000)
-    end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    now = datetime.now(_TZ)
+    start_dt = now - timedelta(days=days)
+    # Redondear al inicio del día local para que el día calendario coincida
+    start_dt = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_dt = now
+    start_ms = int(start_dt.timestamp() * 1000)
+    end_ms = int(end_dt.timestamp() * 1000)
 
     body = {
         "aggregateBy": [{"dataTypeName": data_type}],
@@ -62,7 +71,7 @@ def _aggregate_daily(service, data_type: str, days: int, data_source: str) -> li
     daily: dict[str, float] = {}
     for bucket in result.get("bucket", []):
         ms = int(bucket["startTimeMillis"])
-        day = datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+        day = datetime.fromtimestamp(ms / 1000, tz=_TZ).strftime("%Y-%m-%d")
         for ds2 in bucket.get("dataset", []):
             for point in ds2.get("point", []):
                 for val in point.get("value", []):
@@ -72,8 +81,11 @@ def _aggregate_daily(service, data_type: str, days: int, data_source: str) -> li
 
 
 def _sleep_daily(service, days: int) -> list[dict]:
-    start_ms = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp() * 1000)
-    end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    now = datetime.now(_TZ)
+    start_dt = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+    end_dt = now
+    start_ms = int(start_dt.timestamp() * 1000)
+    end_ms = int(end_dt.timestamp() * 1000)
 
     body = {
         "aggregateBy": [{"dataTypeName": "com.google.sleep.segment"}],
@@ -85,7 +97,7 @@ def _sleep_daily(service, days: int) -> list[dict]:
     daily: dict[str, float] = {}
     for bucket in result.get("bucket", []):
         ms = int(bucket["startTimeMillis"])
-        day = datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+        day = datetime.fromtimestamp(ms / 1000, tz=_TZ).strftime("%Y-%m-%d")
         for ds2 in bucket.get("dataset", []):
             for point in ds2.get("point", []):
                 start = int(point["startTimeNanos"]) / 1e9
@@ -96,8 +108,11 @@ def _sleep_daily(service, days: int) -> list[dict]:
 
 
 def _hr_daily(service, days: int) -> list[dict]:
-    start_ms = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp() * 1000)
-    end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    now = datetime.now(_TZ)
+    start_dt = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+    end_dt = now
+    start_ms = int(start_dt.timestamp() * 1000)
+    end_ms = int(end_dt.timestamp() * 1000)
     body = {
         "aggregateBy": [{"dataTypeName": "com.google.heart_rate.bpm"}],
         "bucketByTime": {"durationMillis": 86400000},
@@ -108,7 +123,7 @@ def _hr_daily(service, days: int) -> list[dict]:
     daily: dict[str, list] = {}
     for bucket in result.get("bucket", []):
         ms = int(bucket["startTimeMillis"])
-        day = datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+        day = datetime.fromtimestamp(ms / 1000, tz=_TZ).strftime("%Y-%m-%d")
         for ds2 in bucket.get("dataset", []):
             for point in ds2.get("point", []):
                 for val in point.get("value", []):
@@ -204,7 +219,7 @@ async def fit_weight() -> dict:
 
     def _run():
         service = _get_service()
-        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        now_ms = int(datetime.now(_TZ).timestamp() * 1000)
         start_ms = now_ms - 90 * 86400000
         body = {
             "aggregateBy": [{"dataTypeName": "com.google.weight"}],
@@ -217,7 +232,7 @@ async def fit_weight() -> dict:
         latest_day = ""
         for bucket in result.get("bucket", []):
             ms = int(bucket["startTimeMillis"])
-            day = datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+            day = datetime.fromtimestamp(ms / 1000, tz=_TZ).strftime("%Y-%m-%d")
             for ds2 in bucket.get("dataset", []):
                 for point in ds2.get("point", []):
                     for val in point.get("value", []):
@@ -241,7 +256,7 @@ async def fit_daily_summary(date_str: str = "") -> dict:
 
     Returns: {date, steps, sleep_hours, avg_bpm, active_minutes, weight_kg}
     """
-    target = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else date.today()
+    target = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else datetime.now(_TZ).date()
     loop = asyncio.get_running_loop()
 
     def _run():
