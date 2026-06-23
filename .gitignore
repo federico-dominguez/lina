@@ -82,3 +82,8 @@ limpiza-audit/
 comm/*.session*
 comm/__pycache__/
 comm/lib/
+.secrets/
+gcal-*.txt
+gcal-*.py
+gcal-*.json
+mcps-backup/
